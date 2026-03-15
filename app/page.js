@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { COURSES, TM, CAL_LINK, TOKEN_CUTOFF, calcGrade, getBlockers, tokBal, pastCutoff, getTokenTarget } from '../lib/courses';
+import { COURSES, TM, CAL_LINK, TOKEN_CUTOFF, BRAND, calcGrade, getBlockers, tokBal, pastCutoff, getTokenTarget } from '../lib/courses';
 
 const F = { d: "'Source Serif 4',Georgia,serif", b: "'DM Sans',sans-serif" };
 
@@ -263,7 +263,7 @@ export default function App() {
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
       <div style={{ maxWidth: 420, width: "100%", padding: "0 20px" }}>
         <div style={{ textAlign: "center", marginBottom: 36 }}>
-          <div style={{ display: "inline-block", padding: "4px 10px", background: "#2D6A4F", color: "#fff", fontFamily: F.b, fontSize: 9, fontWeight: 600, letterSpacing: ".1em", textTransform: "uppercase", borderRadius: 3, marginBottom: 14 }}>Spec Grading Tracker</div>
+          <div style={{ display: "inline-block", padding: "4px 10px", background: "#CF202E", color: "#fff", fontFamily: F.b, fontSize: 9, fontWeight: 600, letterSpacing: ".1em", textTransform: "uppercase", borderRadius: 3, marginBottom: 14 }}>Spec Grading Tracker</div>
           <h1 style={{ fontSize: 30, fontWeight: 700, color: "#1A1A1A", lineHeight: 1.15, marginBottom: 6 }}>Own your learning.</h1>
           <p style={{ fontFamily: F.b, fontSize: 13, color: "#999" }}>Track your growth. Make decisions. Pursue mastery.</p>
         </div>
@@ -278,7 +278,7 @@ export default function App() {
             style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: 12, boxSizing: "border-box", outline: "none" }} />
           {loginErr && <div style={{ fontFamily: F.b, fontSize: 11, color: "#C0392B", marginBottom: 10, lineHeight: 1.4 }}>{loginErr}</div>}
           <button onClick={isSignup ? handleSignup : handleLogin}
-            style={{ width: "100%", padding: "10px", background: "#2D6A4F", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
+            style={{ width: "100%", padding: "10px", background: "#CF202E", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
             {isSignup ? "Create Account" : "Sign In"}
           </button>
           <button onClick={() => { setIsSignup(!isSignup); setLoginErr(''); }}
@@ -366,7 +366,7 @@ export default function App() {
               <span style={{ fontFamily: F.d, fontSize: 14, fontWeight: 600 }}>{c.short}</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <a href={CAL_LINK} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 12px", background: "#F0FAF4", border: "1px solid #D4EDDA", borderRadius: 7, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", textDecoration: "none" }}>📅 Meet with Dr. Beggs</a>
+              <a href={CAL_LINK} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 12px", background: "#FFF5F5", border: "1px solid #FCDEDE", borderRadius: 7, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#CF202E", textDecoration: "none" }}>📅 Meet with Dr. Beggs</a>
               <button onClick={handleLogout} style={{ fontFamily: F.b, fontSize: 10, color: "#888", background: "none", border: "1px solid #E0DDD8", borderRadius: 4, padding: "3px 8px", cursor: "pointer" }}>Sign out</button>
             </div>
           </div>
@@ -388,7 +388,7 @@ export default function App() {
               </div>
               <div style={{ textAlign: "center", padding: "6px 14px", background: "#F9F8F5", borderRadius: 8 }}>
                 <div style={{ display: "flex", gap: 3, justifyContent: "center", marginBottom: 3 }}>
-                  {Array.from({ length: tok.total }).map((_, i) => <div key={i} style={{ width: 14, height: 14, borderRadius: "50%", background: i < tok.avail ? "#2D6A4F" : "#E0DDD8", fontSize: 7, color: i < tok.avail ? "#fff" : "#CCC", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>✦</div>)}
+                  {Array.from({ length: tok.total }).map((_, i) => <div key={i} style={{ width: 14, height: 14, borderRadius: "50%", background: i < tok.avail ? "#CF202E" : "#E0DDD8", fontSize: 7, color: i < tok.avail ? "#fff" : "#CCC", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>✦</div>)}
                 </div>
                 <div style={{ fontFamily: F.b, fontSize: 9, color: "#999" }}>{tok.avail} token{tok.avail !== 1 ? "s" : ""}</div>
               </div>
@@ -426,7 +426,7 @@ export default function App() {
                     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", cursor: "pointer" }}
                       onClick={() => handleCheck(a.id)}
                       onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                      <div style={{ width: 22, height: 22, borderRadius: 6, border: isChecked ? "none" : "2px solid #D0CEC9", background: isChecked ? "#2D6A4F" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", transition: "all .2s", flexShrink: 0 }}>
+                      <div style={{ width: 22, height: 22, borderRadius: 6, border: isChecked ? "none" : "2px solid #D0CEC9", background: isChecked ? "#CF202E" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", transition: "all .2s", flexShrink: 0 }}>
                         {isChecked && <span style={{ color: "#fff", fontSize: 13, fontWeight: 700 }}>✓</span>}
                       </div>
                       <span style={{ flex: 1, fontFamily: F.b, fontSize: 13, fontWeight: 500, color: isChecked ? "#999" : "#1A1A1A", textDecoration: isChecked ? "line-through" : "none", textDecorationColor: "#DDD" }}>{a.name}</span>
@@ -510,7 +510,7 @@ export default function App() {
           </button>
           {expTokens && <div style={{ background: "#fff", border: "1px solid #E8E6E1", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 16px", marginBottom: 12 }}>
             <div style={{ display: "flex", gap: 5, marginBottom: 8 }}>
-              {Array.from({ length: tok.total }).map((_, i) => <div key={i} style={{ width: 22, height: 22, borderRadius: "50%", background: i < tok.avail ? "#2D6A4F" : "#E0DDD8", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: i < tok.avail ? "#fff" : "#CCC", fontWeight: 700 }}>{i < tok.avail ? "✦" : "✕"}</div>)}
+              {Array.from({ length: tok.total }).map((_, i) => <div key={i} style={{ width: 22, height: 22, borderRadius: "50%", background: i < tok.avail ? "#CF202E" : "#E0DDD8", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: i < tok.avail ? "#fff" : "#CCC", fontWeight: 700 }}>{i < tok.avail ? "✦" : "✕"}</div>)}
             </div>
             <div style={{ fontFamily: F.b, fontSize: 11, color: "#888", marginBottom: 6 }}>3 per course · {tok.used} used · {tok.avail} available</div>
             <div style={{ fontFamily: F.b, fontSize: 11, color: "#999", lineHeight: 1.5 }}>
@@ -737,9 +737,27 @@ export default function App() {
               })}
             </div>
           </div>)}
-        </div>}
 
-        {/* QUEUE */}
+          <Lbl s={{ marginTop: 20 }}>Class Preparation — click to toggle for each student</Lbl>
+          {(c.classPrep || []).map((cp, cpi) => (
+            <div key={cp.id} style={{ marginBottom: 10 }}>
+              <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 4 }}>{cp.name}</div>
+              <div style={{ background: "#fff", borderRadius: 8, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+                {sorted.map((s, si) => {
+                  const done = !!(cP[s.id] || {})[cp.id];
+                  return <div key={s.id} onClick={async () => { await toggleClassPrep(s.id, ck, cp.id); refresh(); }}
+                    style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 16px", borderBottom: si < sorted.length - 1 ? "1px solid #F5F3EF" : "none", cursor: "pointer" }}
+                    onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                    <div style={{ width: 18, height: 18, borderRadius: 4, border: done ? "none" : "2px solid #D0CEC9", background: done ? "#2D6A4F" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      {done && <span style={{ color: "#fff", fontSize: 10, fontWeight: 700 }}>✓</span>}
+                    </div>
+                    <span style={{ fontFamily: F.b, fontSize: 12, color: done ? "#999" : "#1A1A1A" }}>{sortBy === "last" ? `${s.last}, ${s.first}` : s.name}</span>
+                  </div>;
+                })}
+              </div>
+            </div>
+          ))}
+        </div>}
         {tab === "queue" && <div>
           <div style={{ fontFamily: F.b, fontSize: 11, color: "#777", lineHeight: 1.5, marginBottom: 14, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
             Students submit tokens for revisions or late work. Review in Brightspace, then update here.
