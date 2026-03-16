@@ -153,15 +153,10 @@ export default function App() {
   const [isSignup, setIsSignup] = useState(false);
 
   // Course data
-  const [rel, setRel] = useState([]);
-  const [students, setStudents] = useState([]);
-  const [iS, setIS] = useState({});
-  const [iN, setIN] = useState({});
-  const [sC, setSC] = useState({});
-  const [cP, setCP] = useState({});
-  const [toks, setToks] = useState({});
-  const [fq, setFQ] = useState([]);
+  // Course data — single object to prevent multiple re-renders
+  const [courseData, setCourseData] = useState({ rel: [], students: [], iS: {}, iN: {}, sC: {}, cP: {}, toks: {}, fq: [] });
   const [dataLoading, setDataLoading] = useState(false);
+  const { rel, students, iS, iN, sC, cP, toks, fq } = courseData;
 
   // UI state
   const [tab, setTab] = useState('overview');
@@ -203,7 +198,6 @@ export default function App() {
 
   async function loadCourseData(isInitial = true) {
     if (isInitial) setDataLoading(true);
-    const scrollY = window.scrollY;
     const [r, s, is, inn, sc, cp, t, f] = await Promise.all([
       loadReleasedAssignments(ck),
       user.profile.role === 'instructor' ? loadStudentsForCourse(ck) : Promise.resolve([]),
@@ -214,9 +208,8 @@ export default function App() {
       loadTokens(ck, user.profile.role === 'student' ? user.profile.id : null),
       user.profile.role === 'instructor' ? loadFeedbackQueue(ck) : Promise.resolve([]),
     ]);
-    setRel(r); setStudents(s); setIS(is); setIN(inn); setSC(sc); setCP(cp); setToks(t); setFQ(f);
+    setCourseData({ rel: r, students: s, iS: is, iN: inn, sC: sc, cP: cp, toks: t, fq: f });
     if (isInitial) setDataLoading(false);
-    requestAnimationFrame(() => window.scrollTo(0, scrollY));
   }
 
   const refresh = () => loadCourseData(false);
