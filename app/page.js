@@ -201,8 +201,9 @@ export default function App() {
     if (ck && user) loadCourseData();
   }, [ck, user]);
 
-  async function loadCourseData() {
-    setDataLoading(true);
+  async function loadCourseData(isInitial = true) {
+    if (isInitial) setDataLoading(true);
+    const scrollY = window.scrollY;
     const [r, s, is, inn, sc, cp, t, f] = await Promise.all([
       loadReleasedAssignments(ck),
       user.profile.role === 'instructor' ? loadStudentsForCourse(ck) : Promise.resolve([]),
@@ -214,8 +215,11 @@ export default function App() {
       user.profile.role === 'instructor' ? loadFeedbackQueue(ck) : Promise.resolve([]),
     ]);
     setRel(r); setStudents(s); setIS(is); setIN(inn); setSC(sc); setCP(cp); setToks(t); setFQ(f);
-    setDataLoading(false);
+    if (isInitial) setDataLoading(false);
+    requestAnimationFrame(() => window.scrollTo(0, scrollY));
   }
+
+  const refresh = () => loadCourseData(false);
 
   async function handleLogin() {
     setLoginErr('');
@@ -251,9 +255,6 @@ export default function App() {
     await supabase.auth.signOut();
     setUser(null); setCk(null); setLoginEmail(''); setLoginPass(''); setLoginErr('');
   }
-
-  // Refresh helper
-  const refresh = () => loadCourseData();
 
   // ---- LOADING ----
   if (loading) return <Loading />;
