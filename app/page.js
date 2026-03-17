@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { COURSES, TM, CAL_LINK, TOKEN_CUTOFF, BRAND, calcGrade, getBlockers, tokBal, pastCutoff, getTokenTarget } from '../lib/courses';
+import { COURSES, TM, CAL_LINK, BRAND, calcGrade, getBlockers, tokBal, pastCutoff, getTokenCutoff, getTokenTarget } from '../lib/courses';
 
 const F = { d: "'Source Serif 4',Georgia,serif", b: "'DM Sans',sans-serif" };
 
@@ -371,7 +371,7 @@ export default function App() {
     const grade = calcGrade(myChecks, rel, ck);
     const { target, blockers, msg: bMsg } = getBlockers(myChecks, rel, ck);
     const tok = tokBal(myToks.length, 0);
-    const cutoff = pastCutoff();
+    const cutoff = pastCutoff(ck);
 
     const handleCheck = async (aid) => {
       await toggleStudentCheck(myId, ck, aid);
@@ -506,6 +506,8 @@ export default function App() {
           </div>}
 
           {/* Class Prep */}
+          {(c.classPrep && c.classPrep.length > 0) && <>
+
           <button onClick={() => setExpPrep(!expPrep)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "12px 16px", background: "#fff", border: "1px solid #E8E6E1", borderRadius: expPrep ? "10px 10px 0 0" : 10, cursor: "pointer", marginBottom: expPrep ? 0 : 12 }}>
             <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555" }}>Class Preparation ({Object.values(myPrep).filter(Boolean).length}/{c.classPrep.length})</span>
             <span style={{ fontSize: 11, color: "#CCC", transform: expPrep ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
@@ -521,6 +523,7 @@ export default function App() {
               </div>;
             })}
           </div>}
+          </>}
 
           {/* Grade Tracks */}
           <button onClick={() => setExpTracks(!expTracks)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "12px 16px", background: "#fff", border: "1px solid #E8E6E1", borderRadius: expTracks ? "10px 10px 0 0" : 10, cursor: "pointer", marginBottom: expTracks ? 0 : 12 }}>
@@ -557,7 +560,7 @@ export default function App() {
             <div style={{ fontFamily: F.b, fontSize: 11, color: "#888", marginBottom: 6 }}>3 per course · {tok.used} used · {tok.avail} available</div>
             <div style={{ fontFamily: F.b, fontSize: 11, color: "#999", lineHeight: 1.5 }}>
               Use tokens to <strong style={{ color: "#555" }}>revise</strong> or <strong style={{ color: "#555" }}>submit late work</strong>.
-              {cutoff ? <><br /><strong style={{ color: "#C0392B" }}>Token period has ended ({TOKEN_CUTOFF}).</strong></> : <><br /><span style={{ color: "#888" }}>Cutoff: {TOKEN_CUTOFF}</span></>}
+              {cutoff ? <><br /><strong style={{ color: "#C0392B" }}>Token period has ended ({getTokenCutoff(ck)}).</strong></> : <><br /><span style={{ color: "#888" }}>Cutoff: {getTokenCutoff(ck)}</span></>}
             </div>
             {myToks.length > 0 && <div style={{ marginTop: 10 }}>
               <div style={{ fontFamily: F.b, fontSize: 9, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "#CCC", marginBottom: 4 }}>History</div>
@@ -746,7 +749,7 @@ export default function App() {
           <div style={{ display: "flex", gap: 6 }}>
             {pending.length > 0 && tab !== "queue" && <button onClick={() => setTab("queue")} style={{ padding: "3px 10px", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 10, fontWeight: 600, color: "#856404", cursor: "pointer" }}>{pending.length} token{pending.length !== 1 ? "s" : ""}</button>}
             <button onClick={() => { setBatch(true); setBatchAsgn(rel[0] || ""); }} style={{ padding: "5px 12px", background: c.color, color: "#fff", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Grade by Assignment</button>
-            <button onClick={() => { setPrepView(true); setPrepItem((c.classPrep || [])[0]?.id || ""); }} style={{ padding: "5px 12px", background: "#fff", color: c.color, border: `1px solid ${c.color}`, borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Track Class Prep</button>
+            {(c.classPrep && c.classPrep.length > 0) && <button onClick={() => { setPrepView(true); setPrepItem((c.classPrep || [])[0]?.id || ""); }} style={{ padding: "5px 12px", background: "#fff", color: c.color, border: `1px solid ${c.color}`, borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Track Class Prep</button>}
           </div>
         </div>
       </div>
@@ -811,7 +814,7 @@ export default function App() {
             </div>
           </div>}
 
-          <div style={{ marginTop: 20 }}>
+          {cpSum.length > 0 && <div style={{ marginTop: 20 }}>
             <Lbl s={{ marginBottom: 8 }}>Class Preparation Completion</Lbl>
             <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
               {cpSum.map((cp, i) => <div key={cp.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderBottom: i < cpSum.length - 1 ? "1px solid #F5F3EF" : "none" }}>
@@ -819,7 +822,7 @@ export default function App() {
                 <div style={{ flex: 1 }}><div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{cp.name}</div><div style={{ fontFamily: F.b, fontSize: 10, color: "#999" }}>{cp.done} of {students.length}</div></div>
               </div>)}
             </div>
-          </div>
+          </div>}
         </div>}
 
         {/* MANAGE */}
