@@ -151,6 +151,9 @@ export default function App() {
   const [loginPass, setLoginPass] = useState('');
   const [loginErr, setLoginErr] = useState('');
   const [isSignup, setIsSignup] = useState(false);
+  const [signupCode, setSignupCode] = useState('');
+  const [signupFirst, setSignupFirst] = useState('');
+  const [signupLast, setSignupLast] = useState('');
 
   // Course data
   // Course data — single object to prevent multiple re-renders
@@ -230,37 +233,49 @@ export default function App() {
 
   async function handleSignup() {
     setLoginErr('');
-    // Check if email is on the allowed list
-    const { data: allowed } = await supabase.from('allowed_emails').select('*').eq('email', loginEmail.trim().toLowerCase()).single();
-    if (!allowed) {
-      // Also check with original case in case emails were stored with caps
-      const { data: allowed2 } = await supabase.from('allowed_emails').select('*').ilike('email', loginEmail.trim()).single();
-      if (!allowed2) {
-        setLoginErr('This email is not registered for any course. Contact Dr. Beggs.');
-        return;
-      }
-      Object.assign(allowed || {}, allowed2);
+    const email = loginEmail.trim().toLowerCase();
+    
+    // Validate UCM email
+    if (!email.endsWith('@ucmo.edu')) {
+      setLoginErr('Please use your UCM email address (@ucmo.edu).');
+      return;
     }
-    const entry = allowed || {};
+    
+    // Validate name fields
+    if (!signupFirst.trim() || !signupLast.trim()) {
+      setLoginErr('Please enter your first and last name.');
+      return;
+    }
+    
+    // Validate course code
+    const { data: courseCode } = await supabase.from('course_codes').select('*').eq('code', signupCode.trim().toUpperCase()).eq('active', true).single();
+    if (!courseCode) {
+      setLoginErr('Invalid course code. Check with Dr. Beggs for the correct code.');
+      return;
+    }
     
     // Create the auth account
-    const { data: signUpData, error } = await supabase.auth.signUp({ email: loginEmail.trim(), password: loginPass });
+    const { error } = await supabase.auth.signUp({ email, password: loginPass });
     if (error) { setLoginErr(error.message); return; }
     
     // Sign in immediately
-    const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({ email: loginEmail.trim(), password: loginPass });
+    const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({ email, password: loginPass });
     if (signInErr) { setLoginErr('Account created! Please sign in.'); setIsSignup(false); return; }
     
     const authId = signInData.user.id;
     
-    // Check if a profile already exists for this email (existing student from before the fix)
-    const existingProfile = await loadUserProfile(loginEmail.trim());
+    // Check if profile already exists (for students who were in the original pilot)
+    const existingProfile = await loadUserProfile(email);
     
     if (!existingProfile) {
       // Create new profile with the auth ID
-      await supabase.from('profiles').insert({ id: authId, email: entry.email, first_name: entry.first_name, last_name: entry.last_name, role: entry.role });
+      await supabase.from('profiles').insert({ id: authId, email, first_name: signupFirst.trim(), last_name: signupLast.trim(), role: 'student' });
       // Create enrollment
-      await supabase.from('enrollments').insert({ profile_id: authId, course_key: entry.course_key });
+      await supabase.from('enrollments').insert({ profile_id: authId, course_key: courseCode.course_key });
+    } else if (existingProfile.id !== authId) {
+      // Profile exists but with wrong ID — this shouldn't happen with new flow but just in case
+      setLoginErr('Account issue — contact Dr. Beggs.');
+      return;
     }
     
     await checkAuth();
@@ -268,7 +283,7 @@ export default function App() {
 
   async function handleLogout() {
     await supabase.auth.signOut();
-    setUser(null); setCk(null); setLoginEmail(''); setLoginPass(''); setLoginErr('');
+    setUser(null); setCk(null); setLoginEmail(''); setLoginPass(''); setLoginErr(''); setSignupCode(''); setSignupFirst(''); setSignupLast('');
   }
 
   // ---- LOADING ----
@@ -287,11 +302,19 @@ export default function App() {
           <div style={{ fontFamily: F.b, fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "#888", marginBottom: 10 }}>
             {isSignup ? "Create Your Account" : "Sign In"}
           </div>
-          <input value={loginEmail} onChange={e => { setLoginEmail(e.target.value); setLoginErr(''); }} placeholder="University email"
+          {isSignup && <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+            <input value={signupFirst} onChange={e => { setSignupFirst(e.target.value); setLoginErr(''); }} placeholder="First name"
+              style={{ flex: 1, padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, boxSizing: "border-box", outline: "none" }} />
+            <input value={signupLast} onChange={e => { setSignupLast(e.target.value); setLoginErr(''); }} placeholder="Last name"
+              style={{ flex: 1, padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, boxSizing: "border-box", outline: "none" }} />
+          </div>}
+          <input value={loginEmail} onChange={e => { setLoginEmail(e.target.value); setLoginErr(''); }} placeholder="UCM email (@ucmo.edu)"
             style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: 8, boxSizing: "border-box", outline: "none" }} />
           <input value={loginPass} onChange={e => { setLoginPass(e.target.value); setLoginErr(''); }} placeholder={isSignup ? "Create a password (6+ characters)" : "Password"} type="password"
-            onKeyDown={e => { if (e.key === 'Enter') isSignup ? handleSignup() : handleLogin(); }}
-            style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: 12, boxSizing: "border-box", outline: "none" }} />
+            style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: isSignup ? 8 : 12, boxSizing: "border-box", outline: "none" }} />
+          {isSignup && <input value={signupCode} onChange={e => { setSignupCode(e.target.value); setLoginErr(''); }} placeholder="Course code (from Dr. Beggs)"
+            onKeyDown={e => { if (e.key === 'Enter') handleSignup(); }}
+            style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: 12, boxSizing: "border-box", outline: "none" }} />}
           {loginErr && <div style={{ fontFamily: F.b, fontSize: 11, color: "#C0392B", marginBottom: 10, lineHeight: 1.4 }}>{loginErr}</div>}
           <button onClick={isSignup ? handleSignup : handleLogin}
             style={{ width: "100%", padding: "10px", background: "#CF202E", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
