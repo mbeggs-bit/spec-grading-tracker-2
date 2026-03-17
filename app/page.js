@@ -649,20 +649,23 @@ export default function App() {
           <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
             {bSorted.map((s, si) => {
               const st = (iS[s.id] || {})[batchAsgn] || ""; const note = (iN[s.id] || {})[batchAsgn]; const isEN = noteFor === s.id;
+              const studentChecked = !!(sC[s.id] || {})[batchAsgn];
               const opts = ba.eval === "completion"
                 ? [{ v: "mastery", l: "✓ Complete", bg: "#D4EDDA", c: "#2D6A4F" }, { v: "", l: "—", bg: "#F5F4F0", c: "#999" }]
                 : [{ v: "mastery", l: "Mastered", bg: "#D4EDDA", c: "#2D6A4F" }, { v: "revision", l: "Revise", bg: "#FFF3CD", c: "#856404" }, { v: "", l: "—", bg: "#F5F4F0", c: "#999" }];
               return <div key={s.id} style={{ borderBottom: si < bSorted.length - 1 ? "1px solid #F5F3EF" : "none" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 16px" }}>
-                  <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, width: 130, flexShrink: 0 }}>{sortBy === "last" ? `${s.last}, ${s.first}` : `${s.first} ${s.last}`}</div>
-                  <div style={{ display: "flex", gap: 4, flex: 1 }}>
-                    {opts.map(o => <button key={o.v} onClick={() => handleInstrUpdate(s.id, batchAsgn, o.v || null)} style={{ padding: "5px 12px", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer", background: st === o.v ? o.bg : "#F8F7F4", color: st === o.v ? o.c : "#CCC", border: st === o.v ? `2px solid ${o.c}` : "1px solid #E8E6E1" }}>{o.l}</button>)}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px" }}>
+                  <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, width: 120, flexShrink: 0 }}>{sortBy === "last" ? `${s.last}, ${s.first}` : `${s.first} ${s.last}`}</div>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {opts.map(o => <button key={o.v} onClick={() => handleInstrUpdate(s.id, batchAsgn, o.v || null)} style={{ padding: "5px 10px", borderRadius: 6, fontFamily: F.b, fontSize: 10, fontWeight: 600, cursor: "pointer", background: st === o.v ? o.bg : "#F8F7F4", color: st === o.v ? o.c : "#CCC", border: st === o.v ? `2px solid ${o.c}` : "1px solid #E8E6E1" }}>{o.l}</button>)}
                   </div>
-                  {st && <button onClick={() => { setNoteFor(isEN ? null : s.id); setNoteVal(note || ""); }} style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 10, color: note ? "#856404" : "#999", cursor: "pointer", background: "#fff" }}>{note ? "Edit" : "+ Note"}</button>}
-                  {(sC[s.id] || {})[batchAsgn] && <Pill t="Student ✓" bg="#E8F5E9" c="#2D6A4F" />}
+                  <button onClick={() => { setNoteFor(isEN ? null : s.id); setNoteVal(note || ""); }} style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 10, color: note ? "#856404" : "#CCC", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{note ? "✎ Note" : "+ Note"}</button>
+                  <div style={{ width: 60, flexShrink: 0, textAlign: "right" }}>
+                    {studentChecked && <Pill t="Self ✓" bg="#E8F5E9" c="#2D6A4F" />}
+                  </div>
                 </div>
-                {note && !isEN && <div style={{ padding: "2px 16px 6px 146px", fontFamily: F.b, fontSize: 10, color: "#666", fontStyle: "italic" }}>Note: {note}</div>}
-                {isEN && <div style={{ padding: "4px 16px 8px 146px", display: "flex", gap: 6 }}>
+                {note && !isEN && <div style={{ padding: "2px 16px 6px 136px", fontFamily: F.b, fontSize: 10, color: "#666", fontStyle: "italic" }}>Note: {note}</div>}
+                {isEN && <div style={{ padding: "4px 16px 8px 136px", display: "flex", gap: 6 }}>
                   <input value={noteVal} onChange={e => setNoteVal(e.target.value)} placeholder="Feedback note..." autoFocus style={{ flex: 1, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={e => { if (e.key === "Enter") { handleInstrNote(s.id, batchAsgn, noteVal); setNoteFor(null); } }} />
                   <button onClick={() => { handleInstrNote(s.id, batchAsgn, noteVal); setNoteFor(null); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
                 </div>}
