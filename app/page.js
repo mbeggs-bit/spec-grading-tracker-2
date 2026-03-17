@@ -230,17 +230,39 @@ export default function App() {
 
   async function handleSignup() {
     setLoginErr('');
-    // Check if email exists in profiles
-    const profile = await loadUserProfile(loginEmail);
-    if (!profile) {
-      setLoginErr('This email is not registered for any course. Contact Dr. Beggs.');
-      return;
+    // Check if email is on the allowed list
+    const { data: allowed } = await supabase.from('allowed_emails').select('*').eq('email', loginEmail.trim().toLowerCase()).single();
+    if (!allowed) {
+      // Also check with original case in case emails were stored with caps
+      const { data: allowed2 } = await supabase.from('allowed_emails').select('*').ilike('email', loginEmail.trim()).single();
+      if (!allowed2) {
+        setLoginErr('This email is not registered for any course. Contact Dr. Beggs.');
+        return;
+      }
+      Object.assign(allowed || {}, allowed2);
     }
-    const { error } = await supabase.auth.signUp({ email: loginEmail, password: loginPass });
+    const entry = allowed || {};
+    
+    // Create the auth account
+    const { data: signUpData, error } = await supabase.auth.signUp({ email: loginEmail.trim(), password: loginPass });
     if (error) { setLoginErr(error.message); return; }
-    // Auto sign in after signup
-    const { error: signInErr } = await supabase.auth.signInWithPassword({ email: loginEmail, password: loginPass });
+    
+    // Sign in immediately
+    const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({ email: loginEmail.trim(), password: loginPass });
     if (signInErr) { setLoginErr('Account created! Please sign in.'); setIsSignup(false); return; }
+    
+    const authId = signInData.user.id;
+    
+    // Check if a profile already exists for this email (existing student from before the fix)
+    const existingProfile = await loadUserProfile(loginEmail.trim());
+    
+    if (!existingProfile) {
+      // Create new profile with the auth ID
+      await supabase.from('profiles').insert({ id: authId, email: entry.email, first_name: entry.first_name, last_name: entry.last_name, role: entry.role });
+      // Create enrollment
+      await supabase.from('enrollments').insert({ profile_id: authId, course_key: entry.course_key });
+    }
+    
     await checkAuth();
   }
 
