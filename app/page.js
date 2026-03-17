@@ -165,6 +165,8 @@ export default function App() {
   const [tab, setTab] = useState('overview');
   const [batch, setBatch] = useState(false);
   const [batchAsgn, setBatchAsgn] = useState('');
+  const [prepView, setPrepView] = useState(false);
+  const [prepItem, setPrepItem] = useState('');
   const [sortBy, setSortBy] = useState('last');
   const [drill, setDrill] = useState(null);
   const [modal, setModal] = useState(null);
@@ -655,14 +657,69 @@ export default function App() {
                   <div style={{ display: "flex", gap: 4, flex: 1 }}>
                     {opts.map(o => <button key={o.v} onClick={() => handleInstrUpdate(s.id, batchAsgn, o.v || null)} style={{ padding: "5px 12px", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer", background: st === o.v ? o.bg : "#F8F7F4", color: st === o.v ? o.c : "#CCC", border: st === o.v ? `2px solid ${o.c}` : "1px solid #E8E6E1" }}>{o.l}</button>)}
                   </div>
-                  {st === "revision" && <button onClick={() => { setNoteFor(isEN ? null : s.id); setNoteVal(note || ""); }} style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 10, color: "#999", cursor: "pointer", background: "#fff" }}>{note ? "Edit" : "+ Note"}</button>}
+                  {st && <button onClick={() => { setNoteFor(isEN ? null : s.id); setNoteVal(note || ""); }} style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 10, color: note ? "#856404" : "#999", cursor: "pointer", background: "#fff" }}>{note ? "Edit" : "+ Note"}</button>}
                   {(sC[s.id] || {})[batchAsgn] && <Pill t="Student ✓" bg="#E8F5E9" c="#2D6A4F" />}
                 </div>
-                {note && !isEN && <div style={{ padding: "2px 16px 6px 146px", fontFamily: F.b, fontSize: 10, color: "#856404", fontStyle: "italic" }}>Note: {note}</div>}
+                {note && !isEN && <div style={{ padding: "2px 16px 6px 146px", fontFamily: F.b, fontSize: 10, color: "#666", fontStyle: "italic" }}>Note: {note}</div>}
                 {isEN && <div style={{ padding: "4px 16px 8px 146px", display: "flex", gap: 6 }}>
                   <input value={noteVal} onChange={e => setNoteVal(e.target.value)} placeholder="Feedback note..." autoFocus style={{ flex: 1, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={e => { if (e.key === "Enter") { handleInstrNote(s.id, batchAsgn, noteVal); setNoteFor(null); } }} />
                   <button onClick={() => { handleInstrNote(s.id, batchAsgn, noteVal); setNoteFor(null); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
                 </div>}
+              </div>;
+            })}
+          </div>
+        </div>}
+      </div>
+    );
+  }
+
+  // TRACK CLASS PREP VIEW
+  if (prepView) {
+    const cpItems = c.classPrep || [];
+    const currentPrep = cpItems.find(x => x.id === prepItem);
+    const pSorted = [...students].sort((a, b) => sortBy === "first" ? (a.first || "").localeCompare(b.first || "") : (a.last || "").localeCompare(b.last || ""));
+    const markAllPrep = async (checked) => {
+      for (const s of pSorted) {
+        const done = !!(cP[s.id] || {})[prepItem];
+        if (checked && !done) await toggleClassPrep(s.id, ck, prepItem);
+        if (!checked && done) await toggleClassPrep(s.id, ck, prepItem);
+      }
+      refresh();
+    };
+    const doneCount = students.filter(s => (cP[s.id] || {})[prepItem]).length;
+    return (
+      <div style={{ maxWidth: 900, margin: "0 auto", padding: "20px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button onClick={() => setPrepView(false)} style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#888" }}>← Overview</button>
+            <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: "#555" }}>Track Class Prep</span>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 10, background: "#fff" }}><option value="first">First</option><option value="last">Last</option></select>
+            <select value={prepItem} onChange={e => setPrepItem(e.target.value)} style={{ padding: "5px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, background: "#fff" }}>
+              {cpItems.map(cp => <option key={cp.id} value={cp.id}>{cp.name}</option>)}
+            </select>
+          </div>
+        </div>
+        {currentPrep && <div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ fontFamily: F.d, fontSize: 17, fontWeight: 600 }}>{currentPrep.name}</span>
+            <Pill t={`${doneCount} of ${students.length}`} bg={doneCount === students.length ? "#D4EDDA" : "#F5F4F0"} c={doneCount === students.length ? "#2D6A4F" : "#999"} />
+          </div>
+          <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+            <button onClick={() => markAllPrep(true)} style={{ padding: "6px 14px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>Mark All Complete</button>
+            <button onClick={() => markAllPrep(false)} style={{ padding: "6px 14px", background: "#F5F4F0", border: "1px solid #E8E6E1", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#999", cursor: "pointer" }}>Reset All</button>
+          </div>
+          <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+            {pSorted.map((s, si) => {
+              const done = !!(cP[s.id] || {})[prepItem];
+              return <div key={s.id} onClick={async () => { await toggleClassPrep(s.id, ck, prepItem); refresh(); }}
+                style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 16px", borderBottom: si < pSorted.length - 1 ? "1px solid #F5F3EF" : "none", cursor: "pointer" }}
+                onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <div style={{ width: 22, height: 22, borderRadius: 6, border: done ? "none" : "2px solid #D0CEC9", background: done ? "#2D6A4F" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  {done && <span style={{ color: "#fff", fontSize: 13, fontWeight: 700 }}>✓</span>}
+                </div>
+                <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, color: done ? "#999" : "#1A1A1A" }}>{sortBy === "last" ? `${s.last}, ${s.first}` : `${s.first} ${s.last}`}</span>
               </div>;
             })}
           </div>
@@ -685,6 +742,7 @@ export default function App() {
           <div style={{ display: "flex", gap: 6 }}>
             {pending.length > 0 && tab !== "queue" && <button onClick={() => setTab("queue")} style={{ padding: "3px 10px", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 10, fontWeight: 600, color: "#856404", cursor: "pointer" }}>{pending.length} token{pending.length !== 1 ? "s" : ""}</button>}
             <button onClick={() => { setBatch(true); setBatchAsgn(rel[0] || ""); }} style={{ padding: "5px 12px", background: c.color, color: "#fff", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Grade by Assignment</button>
+            <button onClick={() => { setPrepView(true); setPrepItem((c.classPrep || [])[0]?.id || ""); }} style={{ padding: "5px 12px", background: "#fff", color: c.color, border: `1px solid ${c.color}`, borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Track Class Prep</button>
           </div>
         </div>
       </div>
@@ -776,26 +834,6 @@ export default function App() {
               })}
             </div>
           </div>)}
-
-          <Lbl s={{ marginTop: 20 }}>Class Preparation — click to toggle for each student</Lbl>
-          {(c.classPrep || []).map((cp, cpi) => (
-            <div key={cp.id} style={{ marginBottom: 10 }}>
-              <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 4 }}>{cp.name}</div>
-              <div style={{ background: "#fff", borderRadius: 8, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-                {sorted.map((s, si) => {
-                  const done = !!(cP[s.id] || {})[cp.id];
-                  return <div key={s.id} onClick={async () => { await toggleClassPrep(s.id, ck, cp.id); refresh(); }}
-                    style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 16px", borderBottom: si < sorted.length - 1 ? "1px solid #F5F3EF" : "none", cursor: "pointer" }}
-                    onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                    <div style={{ width: 18, height: 18, borderRadius: 4, border: done ? "none" : "2px solid #D0CEC9", background: done ? "#2D6A4F" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      {done && <span style={{ color: "#fff", fontSize: 10, fontWeight: 700 }}>✓</span>}
-                    </div>
-                    <span style={{ fontFamily: F.b, fontSize: 12, color: done ? "#999" : "#1A1A1A" }}>{sortBy === "last" ? `${s.last}, ${s.first}` : s.name}</span>
-                  </div>;
-                })}
-              </div>
-            </div>
-          ))}
         </div>}
         {tab === "queue" && <div>
           <div style={{ fontFamily: F.b, fontSize: 11, color: "#777", lineHeight: 1.5, marginBottom: 14, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
