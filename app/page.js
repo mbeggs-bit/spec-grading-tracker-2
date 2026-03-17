@@ -408,6 +408,7 @@ export default function App() {
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <a href={CAL_LINK} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 12px", background: "#FFF5F5", border: "1px solid #FCDEDE", borderRadius: 7, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#CF202E", textDecoration: "none" }}>📅 Meet with Dr. Beggs</a>
+              <a href="mailto:mbeggs@ucmo.edu" style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 12px", background: "#F5F5F5", border: "1px solid #E8E6E1", borderRadius: 7, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", textDecoration: "none" }}>✉ Email Dr. Beggs</a>
               <button onClick={handleLogout} style={{ fontFamily: F.b, fontSize: 10, color: "#888", background: "none", border: "1px solid #E0DDD8", borderRadius: 4, padding: "3px 8px", cursor: "pointer" }}>Sign out</button>
             </div>
           </div>
