@@ -227,6 +227,7 @@ export default function App() {
   const [tokSearch, setTokSearch] = useState('');
   const [gridSearch, setGridSearch] = useState('');
   const [batchSearch, setBatchSearch] = useState('');
+  const [teachDateFilter, setTeachDateFilter] = useState('all');
   const [expTracks, setExpTracks] = useState(false);
   const [expTokens, setExpTokens] = useState(false);
   const [expPrep, setExpPrep] = useState(false);
@@ -371,9 +372,10 @@ export default function App() {
             style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: 8, boxSizing: "border-box", outline: "none" }} />
           <input value={loginPass} onChange={e => { setLoginPass(e.target.value); setLoginErr(''); }} placeholder={isSignup ? "Create a password (6+ characters)" : "Password"} type="password"
             style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: isSignup ? 8 : 12, boxSizing: "border-box", outline: "none" }} />
-          {isSignup && <input value={signupCode} onChange={e => { setSignupCode(e.target.value); setLoginErr(''); }} placeholder="Course code (from Dr. Beggs)"
+          {isSignup && <input value={signupCode} onChange={e => { setSignupCode(e.target.value); setLoginErr(''); }} placeholder="Course code (provided by Dr. Beggs)"
             onKeyDown={e => { if (e.key === 'Enter') handleSignup(); }}
-            style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: 12, boxSizing: "border-box", outline: "none" }} />}
+            style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: 4, boxSizing: "border-box", outline: "none" }} />}
+          {isSignup && <div style={{ fontFamily: F.b, fontSize: 10, color: "#BBB", marginBottom: 12, paddingLeft: 2 }}>Example: MATH4850 or MATH3820</div>}
           {loginErr && <div style={{ fontFamily: F.b, fontSize: 11, color: "#C0392B", marginBottom: 10, lineHeight: 1.4 }}>{loginErr}</div>}
           <button onClick={isSignup ? handleSignup : handleLogin}
             style={{ width: "100%", padding: "10px", background: "#CF202E", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
@@ -1049,6 +1051,43 @@ export default function App() {
 
                 {unscheduled.length > 0 && <div>
                   <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 8 }}>Not yet scheduled</div>
+
+                {/* Scheduled by date */}
+                {(() => {
+                  const allSel = teachSel.filter(ts => assignmentIds.includes(ts.assignment_id)).sort((a, b) => new Date(a.teach_date) - new Date(b.teach_date));
+                  if (allSel.length === 0) return null;
+                  const allDates = [...new Set(allSel.map(ts => ts.teach_date))].sort();
+                  const filtered = teachDateFilter === 'all' ? allSel : allSel.filter(ts => ts.teach_date === teachDateFilter);
+                  const dateGroups = {};
+                  filtered.forEach(ts => {
+                    const key = ts.assignment_id + '|' + ts.teach_date;
+                    if (!dateGroups[key]) dateGroups[key] = { aid: ts.assignment_id, date: ts.teach_date, sels: [] };
+                    dateGroups[key].sels.push(ts);
+                  });
+                  const groups = Object.values(dateGroups).sort((a, b) => new Date(a.date) - new Date(b.date));
+                  return <div style={{ marginBottom: 14 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                      <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555" }}>Scheduled</div>
+                      <select value={teachDateFilter} onChange={e => setTeachDateFilter(e.target.value)} style={{ padding: "3px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 10, background: "#fff", cursor: "pointer" }}>
+                        <option value="all">All dates</option>
+                        {allDates.map(d => <option key={d} value={d}>{formatDate(d)}</option>)}
+                      </select>
+                    </div>
+                    <div style={{ background: "#fff", borderRadius: 8, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+                      {groups.map((g, gi) => { const a = c.assignments.find(x => x.id === g.aid); return <div key={gi} style={{ padding: "8px 12px", borderBottom: gi < groups.length - 1 ? "1px solid #F5F3EF" : "none" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                          <div><span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600 }}>{formatDate(g.date)}</span><span style={{ fontFamily: F.b, fontSize: 10, color: "#888", marginLeft: 8 }}>{a?.name || g.aid}</span></div>
+                          <div style={{ fontFamily: F.b, fontSize: 10, color: "#888" }}>Plan due: {formatDate(new Date(new Date(g.date + 'T12:00:00').getTime() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10))}</div>
+                        </div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                          {g.sels.map(ts => { const nm = `${ts.profiles?.last_name || ''}, ${ts.profiles?.first_name || ''}`; return <span key={ts.id} style={{ padding: "3px 8px", background: "#D4EDDA", borderRadius: 4, fontFamily: F.b, fontSize: 10, color: "#2D6A4F" }}>{nm}</span>; })}
+                        </div>
+                      </div>; })}
+                      {groups.length === 0 && <div style={{ padding: "12px", textAlign: "center", fontFamily: F.b, fontSize: 11, color: "#CCC" }}>No one scheduled for this date.</div>}
+                    </div>
+                  </div>;
+                })()}
+
                   {assignmentIds.map(aid => {
                     const a = c.assignments.find(x => x.id === aid);
                     const unsched = unscheduled.filter(u => u.aid === aid);
