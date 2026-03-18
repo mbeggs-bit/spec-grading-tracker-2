@@ -1003,10 +1003,18 @@ export default function App() {
                 </div>}
 
                 {unscheduled.length > 0 && <div>
-                  <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 6 }}>Not yet scheduled ({unscheduled.length})</div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                    {unscheduled.map((s, i) => { const a = c.assignments.find(x => x.id === s.aid); return <span key={i} style={{ padding: "3px 8px", background: "#FFF3E0", borderRadius: 4, fontFamily: F.b, fontSize: 10, color: "#E65100" }}>{s.first} {s.last} — {a?.name || s.aid}</span>; })}
-                  </div>
+                  <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 8 }}>Not yet scheduled</div>
+                  {assignmentIds.map(aid => {
+                    const a = c.assignments.find(x => x.id === aid);
+                    const unsched = unscheduled.filter(u => u.aid === aid);
+                    if (unsched.length === 0) return null;
+                    return <div key={aid} style={{ marginBottom: 10 }}>
+                      <div style={{ fontFamily: F.b, fontSize: 10, fontWeight: 600, color: "#888", marginBottom: 4 }}>{a?.name || aid} ({unsched.length})</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                        {unsched.map((s, i) => <span key={i} style={{ padding: "3px 8px", background: "#FFF3E0", borderRadius: 4, fontFamily: F.b, fontSize: 10, color: "#E65100" }}>{s.last}, {s.first}</span>)}
+                      </div>
+                    </div>;
+                  })}
                 </div>}
               </>;
             })()}
