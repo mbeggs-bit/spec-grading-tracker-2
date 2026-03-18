@@ -224,6 +224,9 @@ export default function App() {
   const [editDueVal, setEditDueVal] = useState('');
   const [queueFilter, setQueueFilter] = useState('pending');
   const [tokExpand, setTokExpand] = useState(null);
+  const [tokSearch, setTokSearch] = useState('');
+  const [gridSearch, setGridSearch] = useState('');
+  const [batchSearch, setBatchSearch] = useState('');
   const [expTracks, setExpTracks] = useState(false);
   const [expTokens, setExpTokens] = useState(false);
   const [expPrep, setExpPrep] = useState(false);
@@ -737,15 +740,18 @@ export default function App() {
   // BATCH GRADING VIEW
   if (batch) {
     const ba = c.assignments.find(x => x.id === batchAsgn);
-    const bSorted = [...students].sort((a, b) => sortBy === "first" ? (a.first || "").localeCompare(b.first || "") : (a.last || "").localeCompare(b.last || ""));
+    const bAll = [...students].sort((a, b) => sortBy === "first" ? (a.first || "").localeCompare(b.first || "") : (a.last || "").localeCompare(b.last || ""));
+    const bq = batchSearch.toLowerCase();
+    const bSorted = bq ? bAll.filter(s => `${s.first} ${s.last}`.toLowerCase().includes(bq) || `${s.last}, ${s.first}`.toLowerCase().includes(bq)) : bAll;
     return (
       <div style={{ maxWidth: 900, margin: "0 auto", padding: "20px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button onClick={() => setBatch(false)} style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#888" }}>← Overview</button>
+            <button onClick={() => { setBatch(false); setBatchSearch(''); }} style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#888" }}>← Overview</button>
             <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: "#555" }}>Grade by Assignment</span>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
+            <input value={batchSearch} onChange={e => setBatchSearch(e.target.value)} placeholder="Filter..." style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 10, background: "#fff", width: 80, outline: "none" }} />
             <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 10, background: "#fff" }}><option value="first">First</option><option value="last">Last</option></select>
             <select value={batchAsgn} onChange={e => setBatchAsgn(e.target.value)} style={{ padding: "5px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, background: "#fff" }}>
               {rel.map(id => { const x = c.assignments.find(a => a.id === id); return <option key={id} value={id}>{x?.name || id}</option>; })}
@@ -883,6 +889,7 @@ export default function App() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
             <Lbl s={{ marginBottom: 0 }}>Students (Your Records)</Lbl>
             <div style={{ display: "flex", gap: 4 }}>
+              <input value={gridSearch} onChange={e => setGridSearch(e.target.value)} placeholder="Filter..." style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 10, color: "#666", background: "#fff", width: 80, outline: "none" }} />
               <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: "2px 6px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 10, color: "#666", background: "#fff", cursor: "pointer" }}><option value="first">First</option><option value="last">Last</option><option value="grade">Track</option></select>
               <button onClick={exportCSV} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 10, color: "#666", background: "#fff", cursor: "pointer" }}>📥 CSV</button>
               <button onClick={refresh} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 10, color: "#666", background: "#fff", cursor: "pointer" }}>↻ Refresh</button>
@@ -896,7 +903,7 @@ export default function App() {
               <div style={{ flex: 1, display: "flex", gap: 2 }}>{rel.map(id => { const x = c.assignments.find(a => a.id === id); return <div key={id} style={{ flex: 1, minWidth: 12, maxWidth: 22, fontFamily: F.b, fontSize: 6, fontWeight: 600, color: "#CCC", textAlign: "center", overflow: "hidden" }} title={x?.name}>{(x?.name || "").substring(0, 4)}</div>; })}</div>
               <div style={{ width: 50, fontFamily: F.b, fontSize: 8, fontWeight: 600, color: "#CCC", textAlign: "right" }}>Self</div>
             </div>
-            {sorted.map((s, si) => {
+            {(() => { const gq = gridSearch.toLowerCase(); const gridFiltered = gq ? sorted.filter(s => `${s.first} ${s.last}`.toLowerCase().includes(gq) || `${s.last}, ${s.first}`.toLowerCase().includes(gq)) : sorted; return gridFiltered.map((s, si) => {
               const ig = calcGrade(iS[s.id] || {}, rel, ck); const sg = calcGrade(sC[s.id] || {}, rel, ck);
               const m = TM[ig] || TM.F; const mm = ig !== sg && ig !== "early" && sg !== "early";
               return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < sorted.length - 1 ? "1px solid #F5F3EF" : "none", background: mm ? "#FFF8F0" : "transparent" }}>
@@ -909,9 +916,9 @@ export default function App() {
                 </div>
                 <div style={{ width: 50, textAlign: "right", fontFamily: F.b, fontSize: 9, color: mm ? "#E65100" : "#CCC" }}>{sg === "early" ? "—" : sg}{mm ? " ⚠" : ""}</div>
               </div>;
-            })}
+            }); })()}
           </div>
-          <div style={{ fontFamily: F.b, fontSize: 10, color: "#BBB", marginTop: 8 }}>"Self" = student self-reported track. ⚠ = mismatch.</div>
+          <div style={{ fontFamily: F.b, fontSize: 10, color: "#BBB", marginTop: 8 }}>"Self" = student self-reported track. ⚠ = mismatch.{gridSearch && ` Showing ${gridSearch} filter.`}</div>
 
           {insights.length > 0 && <div style={{ marginTop: 20 }}>
             <Lbl s={{ marginBottom: 8 }}>Where Students Are Struggling</Lbl>
@@ -927,32 +934,38 @@ export default function App() {
           </div>}
 
           <div style={{ marginTop: 20 }}>
-            <Lbl s={{ marginBottom: 8 }}>Token Usage</Lbl>
-            <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-              {[...students].sort((a, b) => (a.last || "").localeCompare(b.last || "")).map((s, si) => {
-                const sToks = toks[s.id] || [];
-                const tok = tokBal(sToks.length, 0);
-                const expanded = tokExpand === s.id;
-                return <div key={s.id} style={{ borderBottom: si < students.length - 1 ? "1px solid #F5F3EF" : "none" }}>
-                  <div onClick={() => setTokExpand(expanded ? null : s.id)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", cursor: "pointer" }}
-                    onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                    <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500, flex: 1 }}>{s.last}, {s.first}</div>
-                    <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
-                      {Array.from({ length: tok.total }).map((_, i) => <div key={i} style={{ width: 12, height: 12, borderRadius: "50%", background: i < tok.avail ? "#CF202E" : "#E0DDD8" }} />)}
+            <Lbl s={{ marginBottom: 8 }}>Token Lookup</Lbl>
+            <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", padding: "12px 16px" }}>
+              <input value={tokSearch} onChange={e => { setTokSearch(e.target.value); setTokExpand(null); }} placeholder="Search student name..." 
+                style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, boxSizing: "border-box", outline: "none", marginBottom: tokSearch.length > 0 ? 8 : 0 }} />
+              {tokSearch.length > 0 && (() => {
+                const q = tokSearch.toLowerCase();
+                const matches = [...students].filter(s => `${s.first} ${s.last}`.toLowerCase().includes(q) || `${s.last} ${s.first}`.toLowerCase().includes(q) || `${s.last}, ${s.first}`.toLowerCase().includes(q)).sort((a, b) => (a.last || "").localeCompare(b.last || ""));
+                if (matches.length === 0) return <div style={{ fontFamily: F.b, fontSize: 11, color: "#CCC", padding: "4px 0" }}>No students found.</div>;
+                return matches.map((s, si) => {
+                  const sToks = toks[s.id] || [];
+                  const tok = tokBal(sToks.length, 0);
+                  const expanded = tokExpand === s.id;
+                  return <div key={s.id} style={{ borderBottom: si < matches.length - 1 ? "1px solid #F5F3EF" : "none" }}>
+                    <div onClick={() => setTokExpand(expanded ? null : s.id)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", cursor: "pointer" }}>
+                      <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500, flex: 1 }}>{s.last}, {s.first}</div>
+                      <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
+                        {Array.from({ length: tok.total }).map((_, i) => <div key={i} style={{ width: 12, height: 12, borderRadius: "50%", background: i < tok.avail ? "#CF202E" : "#E0DDD8" }} />)}
+                      </div>
+                      <div style={{ fontFamily: F.b, fontSize: 11, color: tok.avail === 0 ? "#C0392B" : "#888", width: 70, textAlign: "right", flexShrink: 0 }}>{tok.avail} left</div>
+                      {sToks.length > 0 && <span style={{ fontSize: 10, color: "#CCC", transform: expanded ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>}
                     </div>
-                    <div style={{ fontFamily: F.b, fontSize: 11, color: tok.avail === 0 ? "#C0392B" : "#888", width: 70, textAlign: "right", flexShrink: 0 }}>{tok.avail} left · {tok.used} used</div>
-                    <span style={{ fontSize: 10, color: "#CCC", transform: expanded ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
-                  </div>
-                  {expanded && sToks.length > 0 && <div style={{ padding: "2px 16px 10px 16px", background: "#FAFAF7" }}>
-                    {sToks.map((t, ti) => { const a = c.assignments.find(x => x.id === t.assignment_id) || (c.tokenGroups || {})[t.assignment_id]; return <div key={ti} style={{ display: "flex", gap: 8, padding: "4px 0", fontFamily: F.b, fontSize: 11, color: "#666", borderBottom: ti < sToks.length - 1 ? "1px solid #F0EEEA" : "none" }}>
-                      <span style={{ color: "#CCC" }}>✦</span>
-                      <span style={{ flex: 1 }}>{t.token_type === "revision" ? "Revision" : "Late"}: {a?.name || t.assignment_id}{t.note ? ` — "${t.note}"` : ""}</span>
-                      <span style={{ color: "#BBB", fontSize: 10 }}>{new Date(t.submitted_at).toLocaleDateString()}</span>
-                    </div>; })}
-                  </div>}
-                  {expanded && sToks.length === 0 && <div style={{ padding: "4px 16px 10px", fontFamily: F.b, fontSize: 10, color: "#CCC", background: "#FAFAF7" }}>No tokens used.</div>}
-                </div>;
-              })}
+                    {expanded && sToks.length > 0 && <div style={{ padding: "2px 0 8px", borderTop: "1px solid #F5F3EF" }}>
+                      {sToks.map((t, ti) => { const a = c.assignments.find(x => x.id === t.assignment_id) || (c.tokenGroups || {})[t.assignment_id]; return <div key={ti} style={{ display: "flex", gap: 8, padding: "4px 0", fontFamily: F.b, fontSize: 11, color: "#666" }}>
+                        <span style={{ color: "#CCC" }}>✦</span>
+                        <span style={{ flex: 1 }}>{t.token_type === "revision" ? "Revision" : "Late"}: {a?.name || t.assignment_id}{t.note ? ` — "${t.note}"` : ""}</span>
+                        <span style={{ color: "#BBB", fontSize: 10 }}>{new Date(t.submitted_at).toLocaleDateString()}</span>
+                      </div>; })}
+                    </div>}
+                    {expanded && sToks.length === 0 && <div style={{ padding: "4px 0 8px", fontFamily: F.b, fontSize: 10, color: "#CCC" }}>No tokens used.</div>}
+                  </div>;
+                });
+              })()}
             </div>
           </div>
 
