@@ -148,6 +148,36 @@ async function toggleReleased(courseKey, assignmentId) {
   }
 }
 
+// TEACHING SCHEDULE
+async function loadTeachingDates(courseKey) {
+  const { data } = await supabase.from('teaching_dates').select('*').eq('course_key', courseKey).order('teach_date');
+  return data || [];
+}
+
+async function loadTeachingSelections(courseKey, profileId) {
+  const q = supabase.from('teaching_selections').select('*, profiles(first_name, last_name)').eq('course_key', courseKey);
+  if (profileId) q.eq('profile_id', profileId);
+  const { data } = await q;
+  return data || [];
+}
+
+async function pickTeachingDate(profileId, courseKey, assignmentId, teachDate) {
+  const planDue = new Date(teachDate);
+  planDue.setDate(planDue.getDate() - 3);
+  const planDueStr = planDue.toISOString().slice(0, 10);
+  // Upsert — if they already picked a date for this assignment, replace it
+  const { data: existing } = await supabase.from('teaching_selections').select('id').match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId }).single();
+  if (existing) {
+    await supabase.from('teaching_selections').update({ teach_date: teachDate, plan_due_date: planDueStr }).eq('id', existing.id);
+  } else {
+    await supabase.from('teaching_selections').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, teach_date: teachDate, plan_due_date: planDueStr });
+  }
+}
+
+async function removeTeachingSelection(profileId, courseKey, assignmentId) {
+  await supabase.from('teaching_selections').delete().match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId });
+}
+
 /* ================================================================
    TINY COMPONENTS
    ================================================================ */
@@ -173,9 +203,9 @@ export default function App() {
 
   // Course data
   // Course data — single object to prevent multiple re-renders
-  const [courseData, setCourseData] = useState({ rel: [], dueDates: {}, students: [], iS: {}, iN: {}, sC: {}, cP: {}, toks: {}, fq: [] });
+  const [courseData, setCourseData] = useState({ rel: [], dueDates: {}, students: [], iS: {}, iN: {}, sC: {}, cP: {}, toks: {}, fq: [], teachDates: [], teachSel: [] });
   const [dataLoading, setDataLoading] = useState(false);
-  const { rel, dueDates, students, iS, iN, sC, cP, toks, fq } = courseData;
+  const { rel, dueDates, students, iS, iN, sC, cP, toks, fq, teachDates, teachSel } = courseData;
 
   // UI state
   const [tab, setTab] = useState('overview');
@@ -195,6 +225,7 @@ export default function App() {
   const [expTracks, setExpTracks] = useState(false);
   const [expTokens, setExpTokens] = useState(false);
   const [expPrep, setExpPrep] = useState(false);
+  const [expTeach, setExpTeach] = useState(true);
 
   // Check auth on mount
   useEffect(() => {
@@ -221,7 +252,7 @@ export default function App() {
 
   async function loadCourseData(isInitial = true) {
     if (isInitial) setDataLoading(true);
-    const [r, dd, s, is, inn, sc, cp, t, f] = await Promise.all([
+    const [r, dd, s, is, inn, sc, cp, t, f, td, ts] = await Promise.all([
       loadReleasedAssignments(ck),
       loadDueDates(ck),
       user.profile.role === 'instructor' ? loadStudentsForCourse(ck) : Promise.resolve([]),
@@ -231,8 +262,10 @@ export default function App() {
       loadClassPrep(ck, user.profile.role === 'student' ? user.profile.id : null),
       loadTokens(ck, user.profile.role === 'student' ? user.profile.id : null),
       user.profile.role === 'instructor' ? loadFeedbackQueue(ck) : Promise.resolve([]),
+      loadTeachingDates(ck),
+      loadTeachingSelections(ck, user.profile.role === 'student' ? user.profile.id : null),
     ]);
-    setCourseData({ rel: r, dueDates: dd, students: s, iS: is, iN: inn, sC: sc, cP: cp, toks: t, fq: f });
+    setCourseData({ rel: r, dueDates: dd, students: s, iS: is, iN: inn, sC: sc, cP: cp, toks: t, fq: f, teachDates: td, teachSel: ts });
     if (isInitial) setDataLoading(false);
   }
 
@@ -529,6 +562,58 @@ export default function App() {
               <div style={{ fontFamily: F.b, fontSize: 10, color: "#BBB", marginTop: 8 }}>Uses 1 of your {tok.avail} token{tok.avail !== 1 ? "s" : ""}.</div>
             </div>
           </div>}
+
+          {/* Teaching Schedule */}
+          {teachDates.length > 0 && <>
+          <button onClick={() => setExpTeach(!expTeach)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "12px 16px", background: "#fff", border: "1px solid #E8E6E1", borderRadius: expTeach ? "10px 10px 0 0" : 10, cursor: "pointer", marginBottom: expTeach ? 0 : 12 }}>
+            <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555" }}>Teaching Schedule</span>
+            <span style={{ fontSize: 11, color: "#CCC", transform: expTeach ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
+          </button>
+          {expTeach && <div style={{ background: "#fff", border: "1px solid #E8E6E1", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 16px", marginBottom: 12 }}>
+            <div style={{ fontFamily: F.b, fontSize: 11, color: "#888", marginBottom: 12, lineHeight: 1.5 }}>Select your teaching dates below. Your planning document is due 3 days before your teaching day.</div>
+            {(() => {
+              const assignmentIds = [...new Set(teachDates.map(td => td.assignment_id))];
+              return assignmentIds.map(aid => {
+                const a = c.assignments.find(x => x.id === aid);
+                const dates = teachDates.filter(td => td.assignment_id === aid);
+                const allClosed = dates.every(d => d.closed);
+                const mySel = teachSel.find(ts => ts.assignment_id === aid);
+                const formatDate = (d) => { const dt = new Date(d + 'T12:00:00'); return dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }); };
+                return <div key={aid} style={{ marginBottom: 12, padding: "12px", background: allClosed ? "#F9F8F5" : "#F0F8FF", borderRadius: 8, border: allClosed ? "1px solid #E8E6E1" : "1px solid #DCEEFB" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: allClosed ? "#999" : "#1A1A1A" }}>{a?.name || aid}</div>
+                    {allClosed && <Pill t="Closed" bg="#F5F4F0" c="#999" />}
+                    {mySel && !allClosed && <Pill t="Scheduled" bg="#D4EDDA" c="#2D6A4F" />}
+                  </div>
+                  {mySel ? <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0" }}>
+                      <div>
+                        <div style={{ fontFamily: F.b, fontSize: 11, color: "#888" }}>Teaching</div>
+                        <div style={{ fontFamily: F.b, fontSize: 14, fontWeight: 500 }}>{formatDate(mySel.teach_date)}</div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontFamily: F.b, fontSize: 11, color: "#888" }}>Plan due</div>
+                        <div style={{ fontFamily: F.b, fontSize: 14, fontWeight: 500 }}>{formatDate(mySel.plan_due_date)}</div>
+                      </div>
+                      {!allClosed && <button onClick={async () => { await removeTeachingSelection(myId, ck, aid); refresh(); }} style={{ padding: "4px 10px", background: "#fff", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 10, color: "#999", cursor: "pointer" }}>Change</button>}
+                    </div>
+                  </div> : !allClosed ? <div>
+                    <div style={{ fontFamily: F.b, fontSize: 11, color: "#555", marginBottom: 6 }}>Pick your teaching date:</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                      {dates.filter(d => !d.closed).map(d => <button key={d.teach_date} onClick={async () => { await pickTeachingDate(myId, ck, aid, d.teach_date); refresh(); }}
+                        style={{ padding: "5px 10px", background: "#fff", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer", position: "relative" }}
+                        onMouseEnter={e => { e.currentTarget.style.background = "#DCEEFB"; e.currentTarget.style.borderColor = "#1565C0"; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#E0DDD8"; }}>
+                        {formatDate(d.teach_date)}
+                        {d.note && <div style={{ fontSize: 8, color: "#C0392B", marginTop: 1 }}>⚠ {d.note}</div>}
+                      </button>)}
+                    </div>
+                  </div> : <div style={{ fontFamily: F.b, fontSize: 11, color: "#999" }}>Teaching window has closed.</div>}
+                </div>;
+              });
+            })()}
+          </div>}
+          </>}
 
           {/* Class Prep */}
           {(c.classPrep && c.classPrep.length > 0) && <>
@@ -847,6 +932,84 @@ export default function App() {
                 <div style={{ flex: 1 }}><div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{cp.name}</div><div style={{ fontFamily: F.b, fontSize: 10, color: "#999" }}>{cp.done} of {students.length}</div></div>
               </div>)}
             </div>
+          </div>}
+
+          {/* Teaching Schedule Dashboard */}
+          {teachDates.length > 0 && <div style={{ marginTop: 20 }}>
+            <Lbl s={{ marginBottom: 8 }}>Teaching Schedule</Lbl>
+            {(() => {
+              const formatDate = (d) => { const dt = new Date(d + 'T12:00:00'); return dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }); };
+              const assignmentIds = [...new Set(teachDates.filter(td => !td.closed).map(td => td.assignment_id))];
+              const today = new Date(); today.setHours(0,0,0,0);
+              const sevenDays = new Date(today); sevenDays.setDate(sevenDays.getDate() + 7);
+
+              // At a glance
+              const allAids = [...new Set(teachDates.map(td => td.assignment_id))];
+              const glance = allAids.map(aid => {
+                const a = c.assignments.find(x => x.id === aid);
+                const scheduled = teachSel.filter(ts => ts.assignment_id === aid).length;
+                const closed = teachDates.filter(td => td.assignment_id === aid).every(d => d.closed);
+                return { aid, name: a?.name || aid, scheduled, closed };
+              });
+
+              // Upcoming (plan due in next 7 days)
+              const upcoming = teachSel.filter(ts => {
+                const due = new Date(ts.plan_due_date + 'T12:00:00');
+                return due >= today && due <= sevenDays;
+              }).sort((a, b) => new Date(a.plan_due_date) - new Date(b.plan_due_date));
+
+              // Not yet scheduled
+              const scheduledStudentIds = new Set(teachSel.map(ts => ts.profile_id + '_' + ts.assignment_id));
+              const unscheduled = [];
+              assignmentIds.forEach(aid => {
+                students.forEach(s => {
+                  if (!scheduledStudentIds.has(s.id + '_' + aid)) unscheduled.push({ ...s, aid });
+                });
+              });
+
+              return <>
+                <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+                  {glance.map(g => <div key={g.aid} style={{ flex: 1, minWidth: 100, background: g.closed ? "#F5F4F0" : "#F0F8FF", padding: "10px 12px", borderRadius: 8, border: `1px solid ${g.closed ? "#E8E6E1" : "#DCEEFB"}` }}>
+                    <div style={{ fontFamily: F.b, fontSize: 10, color: "#888", marginBottom: 2 }}>{g.name}</div>
+                    <div style={{ fontFamily: F.d, fontSize: 18, fontWeight: 600, color: g.closed ? "#999" : "#1565C0" }}>{g.scheduled}/{students.length}</div>
+                    <div style={{ fontFamily: F.b, fontSize: 9, color: "#999" }}>{g.closed ? "closed" : "scheduled"}</div>
+                  </div>)}
+                </div>
+
+                {upcoming.length > 0 && <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 6 }}>Plans due in the next 7 days</div>
+                  <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+                    {upcoming.map((ts, i) => {
+                      const a = c.assignments.find(x => x.id === ts.assignment_id);
+                      const sName = `${ts.profiles?.first_name || ''} ${ts.profiles?.last_name || ''}`.trim();
+                      const initials = `${(ts.profiles?.first_name || '')[0] || ''}${(ts.profiles?.last_name || '')[0] || ''}`;
+                      const dueDate = new Date(ts.plan_due_date + 'T12:00:00');
+                      const daysUntil = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
+                      const badgeColor = daysUntil <= 1 ? { bg: "#FFF3CD", c: "#856404" } : daysUntil <= 3 ? { bg: "#FAEEDA", c: "#633806" } : { bg: "#F5F4F0", c: "#666" };
+                      return <div key={ts.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderBottom: i < upcoming.length - 1 ? "1px solid #F5F3EF" : "none" }}>
+                        <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#DCEEFB", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#1565C0", flexShrink: 0 }}>{initials}</div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500 }}>{sName}</div>
+                          <div style={{ fontFamily: F.b, fontSize: 10, color: "#999" }}>{a?.name || ts.assignment_id} · Teaching {formatDate(ts.teach_date)}</div>
+                        </div>
+                        <div style={{ textAlign: "right", marginRight: 8 }}>
+                          <div style={{ fontFamily: F.b, fontSize: 9, color: "#999" }}>Plan due</div>
+                          <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{formatDate(ts.plan_due_date)}</div>
+                        </div>
+                        <Pill t={daysUntil <= 0 ? "Due today" : daysUntil === 1 ? "Due tomorrow" : `${daysUntil} days`} bg={badgeColor.bg} c={badgeColor.c} />
+                      </div>;
+                    })}
+                  </div>
+                </div>}
+
+                {unscheduled.length > 0 && <div>
+                  <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 6 }}>Not yet scheduled ({unscheduled.length})</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                    {unscheduled.map((s, i) => { const a = c.assignments.find(x => x.id === s.aid); return <span key={i} style={{ padding: "3px 8px", background: "#FFF3E0", borderRadius: 4, fontFamily: F.b, fontSize: 10, color: "#E65100" }}>{s.first} {s.last} — {a?.name || s.aid}</span>; })}
+                  </div>
+                </div>}
+              </>;
+            })()}
           </div>}
         </div>}
 
