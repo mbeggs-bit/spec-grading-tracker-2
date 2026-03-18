@@ -222,6 +222,8 @@ export default function App() {
   const [noteVal, setNoteVal] = useState('');
   const [editDue, setEditDue] = useState(null);
   const [editDueVal, setEditDueVal] = useState('');
+  const [queueFilter, setQueueFilter] = useState('pending');
+  const [tokExpand, setTokExpand] = useState(null);
   const [expTracks, setExpTracks] = useState(false);
   const [expTokens, setExpTokens] = useState(false);
   const [expPrep, setExpPrep] = useState(false);
@@ -924,6 +926,36 @@ export default function App() {
             </div>
           </div>}
 
+          <div style={{ marginTop: 20 }}>
+            <Lbl s={{ marginBottom: 8 }}>Token Usage</Lbl>
+            <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+              {[...students].sort((a, b) => (a.last || "").localeCompare(b.last || "")).map((s, si) => {
+                const sToks = toks[s.id] || [];
+                const tok = tokBal(sToks.length, 0);
+                const expanded = tokExpand === s.id;
+                return <div key={s.id} style={{ borderBottom: si < students.length - 1 ? "1px solid #F5F3EF" : "none" }}>
+                  <div onClick={() => setTokExpand(expanded ? null : s.id)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", cursor: "pointer" }}
+                    onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                    <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500, flex: 1 }}>{s.last}, {s.first}</div>
+                    <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
+                      {Array.from({ length: tok.total }).map((_, i) => <div key={i} style={{ width: 12, height: 12, borderRadius: "50%", background: i < tok.avail ? "#CF202E" : "#E0DDD8" }} />)}
+                    </div>
+                    <div style={{ fontFamily: F.b, fontSize: 11, color: tok.avail === 0 ? "#C0392B" : "#888", width: 70, textAlign: "right", flexShrink: 0 }}>{tok.avail} left · {tok.used} used</div>
+                    <span style={{ fontSize: 10, color: "#CCC", transform: expanded ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
+                  </div>
+                  {expanded && sToks.length > 0 && <div style={{ padding: "2px 16px 10px 16px", background: "#FAFAF7" }}>
+                    {sToks.map((t, ti) => { const a = c.assignments.find(x => x.id === t.assignment_id) || (c.tokenGroups || {})[t.assignment_id]; return <div key={ti} style={{ display: "flex", gap: 8, padding: "4px 0", fontFamily: F.b, fontSize: 11, color: "#666", borderBottom: ti < sToks.length - 1 ? "1px solid #F0EEEA" : "none" }}>
+                      <span style={{ color: "#CCC" }}>✦</span>
+                      <span style={{ flex: 1 }}>{t.token_type === "revision" ? "Revision" : "Late"}: {a?.name || t.assignment_id}{t.note ? ` — "${t.note}"` : ""}</span>
+                      <span style={{ color: "#BBB", fontSize: 10 }}>{new Date(t.submitted_at).toLocaleDateString()}</span>
+                    </div>; })}
+                  </div>}
+                  {expanded && sToks.length === 0 && <div style={{ padding: "4px 16px 10px", fontFamily: F.b, fontSize: 10, color: "#CCC", background: "#FAFAF7" }}>No tokens used.</div>}
+                </div>;
+              })}
+            </div>
+          </div>
+
           {cpSum.length > 0 && <div style={{ marginTop: 20 }}>
             <Lbl s={{ marginBottom: 8 }}>Class Preparation Completion</Lbl>
             <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
@@ -1055,27 +1087,33 @@ export default function App() {
           <div style={{ fontFamily: F.b, fontSize: 11, color: "#777", lineHeight: 1.5, marginBottom: 14, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
             Students submit tokens for revisions or late work. Review in Brightspace, then update here.
           </div>
-          {pending.length === 0 && <div style={{ background: "#D4EDDA", borderRadius: 10, padding: "24px", textAlign: "center", marginBottom: 16 }}><div style={{ fontSize: 22, marginBottom: 4 }}>✓</div><div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: "#2D6A4F" }}>All caught up!</div></div>}
-          <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-            {fq.map((item, i) => {
-              const a = c.assignments.find(x => x.id === item.assignment_id) || (c.tokenGroups || {})[item.assignment_id];
-              return <div key={item.id} style={{ padding: "12px 16px", borderBottom: i < fq.length - 1 ? "1px solid #F5F3EF" : "none", opacity: item.resolved ? .6 : 1, background: item.resolved ? "#FAFAF7" : "transparent" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: item.resolved ? 0 : 8 }}>
-                  <div style={{ width: 26, height: 26, borderRadius: 6, background: item.token_type === "late" ? "#F3E8FF" : "#FFF3CD", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0 }}>{item.token_type === "late" ? "📥" : "↻"}</div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}><strong>{item.sName}</strong> — {a?.name || item.assignment_id}</div>
-                    <div style={{ fontFamily: F.b, fontSize: 10, color: "#999" }}>{item.token_type === "late" ? "Late submission" : "Revision"} · {new Date(item.submitted_at).toLocaleDateString()}{item.note ? ` · "${item.note}"` : ""}</div>
-                  </div>
-                  {item.resolved && <Pill t={`→ ${item.resolution}`} bg={item.resolution === "M" ? "#D4EDDA" : "#FFF3CD"} c={item.resolution === "M" ? "#2D6A4F" : "#856404"} />}
-                </div>
-                {!item.resolved && <div style={{ display: "flex", gap: 6, marginLeft: 36 }}>
-                  <button onClick={() => handleResolve(item.id, item.profile_id, item.assignment_id, "M")} style={{ padding: "6px 14px", background: "#2D6A4F", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontFamily: F.b, fontSize: 11, fontWeight: 600 }}>Reviewed → Mastered</button>
-                  <button onClick={() => handleResolve(item.id, item.profile_id, item.assignment_id, "R")} style={{ padding: "6px 14px", background: "#fff", color: "#856404", border: "1px solid #FFECB5", borderRadius: 5, cursor: "pointer", fontFamily: F.b, fontSize: 11, fontWeight: 600 }}>Reviewed → Still Needs Revision</button>
-                </div>}
-              </div>;
-            })}
-            {fq.length === 0 && <div style={{ padding: "18px", textAlign: "center", fontFamily: F.b, fontSize: 11, color: "#CCC" }}>No submissions yet.</div>}
+          <div style={{ display: "flex", gap: 0, marginBottom: 12, background: "#F5F4F0", borderRadius: 8, padding: 3 }}>
+            {[{ k: "pending", l: `Pending (${pending.length})` }, { k: "resolved", l: "Resolved" }, { k: "all", l: "All" }].map(f => <button key={f.k} onClick={() => setQueueFilter(f.k)} style={{ flex: 1, padding: "6px 10px", borderRadius: 6, border: "none", fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer", background: queueFilter === f.k ? "#fff" : "transparent", color: queueFilter === f.k ? "#1A1A1A" : "#999", boxShadow: queueFilter === f.k ? "0 1px 3px rgba(0,0,0,.1)" : "none" }}>{f.l}</button>)}
           </div>
+          {queueFilter === "pending" && pending.length === 0 && <div style={{ background: "#D4EDDA", borderRadius: 10, padding: "24px", textAlign: "center", marginBottom: 16 }}><div style={{ fontSize: 22, marginBottom: 4 }}>✓</div><div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: "#2D6A4F" }}>All caught up!</div></div>}
+          {(() => {
+            const filtered = queueFilter === "pending" ? fq.filter(f => !f.resolved) : queueFilter === "resolved" ? fq.filter(f => f.resolved) : fq;
+            return <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+              {filtered.map((item, i) => {
+                const a = c.assignments.find(x => x.id === item.assignment_id) || (c.tokenGroups || {})[item.assignment_id];
+                return <div key={item.id} style={{ padding: "12px 16px", borderBottom: i < filtered.length - 1 ? "1px solid #F5F3EF" : "none", opacity: item.resolved ? .7 : 1, background: item.resolved ? "#FAFAF7" : "transparent" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: item.resolved ? 0 : 8 }}>
+                    <div style={{ width: 26, height: 26, borderRadius: 6, background: item.token_type === "late" ? "#F3E8FF" : "#FFF3CD", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0 }}>{item.token_type === "late" ? "📥" : "↻"}</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}><strong>{item.sName}</strong> — {a?.name || item.assignment_id}</div>
+                      <div style={{ fontFamily: F.b, fontSize: 10, color: "#999" }}>{item.token_type === "late" ? "Late submission" : "Revision"} · {new Date(item.submitted_at).toLocaleDateString()}{item.note ? ` · "${item.note}"` : ""}</div>
+                    </div>
+                    {item.resolved && <Pill t={`→ ${item.resolution}`} bg={item.resolution === "M" ? "#D4EDDA" : "#FFF3CD"} c={item.resolution === "M" ? "#2D6A4F" : "#856404"} />}
+                  </div>
+                  {!item.resolved && <div style={{ display: "flex", gap: 6, marginLeft: 36 }}>
+                    <button onClick={() => handleResolve(item.id, item.profile_id, item.assignment_id, "M")} style={{ padding: "6px 14px", background: "#2D6A4F", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontFamily: F.b, fontSize: 11, fontWeight: 600 }}>Reviewed → Mastered</button>
+                    <button onClick={() => handleResolve(item.id, item.profile_id, item.assignment_id, "R")} style={{ padding: "6px 14px", background: "#fff", color: "#856404", border: "1px solid #FFECB5", borderRadius: 5, cursor: "pointer", fontFamily: F.b, fontSize: 11, fontWeight: 600 }}>Reviewed → Still Needs Revision</button>
+                  </div>}
+                </div>;
+              })}
+              {filtered.length === 0 && <div style={{ padding: "18px", textAlign: "center", fontFamily: F.b, fontSize: 11, color: "#CCC" }}>{queueFilter === "resolved" ? "No resolved tokens yet." : "No submissions yet."}</div>}
+            </div>;
+          })()}
         </div>}
 
         {/* TRACKS */}
