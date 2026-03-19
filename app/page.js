@@ -564,8 +564,8 @@ export default function App() {
               <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
                 {[{ v: "revision", l: "I revised this" }, { v: "late", l: "I'm submitting late" }, { v: "extra", l: "Using an extra token" }].map(o => <button key={o.v} onClick={() => setTfType(o.v)} style={{ padding: "7px 14px", borderRadius: 6, fontFamily: F.b, fontSize: 11, cursor: "pointer", background: tfType === o.v ? c.color : "#fff", color: tfType === o.v ? "#fff" : "#555", border: tfType === o.v ? `1px solid ${c.color}` : "1px solid #E0DDD8", flex: 1, textAlign: "center", minWidth: o.v === "extra" ? "100%" : "auto" }}>{o.l}</button>)}
               </div>
-              {tfType === "extra" && <input value={tfExtra} onChange={e => setTfExtra(e.target.value)} placeholder="Which token activity did you complete?" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 8, boxSizing: "border-box" }} />}
-              <input value={tfLink} onChange={e => setTfLink(e.target.value)} placeholder="Link to your work (paste Brightspace URL)" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 8, boxSizing: "border-box" }} />
+              {tfType === "extra" && <input value={tfExtra} onChange={e => setTfExtra(e.target.value)} placeholder="List the extra token assignment you completed" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 8, boxSizing: "border-box" }} />}
+              <input value={tfLink} onChange={e => setTfLink(e.target.value)} placeholder="Paste a link to your work (Google Doc, Slides, Canva, etc.)" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 8, boxSizing: "border-box" }} />
               <input value={tfNote} onChange={e => setTfNote(e.target.value)} placeholder="Note for Dr. Beggs (optional)" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 14, boxSizing: "border-box" }} />
               <div style={{ display: "flex", gap: 8 }}>
                 <button onClick={handleToken} style={{ padding: "8px 18px", background: c.color, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600 }}>Submit Token</button>
@@ -641,7 +641,10 @@ export default function App() {
               return <div key={cp.id} onClick={() => handlePrep(cp.id)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 4px", borderBottom: i < c.classPrep.length - 1 ? "1px solid #F5F3EF" : "none", cursor: "pointer" }}
                 onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                 <div style={{ width: 20, height: 20, borderRadius: 5, border: done ? "none" : "2px solid #D0CEC9", background: done ? c.color : "#fff", display: "flex", alignItems: "center", justifyContent: "center", transition: "all .2s", flexShrink: 0 }}>{done && <span style={{ color: "#fff", fontSize: 11, fontWeight: 700 }}>✓</span>}</div>
-                <span style={{ fontFamily: F.b, fontSize: 12, color: done ? "#999" : "#1A1A1A", textDecoration: done ? "line-through" : "none" }}>{cp.name}</span>
+                <div style={{ flex: 1 }}>
+                  <span style={{ fontFamily: F.b, fontSize: 12, color: done ? "#999" : "#1A1A1A", textDecoration: done ? "line-through" : "none" }}>{cp.name}</span>
+                  {dueDates[cp.id] && <div style={{ fontFamily: F.b, fontSize: 10, color: done ? "#CCC" : "#888", marginTop: 1 }}>{dueDates[cp.id]}</div>}
+                </div>
               </div>;
             })}
           </div>}
@@ -837,7 +840,13 @@ export default function App() {
           <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ fontFamily: F.d, fontSize: 17, fontWeight: 600 }}>{currentPrep.name}</span>
             <Pill t={`${doneCount} of ${students.length}`} bg={doneCount === students.length ? "#D4EDDA" : "#F5F4F0"} c={doneCount === students.length ? "#2D6A4F" : "#999"} />
+            <button onClick={() => { setEditDue(editDue === prepItem ? null : prepItem); setEditDueVal(dueDates[prepItem] || ''); }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 9, color: dueDates[prepItem] ? "#856404" : "#CCC", cursor: "pointer", background: "#fff" }}>{dueDates[prepItem] ? "✎ Due: " + dueDates[prepItem] : "+ Due date"}</button>
           </div>
+          {editDue === prepItem && <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+            <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class Mon 3/24" autoFocus style={{ flex: 1, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, prepItem, editDueVal); setEditDue(null); refresh(); } }} />
+            <button onClick={async () => { await upsertDueDate(ck, prepItem, editDueVal); setEditDue(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
+            <button onClick={async () => { await upsertDueDate(ck, prepItem, ''); setEditDue(null); refresh(); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#999", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 10, cursor: "pointer" }}>Clear</button>
+          </div>}
           <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
             <button onClick={() => markAllPrep(true)} style={{ padding: "6px 14px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>Mark All Complete</button>
             <button onClick={() => markAllPrep(false)} style={{ padding: "6px 14px", background: "#F5F4F0", border: "1px solid #E8E6E1", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#999", cursor: "pointer" }}>Reset All</button>
