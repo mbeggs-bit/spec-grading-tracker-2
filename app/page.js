@@ -126,9 +126,9 @@ async function toggleClassPrep(profileId, courseKey, prepId) {
   }
 }
 
-async function submitToken(profileId, courseKey, assignmentId, tokenType, note) {
-  await supabase.from('tokens').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, token_type: tokenType, note });
-  await supabase.from('feedback_queue').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, token_type: tokenType, note });
+async function submitToken(profileId, courseKey, assignmentId, tokenType, note, link) {
+  await supabase.from('tokens').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, token_type: tokenType, note, link });
+  await supabase.from('feedback_queue').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, token_type: tokenType, note, link });
 }
 
 async function resolveQueueItem(queueId, profileId, courseKey, assignmentId, resolution) {
@@ -218,6 +218,8 @@ export default function App() {
   const [modal, setModal] = useState(null);
   const [tfType, setTfType] = useState('revision');
   const [tfNote, setTfNote] = useState('');
+  const [tfLink, setTfLink] = useState('');
+  const [tfExtra, setTfExtra] = useState('');
   const [noteFor, setNoteFor] = useState(null);
   const [noteVal, setNoteVal] = useState('');
   const [editDue, setEditDue] = useState(null);
@@ -442,8 +444,9 @@ export default function App() {
     };
     const handleToken = async () => {
       if (!modal) return;
-      await submitToken(myId, ck, modal.id, tfType, tfNote);
-      setModal(null); setTfNote(''); setTfType('revision');
+      const note = tfType === 'extra' ? `Extra token: ${tfExtra}${tfNote ? ' — ' + tfNote : ''}` : tfNote;
+      await submitToken(myId, ck, modal.id, tfType === 'extra' ? 'revision' : tfType, note, tfLink);
+      setModal(null); setTfNote(''); setTfType('revision'); setTfLink(''); setTfExtra('');
       refresh();
     };
 
@@ -541,7 +544,7 @@ export default function App() {
                       {a.eval === "completion" && <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
                     </div>
                     {showTokenBtn(a) && isFirstInGroup(a) && <div style={{ padding: "0 16px 10px 48px" }}>
-                      <button onClick={(e) => { e.stopPropagation(); const tt = getTokenTarget(a.id, ck); setModal(tt); setTfType("revision"); setTfNote(""); }}
+                      <button onClick={(e) => { e.stopPropagation(); const tt = getTokenTarget(a.id, ck); setModal(tt); setTfType("revision"); setTfNote(""); setTfLink(""); setTfExtra(""); }}
                         style={{ padding: "4px 12px", background: "#FFFCF5", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 10, fontWeight: 600, color: "#856404", cursor: "pointer" }}>
                         Submit a token{a.tokenGroup ? " (entire project)" : ""}
                       </button>
@@ -558,15 +561,17 @@ export default function App() {
               <div style={{ fontFamily: F.d, fontSize: 18, fontWeight: 600, marginBottom: 4 }}>Submit a Token</div>
               <div style={{ fontFamily: F.b, fontSize: 13, color: "#555", marginBottom: 14 }}>{modal.name}</div>
               <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 6 }}>What is this token for?</div>
-              <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
-                {[{ v: "revision", l: "I revised this" }, { v: "late", l: "I'm submitting late" }].map(o => <button key={o.v} onClick={() => setTfType(o.v)} style={{ padding: "7px 14px", borderRadius: 6, fontFamily: F.b, fontSize: 11, cursor: "pointer", background: tfType === o.v ? c.color : "#fff", color: tfType === o.v ? "#fff" : "#555", border: tfType === o.v ? `1px solid ${c.color}` : "1px solid #E0DDD8", flex: 1, textAlign: "center" }}>{o.l}</button>)}
+              <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+                {[{ v: "revision", l: "I revised this" }, { v: "late", l: "I'm submitting late" }, { v: "extra", l: "Using an extra token" }].map(o => <button key={o.v} onClick={() => setTfType(o.v)} style={{ padding: "7px 14px", borderRadius: 6, fontFamily: F.b, fontSize: 11, cursor: "pointer", background: tfType === o.v ? c.color : "#fff", color: tfType === o.v ? "#fff" : "#555", border: tfType === o.v ? `1px solid ${c.color}` : "1px solid #E0DDD8", flex: 1, textAlign: "center", minWidth: o.v === "extra" ? "100%" : "auto" }}>{o.l}</button>)}
               </div>
+              {tfType === "extra" && <input value={tfExtra} onChange={e => setTfExtra(e.target.value)} placeholder="Which token activity did you complete?" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 8, boxSizing: "border-box" }} />}
+              <input value={tfLink} onChange={e => setTfLink(e.target.value)} placeholder="Link to your work (paste Brightspace URL)" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 8, boxSizing: "border-box" }} />
               <input value={tfNote} onChange={e => setTfNote(e.target.value)} placeholder="Note for Dr. Beggs (optional)" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 14, boxSizing: "border-box" }} />
               <div style={{ display: "flex", gap: 8 }}>
                 <button onClick={handleToken} style={{ padding: "8px 18px", background: c.color, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600 }}>Submit Token</button>
                 <button onClick={() => setModal(null)} style={{ padding: "8px 14px", background: "#F0EEEA", color: "#888", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 12 }}>Cancel</button>
               </div>
-              <div style={{ fontFamily: F.b, fontSize: 10, color: "#BBB", marginTop: 8 }}>Uses 1 of your {tok.avail} token{tok.avail !== 1 ? "s" : ""}.</div>
+              <div style={{ fontFamily: F.b, fontSize: 10, color: "#BBB", marginTop: 8 }}>{tfType === "extra" ? "Uses 1 extra token. Requires prior approval from Dr. Beggs." : `Uses 1 of your ${tok.avail} token${tok.avail !== 1 ? "s" : ""}.`}</div>
             </div>
           </div>}
 
@@ -1154,6 +1159,7 @@ export default function App() {
                     <div style={{ flex: 1 }}>
                       <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}><strong>{item.sName}</strong> — {a?.name || item.assignment_id}</div>
                       <div style={{ fontFamily: F.b, fontSize: 10, color: "#999" }}>{item.token_type === "late" ? "Late submission" : "Revision"} · {new Date(item.submitted_at).toLocaleDateString()}{item.note ? ` · "${item.note}"` : ""}</div>
+                      {item.link && <a href={item.link} target="_blank" rel="noopener noreferrer" style={{ fontFamily: F.b, fontSize: 10, color: "#1565C0", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 3, marginTop: 2 }} onMouseEnter={e => e.currentTarget.style.textDecoration = "underline"} onMouseLeave={e => e.currentTarget.style.textDecoration = "none"}>🔗 View submission</a>}
                     </div>
                     {item.resolved && <Pill t={`→ ${item.resolution}`} bg={item.resolution === "M" ? "#D4EDDA" : "#FFF3CD"} c={item.resolution === "M" ? "#2D6A4F" : "#856404"} />}
                   </div>
