@@ -1145,18 +1145,20 @@ export default function App() {
           </div>)}
 
           {(c.classPrep && c.classPrep.length > 0) && <>
-          <Lbl s={{ marginTop: 20 }}>Class Preparation — set due dates</Lbl>
+          <Lbl s={{ marginTop: 20 }}>Class Preparation — toggle to release, set due dates</Lbl>
           <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-            {c.classPrep.map((cp, i) => { const dd = dueDates[cp.id]; const isEditingDue = editDue === cp.id;
+            {c.classPrep.map((cp, i) => { const isR = rel.includes(cp.id); const dd = dueDates[cp.id]; const isEditingDue = editDue === cp.id;
               return <div key={cp.id} style={{ borderBottom: i < c.classPrep.length - 1 ? "1px solid #F5F3EF" : "none" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px" }}
+                  onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                  <div onClick={() => handleToggleRel(cp.id)} style={{ width: 34, height: 18, borderRadius: 9, background: isR ? c.color : "#E0DDD8", position: "relative", transition: "background .3s", flexShrink: 0, cursor: "pointer" }}><div style={{ width: 12, height: 12, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: isR ? 19 : 3, transition: "left .3s", boxShadow: "0 1px 2px rgba(0,0,0,.15)" }} /></div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{cp.name}</div>
                     {dd && !isEditingDue && <div style={{ fontFamily: F.b, fontSize: 10, color: "#888", marginTop: 1 }}>Due: {dd}</div>}
                   </div>
-                  <button onClick={() => { setEditDue(isEditingDue ? null : cp.id); setEditDueVal(dd || ''); }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 9, color: dd ? "#856404" : "#CCC", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{dd ? "✎ Due" : "+ Due date"}</button>
+                  <button onClick={(e) => { e.stopPropagation(); setEditDue(isEditingDue ? null : cp.id); setEditDueVal(dd || ''); }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 9, color: dd ? "#856404" : "#CCC", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{dd ? "✎ Due" : "+ Due date"}</button>
                 </div>
-                {isEditingDue && <div style={{ padding: "4px 16px 10px 16px", display: "flex", gap: 6 }}>
+                {isEditingDue && <div style={{ padding: "4px 16px 10px 60px", display: "flex", gap: 6 }}>
                   <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class Mon 3/24" autoFocus style={{ flex: 1, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, cp.id, editDueVal); setEditDue(null); refresh(); } }} />
                   <button onClick={async () => { await upsertDueDate(ck, cp.id, editDueVal); setEditDue(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
                   <button onClick={async () => { await upsertDueDate(ck, cp.id, ''); setEditDue(null); refresh(); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#999", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 10, cursor: "pointer" }}>Clear</button>
