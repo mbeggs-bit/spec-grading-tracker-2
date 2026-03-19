@@ -876,7 +876,7 @@ export default function App() {
 
       <div style={{ maxWidth: 1000, margin: "0 auto", padding: "18px 20px" }}>
         <div style={{ display: "flex", gap: 0, marginBottom: 18, borderBottom: "2px solid #F0EEEA" }}>
-          {[{ k: "overview", l: "Overview" }, { k: "manage", l: "Manage" }, { k: "queue", l: `Tokens${pending.length ? ` (${pending.length})` : ""}` }, { k: "tracks", l: "Tracks" }].map(t => <button key={t.k} onClick={() => setTab(t.k)} style={{ padding: "8px 14px", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: tab === t.k ? c.color : "#999", background: "none", borderBottom: tab === t.k ? `2px solid ${c.color}` : "2px solid transparent", marginBottom: -2 }}>{t.l}</button>)}
+          {[{ k: "overview", l: "Overview" }, { k: "manage", l: "Manage" }, { k: "queue", l: "Tokens" }, { k: "tracks", l: "Tracks" }].map(t => <button key={t.k} onClick={() => setTab(t.k)} style={{ padding: "8px 14px", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: tab === t.k ? c.color : "#999", background: "none", borderBottom: tab === t.k ? `2px solid ${c.color}` : "2px solid transparent", marginBottom: -2, position: "relative" }}>{t.l}{t.k === "queue" && pending.length > 0 && <span style={{ position: "absolute", top: 4, right: 2, minWidth: 16, height: 16, borderRadius: 8, background: "#CF202E", color: "#fff", fontFamily: F.b, fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{pending.length}</span>}</button>)}
         </div>
 
         {/* OVERVIEW */}
