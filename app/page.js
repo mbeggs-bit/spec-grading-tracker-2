@@ -645,6 +645,7 @@ export default function App() {
                   <span style={{ fontFamily: F.b, fontSize: 12, color: done ? "#999" : "#1A1A1A", textDecoration: done ? "line-through" : "none" }}>{cp.name}</span>
                   {dueDates[cp.id] && <div style={{ fontFamily: F.b, fontSize: 10, color: done ? "#CCC" : "#888", marginTop: 1 }}>{dueDates[cp.id]}</div>}
                 </div>
+                <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />
               </div>;
             })}
           </div>}
@@ -1157,6 +1158,7 @@ export default function App() {
                     {dd && !isEditingDue && <div style={{ fontFamily: F.b, fontSize: 10, color: "#888", marginTop: 1 }}>Due: {dd}</div>}
                   </div>
                   <button onClick={(e) => { e.stopPropagation(); setEditDue(isEditingDue ? null : cp.id); setEditDueVal(dd || ''); }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 9, color: dd ? "#856404" : "#CCC", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{dd ? "✎ Due" : "+ Due date"}</button>
+                  <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />
                 </div>
                 {isEditingDue && <div style={{ padding: "4px 16px 10px 60px", display: "flex", gap: 6 }}>
                   <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class Mon 3/24" autoFocus style={{ flex: 1, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, cp.id, editDueVal); setEditDue(null); refresh(); } }} />
