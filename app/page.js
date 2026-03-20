@@ -422,6 +422,9 @@ export default function App() {
 
   const c = COURSES[ck];
   const isInstr = user.profile.role === 'instructor';
+  const assignmentIds = new Set(c.assignments.map(a => a.id));
+  const relAssignments = rel.filter(id => assignmentIds.has(id));
+  const relPrep = rel.filter(id => (c.classPrep || []).some(cp => cp.id === id));
 
   // ---- STUDENT VIEW ----
   if (!isInstr) {
@@ -429,8 +432,8 @@ export default function App() {
     const myChecks = sC[myId] || {};
     const myPrep = cP[myId] || {};
     const myToks = toks[myId] || [];
-    const grade = calcGrade(myChecks, rel, ck);
-    const { target, blockers, msg: bMsg } = getBlockers(myChecks, rel, ck);
+    const grade = calcGrade(myChecks, relAssignments, ck);
+    const { target, blockers, msg: bMsg } = getBlockers(myChecks, relAssignments, ck);
     const tok = tokBal(myToks.length, 0);
     const cutoff = pastCutoff(ck);
 
@@ -455,9 +458,9 @@ export default function App() {
       if (!a.tokenGroup) return true;
       const grp = c.groups.find(g => g.tokenGroup === a.tokenGroup);
       if (!grp) return true;
-      return grp.ids.find(id => rel.includes(id) && !myChecks[id]) === a.id;
+      return grp.ids.find(id => relAssignments.includes(id) && !myChecks[id]) === a.id;
     };
-    const showTokenBtn = (a) => !cutoff && tok.avail > 0 && !myChecks[a.id] && rel.includes(a.id) && !(a.tokenGroup && hasGroupToken(a.tokenGroup));
+    const showTokenBtn = (a) => !cutoff && tok.avail > 0 && !myChecks[a.id] && relAssignments.includes(a.id) && !(a.tokenGroup && hasGroupToken(a.tokenGroup));
 
     return (
       <div>
@@ -488,7 +491,7 @@ export default function App() {
                 <div style={{ fontFamily: F.d, fontSize: 22, fontWeight: 700, color: (TM[grade] || TM.F).c }}>
                   {grade === "early" ? "Getting Started" : grade === "F" ? "Check off assignments to build your track" : `${grade} Track`}
                 </div>
-                <div style={{ fontFamily: F.b, fontSize: 11, color: "#AAA", marginTop: 1 }}>{rel.filter(id => myChecks[id]).length} of {rel.length} checked off</div>
+                <div style={{ fontFamily: F.b, fontSize: 11, color: "#AAA", marginTop: 1 }}>{relAssignments.filter(id => myChecks[id]).length} of {relAssignments.length} checked off</div>
               </div>
               <div style={{ textAlign: "center", padding: "6px 14px", background: "#F9F8F5", borderRadius: 8 }}>
                 <div style={{ display: "flex", gap: 3, justifyContent: "center", marginBottom: 3 }}>
@@ -520,7 +523,7 @@ export default function App() {
               {grp.name && <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: c.color, marginBottom: 5, padding: "0 4px" }}>{grp.name}{grp.tokenGroup ? <span style={{ fontWeight: 400, color: "#999", fontSize: 10, marginLeft: 6 }}>(1 token covers entire project)</span> : ""}</div>}
               <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
                 {grpA.map((a, i) => {
-                  const isRel = rel.includes(a.id); const isChecked = !!myChecks[a.id];
+                  const isRel = relAssignments.includes(a.id); const isChecked = !!myChecks[a.id];
                   if (!isRel) return <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", borderBottom: i < grpA.length - 1 ? "1px solid #F5F3EF" : "none", opacity: .5 }}>
                     <div style={{ width: 22, height: 22, borderRadius: 6, border: "2px dashed #E0DDD8", flexShrink: 0 }} />
                     <div style={{ flex: 1 }}>
@@ -726,17 +729,17 @@ export default function App() {
     if (sortBy === "first") return (a.first || "").localeCompare(b.first || "");
     if (sortBy === "last") return (a.last || "").localeCompare(b.last || "");
     const o = { A: 0, B: 1, C: 2, D: 3, F: 4, early: 5 };
-    return (o[calcGrade(iS[a.id] || {}, rel, ck)] || 5) - (o[calcGrade(iS[b.id] || {}, rel, ck)] || 5);
+    return (o[calcGrade(iS[a.id] || {}, relAssignments, ck)] || 5) - (o[calcGrade(iS[b.id] || {}, relAssignments, ck)] || 5);
   });
 
   const dist = { A: 0, B: 0, C: 0, D: 0, F: 0, early: 0 };
-  students.forEach(s => { const g = calcGrade(iS[s.id] || {}, rel, ck); dist[g] = (dist[g] || 0) + 1; });
+  students.forEach(s => { const g = calcGrade(iS[s.id] || {}, relAssignments, ck); dist[g] = (dist[g] || 0) + 1; });
 
-  const insights = rel.map(id => { const a = c.assignments.find(x => x.id === id); const rc = students.filter(s => (iS[s.id] || {})[id] === "revision").length; const mc = students.filter(s => (iS[s.id] || {})[id] === "mastery").length; return { ...a, rc, mc, ns: students.length - rc - mc }; }).filter(a => a.rc > 0).sort((a, b) => b.rc - a.rc);
+  const insights = relAssignments.map(id => { const a = c.assignments.find(x => x.id === id); const rc = students.filter(s => (iS[s.id] || {})[id] === "revision").length; const mc = students.filter(s => (iS[s.id] || {})[id] === "mastery").length; return { ...a, rc, mc, ns: students.length - rc - mc }; }).filter(a => a.rc > 0).sort((a, b) => b.rc - a.rc);
   const cpSum = (c.classPrep || []).map(cp => ({ ...cp, done: students.filter(s => (cP[s.id] || {})[cp.id]).length }));
 
   const exportCSV = () => {
-    const allA = c.assignments.filter(x => rel.includes(x.id)); const cpI = c.classPrep || [];
+    const allA = c.assignments.filter(x => relAssignments.includes(x.id)); const cpI = c.classPrep || [];
     const header = ["Last", "First", "Email", ...allA.map(x => x.name + " (Instr)"), ...allA.map(x => x.name + " (Student)"), ...cpI.map(x => x.name + " (Prep)"), "Tokens Used", "Tokens Avail", "Instr Track", "Student Track"].join(",");
     const rows = students.map(st => {
       const si = iS[st.id] || {}; const sc = sC[st.id] || {}; const cp2 = cP[st.id] || {}; const tk = (toks[st.id] || []).length;
@@ -765,7 +768,7 @@ export default function App() {
             <input value={batchSearch} onChange={e => setBatchSearch(e.target.value)} placeholder="Filter..." style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 10, background: "#fff", width: 80, outline: "none" }} />
             <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 10, background: "#fff" }}><option value="first">First</option><option value="last">Last</option></select>
             <select value={batchAsgn} onChange={e => setBatchAsgn(e.target.value)} style={{ padding: "5px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, background: "#fff" }}>
-              {rel.map(id => { const x = c.assignments.find(a => a.id === id); return <option key={id} value={id}>{x?.name || id}</option>; })}
+              {relAssignments.map(id => { const x = c.assignments.find(a => a.id === id); return <option key={id} value={id}>{x?.name || id}</option>; })}
             </select>
           </div>
         </div>
@@ -878,7 +881,7 @@ export default function App() {
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             {pending.length > 0 && tab !== "queue" && <button onClick={() => setTab("queue")} style={{ padding: "3px 10px", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 10, fontWeight: 600, color: "#856404", cursor: "pointer" }}>{pending.length} token{pending.length !== 1 ? "s" : ""}</button>}
-            <button onClick={() => { setBatch(true); setBatchAsgn(rel[0] || ""); }} style={{ padding: "5px 12px", background: c.color, color: "#fff", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Grade by Assignment</button>
+            <button onClick={() => { setBatch(true); setBatchAsgn(relAssignments[0] || ""); }} style={{ padding: "5px 12px", background: c.color, color: "#fff", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Grade by Assignment</button>
             {(c.classPrep && c.classPrep.length > 0) && <button onClick={() => { setPrepView(true); setPrepItem((c.classPrep || [])[0]?.id || ""); }} style={{ padding: "5px 12px", background: "#fff", color: c.color, border: `1px solid ${c.color}`, borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Track Class Prep</button>}
           </div>
         </div>
@@ -912,17 +915,17 @@ export default function App() {
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 16px", borderBottom: "2px solid #F0EEEA", background: "#FAFAF7" }}>
               <div style={{ width: 24 }} />
               <div style={{ width: 120, fontFamily: F.b, fontSize: 8, fontWeight: 600, color: "#CCC" }}>Student</div>
-              <div style={{ flex: 1, display: "flex", gap: 2 }}>{rel.map(id => { const x = c.assignments.find(a => a.id === id); return <div key={id} style={{ flex: 1, minWidth: 12, maxWidth: 22, fontFamily: F.b, fontSize: 6, fontWeight: 600, color: "#CCC", textAlign: "center", overflow: "hidden" }} title={x?.name}>{(x?.name || "").substring(0, 4)}</div>; })}</div>
+              <div style={{ flex: 1, display: "flex", gap: 2 }}>{relAssignments.map(id => { const x = c.assignments.find(a => a.id === id); return <div key={id} style={{ flex: 1, minWidth: 12, maxWidth: 22, fontFamily: F.b, fontSize: 6, fontWeight: 600, color: "#CCC", textAlign: "center", overflow: "hidden" }} title={x?.name}>{(x?.name || "").substring(0, 4)}</div>; })}</div>
               <div style={{ width: 50, fontFamily: F.b, fontSize: 8, fontWeight: 600, color: "#CCC", textAlign: "right" }}>Self</div>
             </div>
             {(() => { const gq = gridSearch.toLowerCase(); const gridFiltered = gq ? sorted.filter(s => `${s.first} ${s.last}`.toLowerCase().includes(gq) || `${s.last}, ${s.first}`.toLowerCase().includes(gq)) : sorted; return gridFiltered.map((s, si) => {
-              const ig = calcGrade(iS[s.id] || {}, rel, ck); const sg = calcGrade(sC[s.id] || {}, rel, ck);
+              const ig = calcGrade(iS[s.id] || {}, relAssignments, ck); const sg = calcGrade(sC[s.id] || {}, relAssignments, ck);
               const m = TM[ig] || TM.F; const mm = ig !== sg && ig !== "early" && sg !== "early";
               return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < sorted.length - 1 ? "1px solid #F5F3EF" : "none", background: mm ? "#FFF8F0" : "transparent" }}>
                 <div style={{ width: 22, height: 22, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 10, fontWeight: 700, color: m.c, flexShrink: 0 }}>{ig === "early" ? "—" : ig}</div>
                 <div style={{ width: 120, flexShrink: 0, fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sortBy === "last" ? `${s.last}, ${s.first}` : s.name}</div>
                 <div style={{ flex: 1, display: "flex", gap: 2 }}>
-                  {rel.map(id => { const st = (iS[s.id] || {})[id] || "";
+                  {relAssignments.map(id => { const st = (iS[s.id] || {})[id] || "";
                     return <div key={id} title={c.assignments.find(a => a.id === id)?.name} style={{ flex: 1, minWidth: 12, maxWidth: 22, height: 16, borderRadius: 3, background: st === "mastery" ? "#D4EDDA" : st === "revision" ? "#FFF3CD" : "#F5F4F0", border: !st ? "1.5px dashed #E8E6E1" : "1.5px solid transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 6, fontWeight: 700, color: st === "mastery" ? "#2D6A4F" : st === "revision" ? "#856404" : "transparent" }}>{st === "mastery" ? "M" : st === "revision" ? "R" : ""}</div>;
                   })}
                 </div>
@@ -1207,7 +1210,7 @@ export default function App() {
         {/* TRACKS */}
         {tab === "tracks" && <div>
           <div style={{ fontFamily: F.b, fontSize: 11, color: "#888", marginBottom: 14 }}>Based on <strong>your</strong> records.</div>
-          {["A", "B", "C", "D"].map(g => { const t = c.tracks[g]; const m = TM[g]; const on = students.filter(s => calcGrade(iS[s.id] || {}, rel, ck) === g);
+          {["A", "B", "C", "D"].map(g => { const t = c.tracks[g]; const m = TM[g]; const on = students.filter(s => calcGrade(iS[s.id] || {}, relAssignments, ck) === g);
             return <div key={g} style={{ marginBottom: 12, background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
               <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid #F0EEEA" }}>
                 <div style={{ width: 28, height: 28, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 14, fontWeight: 700, color: m.c }}>{g}</div>
@@ -1221,7 +1224,7 @@ export default function App() {
             <Lbl s={{ marginBottom: 8 }}>Final Grades Summary</Lbl>
             <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
               {[...students].sort((a, b) => (a.last || "").localeCompare(b.last || "")).map((s, i) => {
-                const g = calcGrade(iS[s.id] || {}, rel, ck); const m = TM[g] || TM.F;
+                const g = calcGrade(iS[s.id] || {}, relAssignments, ck); const m = TM[g] || TM.F;
                 return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", borderBottom: i < students.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                   <div style={{ width: 26, height: 26, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 12, fontWeight: 700, color: m.c }}>{g === "early" ? "—" : g}</div>
                   <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500 }}>{s.last}, {s.first}</div>
