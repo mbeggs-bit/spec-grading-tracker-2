@@ -139,6 +139,13 @@ async function resolveQueueItem(queueId, profileId, courseKey, assignmentId, res
   }
 }
 
+async function returnToken(queueId, profileId, courseKey, assignmentId) {
+  await supabase.from('feedback_queue').delete().eq('id', queueId);
+  // Delete the matching token (most recent one for this student/assignment)
+  const { data: tok } = await supabase.from('tokens').select('id').match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId }).order('submitted_at', { ascending: false }).limit(1).single();
+  if (tok) await supabase.from('tokens').delete().eq('id', tok.id);
+}
+
 async function toggleReleased(courseKey, assignmentId) {
   const { data: existing } = await supabase.from('released_assignments').select('id').match({ course_key: courseKey, assignment_id: assignmentId }).single();
   if (existing) {
@@ -720,6 +727,12 @@ export default function App() {
     await resolveQueueItem(qId, pid, ck, aid, res);
     refresh();
   };
+  const handleReturn = async (qId, pid, aid) => {
+    if (confirm('Return this token to the student? This will delete the submission.')) {
+      await returnToken(qId, pid, ck, aid);
+      refresh();
+    }
+  };
   const markAllInstr = async (aid, val) => {
     for (const s of students) { await upsertInstrStatus(s.id, ck, aid, val); }
     refresh();
@@ -1199,6 +1212,10 @@ export default function App() {
                   {!item.resolved && <div style={{ display: "flex", gap: 6, marginLeft: 36 }}>
                     <button onClick={() => handleResolve(item.id, item.profile_id, item.assignment_id, "M")} style={{ padding: "6px 14px", background: "#2D6A4F", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontFamily: F.b, fontSize: 11, fontWeight: 600 }}>Reviewed → Mastered</button>
                     <button onClick={() => handleResolve(item.id, item.profile_id, item.assignment_id, "R")} style={{ padding: "6px 14px", background: "#fff", color: "#856404", border: "1px solid #FFECB5", borderRadius: 5, cursor: "pointer", fontFamily: F.b, fontSize: 11, fontWeight: 600 }}>Reviewed → Still Needs Revision</button>
+                    <button onClick={() => handleReturn(item.id, item.profile_id, item.assignment_id)} style={{ padding: "6px 10px", background: "#fff", color: "#C0392B", border: "1px solid #F5B7B7", borderRadius: 5, cursor: "pointer", fontFamily: F.b, fontSize: 10, fontWeight: 600 }}>Return Token</button>
+                  </div>}
+                  {item.resolved && <div style={{ display: "flex", gap: 6, marginLeft: 36, marginTop: 4 }}>
+                    <button onClick={() => handleReturn(item.id, item.profile_id, item.assignment_id)} style={{ padding: "3px 8px", background: "#fff", color: "#C0392B", border: "1px solid #F5B7B7", borderRadius: 4, cursor: "pointer", fontFamily: F.b, fontSize: 9 }}>↩ Return Token</button>
                   </div>}
                 </div>;
               })}
