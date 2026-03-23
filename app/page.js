@@ -1005,6 +1005,23 @@ export default function App() {
                 <div style={{ flex: 1 }}><div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{cp.name}</div><div style={{ fontFamily: F.b, fontSize: 10, color: "#999" }}>{cp.done} of {students.length}</div></div>
               </div>)}
             </div>
+            <div style={{ marginTop: 10 }}>
+              <input value={gridSearch} onChange={e => setGridSearch(e.target.value)} placeholder="Look up a student's class prep..." style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, boxSizing: "border-box", outline: "none" }} />
+              {gridSearch.length > 0 && (() => {
+                const q = gridSearch.toLowerCase();
+                const matches = students.filter(s => `${s.first} ${s.last}`.toLowerCase().includes(q) || `${s.last}, ${s.first}`.toLowerCase().includes(q));
+                if (matches.length === 0) return <div style={{ fontFamily: F.b, fontSize: 11, color: "#CCC", padding: "8px 0" }}>No students found.</div>;
+                return matches.map(s => <div key={s.id} style={{ marginTop: 6, padding: "8px 12px", background: "#FAFAF7", borderRadius: 8 }}>
+                  <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{s.last}, {s.first}</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                    {(c.classPrep || []).map(cp => {
+                      const done = !!(cP[s.id] || {})[cp.id];
+                      return <span key={cp.id} style={{ padding: "3px 8px", borderRadius: 4, fontFamily: F.b, fontSize: 10, background: done ? "#D4EDDA" : "#F5F4F0", color: done ? "#2D6A4F" : "#999" }}>{done ? "✓ " : ""}{cp.name}</span>;
+                    })}
+                  </div>
+                </div>);
+              })()}
+            </div>
           </div>}
 
           {/* Teaching Schedule Dashboard */}
