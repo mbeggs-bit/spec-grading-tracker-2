@@ -363,7 +363,7 @@ export default function App() {
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
       <div style={{ maxWidth: 420, width: "100%", padding: "0 20px" }}>
         <div style={{ textAlign: "center", marginBottom: 36 }}>
-          <div style={{ display: "inline-block", padding: "4px 10px", background: "#CF202E", color: "#fff", fontFamily: F.b, fontSize: 9, fontWeight: 600, letterSpacing: ".1em", textTransform: "uppercase", borderRadius: 3, marginBottom: 14 }}>Spec Grading Tracker</div>
+          <div style={{ display: "inline-block", padding: "4px 10px", background: "#CF202E", color: "#fff", fontFamily: F.b, fontSize: 9, fontWeight: 600, letterSpacing: ".1em", textTransform: "uppercase", borderRadius: 3, marginBottom: 14 }}>MyTrack</div>
           <h1 style={{ fontSize: 30, fontWeight: 700, color: "#1A1A1A", lineHeight: 1.15, marginBottom: 6 }}>Own your learning.</h1>
           <p style={{ fontFamily: F.b, fontSize: 13, color: "#999" }}>Track your growth. Make decisions. Pursue mastery.</p>
         </div>
@@ -1059,11 +1059,14 @@ export default function App() {
                       const dueDate = new Date(ts.plan_due_date + 'T12:00:00');
                       const daysUntil = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
                       const badgeColor = daysUntil <= 1 ? { bg: "#FFF3CD", c: "#856404" } : daysUntil <= 3 ? { bg: "#FAEEDA", c: "#633806" } : { bg: "#F5F4F0", c: "#666" };
-                      return <div key={ts.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderBottom: i < upcoming.length - 1 ? "1px solid #F5F3EF" : "none" }}>
-                        <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#DCEEFB", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#1565C0", flexShrink: 0 }}>{initials}</div>
+                      const st = (iS[ts.profile_id] || {})[ts.assignment_id] || '';
+                      const circBg = st === 'mastery' ? '#D4EDDA' : st === 'revision' ? '#FFF3CD' : '#DCEEFB';
+                      const circColor = st === 'mastery' ? '#2D6A4F' : st === 'revision' ? '#856404' : '#1565C0';
+                      return <div key={ts.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderBottom: i < upcoming.length - 1 ? "1px solid #F5F3EF" : "none", opacity: st === 'mastery' ? 0.5 : 1 }}>
+                        <div style={{ width: 36, height: 36, borderRadius: "50%", background: circBg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: circColor, flexShrink: 0 }}>{st === 'mastery' ? '✓' : st === 'revision' ? 'R' : initials}</div>
                         <div style={{ flex: 1 }}>
-                          <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500 }}>{sName}</div>
-                          <div style={{ fontFamily: F.b, fontSize: 10, color: "#999" }}>{a?.name || ts.assignment_id} · Teaching {formatDate(ts.teach_date)}</div>
+                          <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, textDecoration: st === 'mastery' ? 'line-through' : 'none', color: st === 'mastery' ? '#999' : '#1A1A1A' }}>{sName}</div>
+                          <div style={{ fontFamily: F.b, fontSize: 10, color: "#999" }}>{a?.name || ts.assignment_id} · Teaching {formatDate(ts.teach_date)}{st ? ` · ${st === 'mastery' ? 'Mastered' : 'Needs revision'}` : ''}</div>
                         </div>
                         <div style={{ textAlign: "right", marginRight: 8 }}>
                           <div style={{ fontFamily: F.b, fontSize: 9, color: "#999" }}>Plan due</div>
@@ -1106,7 +1109,7 @@ export default function App() {
                           <div style={{ fontFamily: F.b, fontSize: 10, color: "#888" }}>Plan due: {formatDate(new Date(new Date(g.date + 'T12:00:00').getTime() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10))}</div>
                         </div>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                          {g.sels.map(ts => { const nm = `${ts.profiles?.last_name || ''}, ${ts.profiles?.first_name || ''}`; return <span key={ts.id} style={{ padding: "3px 8px", background: "#D4EDDA", borderRadius: 4, fontFamily: F.b, fontSize: 10, color: "#2D6A4F" }}>{nm}</span>; })}
+                          {g.sels.map(ts => { const nm = `${ts.profiles?.last_name || ''}, ${ts.profiles?.first_name || ''}`; const st = (iS[ts.profile_id] || {})[g.aid] || ''; const stBg = st === 'mastery' ? '#D4EDDA' : st === 'revision' ? '#FFF3CD' : '#DCEEFB'; const stColor = st === 'mastery' ? '#2D6A4F' : st === 'revision' ? '#856404' : '#1565C0'; const stLabel = st === 'mastery' ? ' ✓M' : st === 'revision' ? ' R' : ''; return <span key={ts.id} style={{ padding: "3px 8px", background: stBg, borderRadius: 4, fontFamily: F.b, fontSize: 10, color: stColor, textDecoration: st === 'mastery' ? 'line-through' : 'none', textDecorationColor: '#B7DFBF' }}>{nm}{stLabel}</span>; })}
                         </div>
                       </div>; })}
                       {groups.length === 0 && <div style={{ padding: "12px", textAlign: "center", fontFamily: F.b, fontSize: 11, color: "#CCC" }}>No one scheduled for this date.</div>}
