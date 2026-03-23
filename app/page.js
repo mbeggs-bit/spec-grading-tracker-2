@@ -135,6 +135,16 @@ async function resolveQueueItem(queueId, profileId, courseKey, assignmentId, res
   await supabase.from('feedback_queue').update({ resolved: true, resolution, resolved_at: new Date().toISOString() }).eq('id', queueId);
   if (resolution === 'M' || resolution === 'R') {
     const status = resolution === 'M' ? 'mastery' : 'revision';
+    // Find the student's email from auth, then get their current profile ID
+    const { data: authUser } = await supabase.from('profiles').select('email').eq('id', profileId).single();
+    if (authUser?.email) {
+      const { data: currentProfile } = await supabase.from('profiles').select('id').eq('email', authUser.email).single();
+      if (currentProfile) {
+        await upsertInstrStatus(currentProfile.id, courseKey, assignmentId, status);
+        return;
+      }
+    }
+    // Fallback to original profileId
     await upsertInstrStatus(profileId, courseKey, assignmentId, status);
   }
 }
