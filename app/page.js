@@ -198,9 +198,9 @@ async function removeTeachingSelection(profileId, courseKey, assignmentId) {
 /* ================================================================
    TINY COMPONENTS
    ================================================================ */
-function Pill({ t, bg = "#F8F7F4", c = "#AAA" }) { return <span style={{ display: "inline-block", padding: "2px 7px", borderRadius: 4, fontFamily: F.b, fontSize: 10, fontWeight: 600, background: bg, color: c, whiteSpace: "nowrap" }}>{t}</span>; }
-function Lbl({ children, s = {} }) { return <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".07em", color: "#999", marginBottom: 10, ...s }}>{children}</div>; }
-function GradeRing({ grade, size = 50 }) { const m = TM[grade] || TM.F; const on = grade !== "F" && grade !== "early"; return <div style={{ width: size, height: size, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: on ? m.c : "#F0EEEA", border: `3px solid ${on ? m.c : "#E0DDD8"}`, transition: "all .4s" }}><span style={{ fontSize: size * .38, fontWeight: 700, fontFamily: F.d, color: on ? "#fff" : "#BBB", lineHeight: 1 }}>{grade === "early" ? "—" : grade}</span></div>; }
+function Pill({ t, bg = "#F8F7F4", c = "#AAA" }) { return <span role="status" aria-label={t} style={{ display: "inline-block", padding: "2px 7px", borderRadius: 4, fontFamily: F.b, fontSize: 10, fontWeight: 600, background: bg, color: c, whiteSpace: "nowrap" }}>{t}</span>; }
+function Lbl({ children, s = {} }) { return <h2 style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".07em", color: "#999", marginBottom: 10, ...s }}>{children}</h2>; }
+function GradeRing({ grade, size = 50, label = "" }) { const m = TM[grade] || TM.F; const on = grade !== "F" && grade !== "early"; return <div role="img" aria-label={label || `Grade track: ${grade}`} style={{ width: size, height: size, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: on ? m.c : "#F0EEEA", border: `3px solid ${on ? m.c : "#E0DDD8"}`, transition: "all .4s" }}><span style={{ fontSize: size * .38, fontWeight: 700, fontFamily: F.d, color: on ? "#fff" : "#BBB", lineHeight: 1 }}>{grade === "early" ? "—" : grade}</span></div>; }
 function Loading() { return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}><div style={{ fontFamily: F.b, color: "#999", fontSize: 14 }}>Loading...</div></div>; }
 
 /* ================================================================
@@ -373,7 +373,7 @@ export default function App() {
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
       <div style={{ maxWidth: 420, width: "100%", padding: "0 20px" }}>
         <div style={{ textAlign: "center", marginBottom: 36 }}>
-          <div style={{ display: "inline-block", padding: "4px 10px", background: "#CF202E", color: "#fff", fontFamily: F.b, fontSize: 9, fontWeight: 600, letterSpacing: ".1em", textTransform: "uppercase", borderRadius: 3, marginBottom: 14 }}>MyTrack</div>
+          <div style={{ display: "inline-block", padding: "4px 10px", background: "#CF202E", color: "#fff", fontFamily: F.b, fontSize: 11, fontWeight: 600, letterSpacing: ".1em", textTransform: "uppercase", borderRadius: 3, marginBottom: 14 }}>MyTrack</div>
           <h1 style={{ fontSize: 30, fontWeight: 700, color: "#1A1A1A", lineHeight: 1.15, marginBottom: 6 }}>Own your learning.</h1>
           <p style={{ fontFamily: F.b, fontSize: 13, color: "#999" }}>Track your growth. Make decisions. Pursue mastery.</p>
         </div>
@@ -382,20 +382,20 @@ export default function App() {
             {isSignup ? "Create Your Account" : "Sign In"}
           </div>
           {isSignup && <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-            <input value={signupFirst} onChange={e => { setSignupFirst(e.target.value); setLoginErr(''); }} placeholder="First name"
+            <input value={signupFirst} onChange={e => { setSignupFirst(e.target.value); setLoginErr(''); }} placeholder="First name" aria-label="First name"
               style={{ flex: 1, padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, boxSizing: "border-box", outline: "none" }} />
-            <input value={signupLast} onChange={e => { setSignupLast(e.target.value); setLoginErr(''); }} placeholder="Last name"
+            <input value={signupLast} onChange={e => { setSignupLast(e.target.value); setLoginErr(''); }} placeholder="Last name" aria-label="Last name"
               style={{ flex: 1, padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, boxSizing: "border-box", outline: "none" }} />
           </div>}
-          <input value={loginEmail} onChange={e => { setLoginEmail(e.target.value); setLoginErr(''); }} placeholder="UCM email (@ucmo.edu)"
+          <input value={loginEmail} onChange={e => { setLoginEmail(e.target.value); setLoginErr(''); }} placeholder="UCM email (@ucmo.edu)" aria-label="UCM email"
             style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: 8, boxSizing: "border-box", outline: "none" }} />
-          <input value={loginPass} onChange={e => { setLoginPass(e.target.value); setLoginErr(''); }} placeholder={isSignup ? "Create a password (6+ characters)" : "Password"} type="password"
+          <input value={loginPass} onChange={e => { setLoginPass(e.target.value); setLoginErr(''); }} placeholder={isSignup ? "Create a password (6+ characters)" : "Password"} type="password" aria-label="Password"
             style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: isSignup ? 8 : 12, boxSizing: "border-box", outline: "none" }} />
-          {isSignup && <input value={signupCode} onChange={e => { setSignupCode(e.target.value); setLoginErr(''); }} placeholder="Course code (provided by Dr. Beggs)"
+          {isSignup && <input value={signupCode} onChange={e => { setSignupCode(e.target.value); setLoginErr(''); }} placeholder="Course code (provided by Dr. Beggs)" aria-label="Course code"
             onKeyDown={e => { if (e.key === 'Enter') handleSignup(); }}
             style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: 4, boxSizing: "border-box", outline: "none" }} />}
           {isSignup && <div style={{ fontFamily: F.b, fontSize: 10, color: "#BBB", marginBottom: 12, paddingLeft: 2 }}>Example: MATH4850 or MATH3820</div>}
-          {loginErr && <div style={{ fontFamily: F.b, fontSize: 11, color: "#C0392B", marginBottom: 10, lineHeight: 1.4 }}>{loginErr}</div>}
+          {loginErr && <div role="alert" aria-live="assertive" style={{ fontFamily: F.b, fontSize: 11, color: "#C0392B", marginBottom: 10, lineHeight: 1.4 }}>{loginErr}</div>}
           <button onClick={isSignup ? handleSignup : handleLogin}
             style={{ width: "100%", padding: "10px", background: "#CF202E", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
             {isSignup ? "Create Account" : "Sign In"}
@@ -414,12 +414,12 @@ export default function App() {
     return (
       <div>
         <div style={{ borderBottom: "1px solid #E8E6E1", background: "#fff" }}>
-          <div style={{ maxWidth: 600, margin: "0 auto", padding: "10px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <main style={{ maxWidth: 600, margin: "0 auto", padding: "10px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ fontFamily: F.b, fontSize: 11, color: "#999" }}>{user.profile.first_name} {user.profile.last_name} ({user.profile.role})</span>
             <button onClick={handleLogout} style={{ fontFamily: F.b, fontSize: 10, color: "#888", background: "none", border: "1px solid #E0DDD8", borderRadius: 4, padding: "3px 8px", cursor: "pointer" }}>Sign out</button>
           </div>
         </div>
-        <div style={{ maxWidth: 600, margin: "0 auto", padding: "40px 20px" }}>
+        <main style={{ maxWidth: 600, margin: "0 auto", padding: "40px 20px" }}>
           <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>Select Course</h2>
           {user.courses.map(k => {
             const co = COURSES[k]; if (!co) return null;
@@ -481,22 +481,23 @@ export default function App() {
 
     return (
       <div>
-        <div style={{ borderBottom: "1px solid #E8E6E1", background: "#fff", position: "sticky", top: 0, zIndex: 10 }}>
+        <a href="#main-content" className="skip-link">Skip to main content</a>
+        <header style={{ borderBottom: "1px solid #E8E6E1", background: "#fff", position: "sticky", top: 0, zIndex: 10 }}>
           <div style={{ maxWidth: 780, margin: "0 auto", padding: "10px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <button onClick={() => setCk(null)} style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#888" }}>← Back</button>
-              <div style={{ width: 1, height: 14, background: "#E0DDD8" }} />
+              <button onClick={() => setCk(null)} aria-label="Back to course list" style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#888" }}>← Back</button>
+              <div style={{ width: 1, height: 14, background: "#E0DDD8" }} aria-hidden="true" />
               <span style={{ fontFamily: F.d, fontSize: 14, fontWeight: 600 }}>{c.short}</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <a href={CAL_LINK} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 12px", background: "#FFF5F5", border: "1px solid #FCDEDE", borderRadius: 7, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#CF202E", textDecoration: "none" }}>📅 Meet with Dr. Beggs</a>
-              <a href="mailto:mbeggs@ucmo.edu" style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 12px", background: "#F5F5F5", border: "1px solid #E8E6E1", borderRadius: 7, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", textDecoration: "none" }}>✉ Email Dr. Beggs</a>
-              <button onClick={handleLogout} style={{ fontFamily: F.b, fontSize: 10, color: "#888", background: "none", border: "1px solid #E0DDD8", borderRadius: 4, padding: "3px 8px", cursor: "pointer" }}>Sign out</button>
+              <a href={CAL_LINK} target="_blank" rel="noopener noreferrer" aria-label="Schedule a meeting with Dr. Beggs" style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 12px", background: "#FFF5F5", border: "1px solid #FCDEDE", borderRadius: 7, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#CF202E", textDecoration: "none" }}>📅 Meet with Dr. Beggs</a>
+              <a href="mailto:mbeggs@ucmo.edu" aria-label="Email Dr. Beggs" style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 12px", background: "#F5F5F5", border: "1px solid #E8E6E1", borderRadius: 7, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", textDecoration: "none" }}>✉ Email Dr. Beggs</a>
+              <button onClick={handleLogout} aria-label="Sign out" style={{ fontFamily: F.b, fontSize: 11, color: "#888", background: "none", border: "1px solid #E0DDD8", borderRadius: 4, padding: "3px 8px", cursor: "pointer" }}>Sign out</button>
             </div>
           </div>
-        </div>
+        </header>
 
-        <div style={{ maxWidth: 780, margin: "0 auto", padding: "22px 20px" }}>
+        <main id="main-content" style={{ maxWidth: 780, margin: "0 auto", padding: "22px 20px" }}>
           {/* Dashboard */}
           <div style={{ background: "#fff", border: `2px solid ${(TM[grade] || TM.F).c}`, borderRadius: 14, padding: "22px", marginBottom: 18 }}>
             <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
@@ -550,8 +551,9 @@ export default function App() {
                     <span style={{ fontFamily: F.b, fontSize: 10, color: "#DDD" }}>Coming soon</span>
                   </div>;
                   return <div key={a.id} style={{ borderBottom: i < grpA.length - 1 ? "1px solid #F5F3EF" : "none" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", cursor: "pointer" }}
+                    <div role="checkbox" aria-checked={isChecked} aria-label={`${a.name} - ${a.eval}`} tabIndex={0} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", cursor: "pointer" }}
                       onClick={() => handleCheck(a.id)}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCheck(a.id); } }}
                       onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                       <div style={{ width: 22, height: 22, borderRadius: 6, border: isChecked ? "none" : "2px solid #D0CEC9", background: isChecked ? "#CF202E" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", transition: "all .2s", flexShrink: 0 }}>
                         {isChecked && <span style={{ color: "#fff", fontSize: 13, fontWeight: 700 }}>✓</span>}
@@ -576,17 +578,17 @@ export default function App() {
           })}
 
           {/* Token Modal */}
-          {modal && <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.3)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }} onClick={() => setModal(null)}>
+          {modal && <div role="dialog" aria-modal="true" aria-label="Submit a token" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.3)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }} onClick={() => setModal(null)}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: "24px", maxWidth: 420, width: "90%", boxShadow: "0 12px 40px rgba(0,0,0,.15)" }}>
-              <div style={{ fontFamily: F.d, fontSize: 18, fontWeight: 600, marginBottom: 4 }}>Submit a Token</div>
+              <h2 style={{ fontFamily: F.d, fontSize: 18, fontWeight: 600, marginBottom: 4 }}>Submit a Token</h2>
               <div style={{ fontFamily: F.b, fontSize: 13, color: "#555", marginBottom: 14 }}>{modal.name}</div>
               <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 6 }}>What is this token for?</div>
               <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
                 {[{ v: "revision", l: "I revised this" }, { v: "late", l: "I'm submitting late" }, { v: "extra", l: "Using an extra token" }].map(o => <button key={o.v} onClick={() => setTfType(o.v)} style={{ padding: "7px 14px", borderRadius: 6, fontFamily: F.b, fontSize: 11, cursor: "pointer", background: tfType === o.v ? c.color : "#fff", color: tfType === o.v ? "#fff" : "#555", border: tfType === o.v ? `1px solid ${c.color}` : "1px solid #E0DDD8", flex: 1, textAlign: "center", minWidth: o.v === "extra" ? "100%" : "auto" }}>{o.l}</button>)}
               </div>
-              {tfType === "extra" && <input value={tfExtra} onChange={e => setTfExtra(e.target.value)} placeholder="List the extra token assignment you completed" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 8, boxSizing: "border-box" }} />}
-              <input value={tfLink} onChange={e => setTfLink(e.target.value)} placeholder="Paste a link to your work (Google Doc, Slides, Canva, etc.)" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 8, boxSizing: "border-box" }} />
-              <input value={tfNote} onChange={e => setTfNote(e.target.value)} placeholder="Note for Dr. Beggs (optional)" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 14, boxSizing: "border-box" }} />
+              {tfType === "extra" && <input value={tfExtra} onChange={e => setTfExtra(e.target.value)} placeholder="List the extra token assignment you completed" aria-label="Extra token activity" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 8, boxSizing: "border-box" }} />}
+              <input value={tfLink} onChange={e => setTfLink(e.target.value)} placeholder="Paste a link to your work (Google Doc, Slides, Canva, etc.)" aria-label="Link to your work" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 8, boxSizing: "border-box" }} />
+              <input value={tfNote} onChange={e => setTfNote(e.target.value)} placeholder="Note for Dr. Beggs (optional)" aria-label="Note for Dr. Beggs" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 14, boxSizing: "border-box" }} />
               <div style={{ display: "flex", gap: 8 }}>
                 <button onClick={handleToken} style={{ padding: "8px 18px", background: c.color, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600 }}>Submit Token</button>
                 <button onClick={() => setModal(null)} style={{ padding: "8px 14px", background: "#F0EEEA", color: "#888", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 12 }}>Cancel</button>
@@ -637,7 +639,7 @@ export default function App() {
                         onMouseEnter={e => { e.currentTarget.style.background = "#DCEEFB"; e.currentTarget.style.borderColor = "#1565C0"; }}
                         onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#E0DDD8"; }}>
                         {formatDate(d.teach_date)}
-                        {d.note && <div style={{ fontSize: 8, color: "#C0392B", marginTop: 1 }}>⚠ {d.note}</div>}
+                        {d.note && <div style={{ fontSize: 11, color: "#C0392B", marginTop: 1 }}>⚠ {d.note}</div>}
                       </button>)}
                     </div>
                   </div> : <div style={{ fontFamily: F.b, fontSize: 11, color: "#999" }}>Teaching window has closed.</div>}
@@ -658,7 +660,7 @@ export default function App() {
             <div style={{ fontFamily: F.b, fontSize: 11, color: "#888", marginBottom: 10, lineHeight: 1.5 }}>These do not affect your letter grade. They contribute to your educator disposition assessment.</div>
             {c.classPrep.map((cp, i) => {
               const done = !!myPrep[cp.id];
-              return <div key={cp.id} onClick={() => handlePrep(cp.id)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 4px", borderBottom: i < c.classPrep.length - 1 ? "1px solid #F5F3EF" : "none", cursor: "pointer" }}
+              return <div key={cp.id} role="checkbox" aria-checked={done} aria-label={`${cp.name} - Completion`} tabIndex={0} onClick={() => handlePrep(cp.id)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePrep(cp.id); } }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 4px", borderBottom: i < c.classPrep.length - 1 ? "1px solid #F5F3EF" : "none", cursor: "pointer" }}
                 onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                 <div style={{ width: 20, height: 20, borderRadius: 5, border: done ? "none" : "2px solid #D0CEC9", background: done ? c.color : "#fff", display: "flex", alignItems: "center", justifyContent: "center", transition: "all .2s", flexShrink: 0 }}>{done && <span style={{ color: "#fff", fontSize: 11, fontWeight: 700 }}>✓</span>}</div>
                 <div style={{ flex: 1 }}>
@@ -680,7 +682,7 @@ export default function App() {
             <div style={{ fontFamily: F.b, fontSize: 11, color: "#888", marginBottom: 12 }}>Every item in a track must be checked off to earn that grade.</div>
             {["A", "B", "C", "D"].map(g => { const t = c.tracks[g]; const m = TM[g]; const isOn = grade === g;
               return <div key={g} style={{ marginBottom: 8, padding: "8px 12px", borderRadius: 8, border: isOn ? `2px solid ${m.c}` : "1px solid #F0EEEA", position: "relative" }}>
-                {isOn && <span style={{ position: "absolute", top: 6, right: 10, fontFamily: F.b, fontSize: 8, fontWeight: 700, color: "#fff", background: m.c, padding: "2px 6px", borderRadius: 6 }}>YOUR TRACK</span>}
+                {isOn && <span style={{ position: "absolute", top: 6, right: 10, fontFamily: F.b, fontSize: 11, fontWeight: 700, color: "#fff", background: m.c, padding: "2px 6px", borderRadius: 6 }}>YOUR TRACK</span>}
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
                   <div style={{ width: 20, height: 20, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 11, fontWeight: 700, color: m.c }}>{g}</div>
                   <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#333" }}>{g} Track</span>
@@ -713,7 +715,7 @@ export default function App() {
               {myToks.map((t, i) => { const a = c.assignments.find(x => x.id === t.assignment_id) || (c.tokenGroups || {})[t.assignment_id]; return <div key={t.id} style={{ display: "flex", gap: 6, padding: "4px 0", borderBottom: i < myToks.length - 1 ? "1px solid #F5F3EF" : "none", fontFamily: F.b, fontSize: 11, color: "#777" }}><span style={{ color: "#CCC" }}>✦</span>{t.token_type === "revision" ? "Revision" : "Late"}: {a?.name || t.assignment_id}<span style={{ marginLeft: "auto", fontSize: 10, color: "#CCC" }}>{new Date(t.submitted_at).toLocaleDateString()}</span></div>; })}
             </div>}
           </div>}
-        </div>
+        </main>
       </div>
     );
   }
@@ -788,9 +790,9 @@ export default function App() {
             <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: "#555" }}>Grade by Assignment</span>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
-            <input value={batchSearch} onChange={e => setBatchSearch(e.target.value)} placeholder="Filter..." style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 10, background: "#fff", width: 80, outline: "none" }} />
-            <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 10, background: "#fff" }}><option value="first">First</option><option value="last">Last</option></select>
-            <select value={batchAsgn} onChange={e => setBatchAsgn(e.target.value)} style={{ padding: "5px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, background: "#fff" }}>
+            <input value={batchSearch} onChange={e => setBatchSearch(e.target.value)} placeholder="Filter..." aria-label="Filter students" style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 10, background: "#fff", width: 80, outline: "none" }} />
+            <select aria-label="Sort order" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 10, background: "#fff" }}><option value="first">First</option><option value="last">Last</option></select>
+            <select aria-label="Select assignment" value={batchAsgn} onChange={e => setBatchAsgn(e.target.value)} style={{ padding: "5px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, background: "#fff" }}>
               {relAssignments.map(id => { const x = c.assignments.find(a => a.id === id); return <option key={id} value={id}>{x?.name || id}</option>; })}
             </select>
           </div>
@@ -824,7 +826,7 @@ export default function App() {
                 </div>
                 {note && !isEN && <div style={{ padding: "2px 16px 6px 136px", fontFamily: F.b, fontSize: 10, color: "#666", fontStyle: "italic" }}>Note: {note}</div>}
                 {isEN && <div style={{ padding: "4px 16px 8px 136px", display: "flex", gap: 6 }}>
-                  <input value={noteVal} onChange={e => setNoteVal(e.target.value)} placeholder="Feedback note..." autoFocus style={{ flex: 1, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={e => { if (e.key === "Enter") { handleInstrNote(s.id, batchAsgn, noteVal); setNoteFor(null); } }} />
+                  <input value={noteVal} onChange={e => setNoteVal(e.target.value)} placeholder="Feedback note..." aria-label="Feedback note" autoFocus style={{ flex: 1, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={e => { if (e.key === "Enter") { handleInstrNote(s.id, batchAsgn, noteVal); setNoteFor(null); } }} />
                   <button onClick={() => { handleInstrNote(s.id, batchAsgn, noteVal); setNoteFor(null); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
                 </div>}
               </div>;
@@ -857,8 +859,8 @@ export default function App() {
             <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: "#555" }}>Track Class Prep</span>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
-            <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 10, background: "#fff" }}><option value="first">First</option><option value="last">Last</option></select>
-            <select value={prepItem} onChange={e => setPrepItem(e.target.value)} style={{ padding: "5px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, background: "#fff" }}>
+            <select aria-label="Sort order" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 10, background: "#fff" }}><option value="first">First</option><option value="last">Last</option></select>
+            <select aria-label="Select class prep item" value={prepItem} onChange={e => setPrepItem(e.target.value)} style={{ padding: "5px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, background: "#fff" }}>
               {cpItems.map(cp => <option key={cp.id} value={cp.id}>{cp.name}</option>)}
             </select>
           </div>
@@ -894,26 +896,27 @@ export default function App() {
   // MAIN INSTRUCTOR VIEW
   return (
     <div>
-      <div style={{ borderBottom: "1px solid #E8E6E1", background: "#fff", position: "sticky", top: 0, zIndex: 10 }}>
+      <a href="#main-content" className="skip-link">Skip to main content</a>
+      <header style={{ borderBottom: "1px solid #E8E6E1", background: "#fff", position: "sticky", top: 0, zIndex: 10 }}>
         <div style={{ maxWidth: 1000, margin: "0 auto", padding: "10px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button onClick={handleLogout} style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#888" }}>← Sign out</button>
-            <div style={{ width: 1, height: 14, background: "#E0DDD8" }} />
-            <select value={ck} onChange={e => setCk(e.target.value)} style={{ fontFamily: F.d, fontSize: 14, fontWeight: 600, border: "none", background: "none", cursor: "pointer", outline: "none" }}>{user.courses.map(k => <option key={k} value={k}>{COURSES[k]?.short || k}</option>)}</select>
-            <span style={{ fontFamily: F.b, fontSize: 10, color: "#999" }}>{students.length} students</span>
+            <button onClick={handleLogout} aria-label="Sign out" style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#888" }}>← Sign out</button>
+            <div style={{ width: 1, height: 14, background: "#E0DDD8" }} aria-hidden="true" />
+            <select aria-label="Select course" value={ck} onChange={e => setCk(e.target.value)} style={{ fontFamily: F.d, fontSize: 14, fontWeight: 600, border: "none", background: "none", cursor: "pointer", outline: "none" }}>{user.courses.map(k => <option key={k} value={k}>{COURSES[k]?.short || k}</option>)}</select>
+            <span style={{ fontFamily: F.b, fontSize: 11, color: "#999" }}>{students.length} students</span>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
-            {pending.length > 0 && tab !== "queue" && <button onClick={() => setTab("queue")} style={{ padding: "3px 10px", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 10, fontWeight: 600, color: "#856404", cursor: "pointer" }}>{pending.length} token{pending.length !== 1 ? "s" : ""}</button>}
-            <button onClick={() => { setBatch(true); setBatchAsgn(relAssignments[0] || ""); }} style={{ padding: "5px 12px", background: c.color, color: "#fff", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Grade by Assignment</button>
-            {(c.classPrep && c.classPrep.length > 0) && <button onClick={() => { setPrepView(true); setPrepItem((c.classPrep || [])[0]?.id || ""); }} style={{ padding: "5px 12px", background: "#fff", color: c.color, border: `1px solid ${c.color}`, borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Track Class Prep</button>}
+            {pending.length > 0 && tab !== "queue" && <button onClick={() => setTab("queue")} aria-label={`${pending.length} pending token submissions`} style={{ padding: "3px 10px", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>{pending.length} token{pending.length !== 1 ? "s" : ""}</button>}
+            <button onClick={() => { setBatch(true); setBatchAsgn(relAssignments[0] || ""); }} aria-label="Grade by assignment" style={{ padding: "5px 12px", background: c.color, color: "#fff", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Grade by Assignment</button>
+            {(c.classPrep && c.classPrep.length > 0) && <button onClick={() => { setPrepView(true); setPrepItem((c.classPrep || [])[0]?.id || ""); }} aria-label="Track class prep" style={{ padding: "5px 12px", background: "#fff", color: c.color, border: `1px solid ${c.color}`, borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Track Class Prep</button>}
           </div>
         </div>
-      </div>
+      </header>
 
-      <div style={{ maxWidth: 1000, margin: "0 auto", padding: "18px 20px" }}>
-        <div style={{ display: "flex", gap: 0, marginBottom: 18, borderBottom: "2px solid #F0EEEA" }}>
-          {[{ k: "overview", l: "Overview" }, { k: "manage", l: "Manage" }, { k: "queue", l: "Tokens" }, { k: "tracks", l: "Tracks" }].map(t => <button key={t.k} onClick={() => setTab(t.k)} style={{ padding: "8px 14px", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: tab === t.k ? c.color : "#999", background: "none", borderBottom: tab === t.k ? `2px solid ${c.color}` : "2px solid transparent", marginBottom: -2, position: "relative" }}>{t.l}{t.k === "queue" && pending.length > 0 && <span style={{ position: "absolute", top: 4, right: 2, minWidth: 16, height: 16, borderRadius: 8, background: "#CF202E", color: "#fff", fontFamily: F.b, fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{pending.length}</span>}</button>)}
-        </div>
+      <main id="main-content" style={{ maxWidth: 1000, margin: "0 auto", padding: "18px 20px" }}>
+        <nav role="tablist" aria-label="Dashboard sections" style={{ display: "flex", gap: 0, marginBottom: 18, borderBottom: "2px solid #F0EEEA" }}>
+          {[{ k: "overview", l: "Overview" }, { k: "manage", l: "Manage" }, { k: "queue", l: "Tokens" }, { k: "tracks", l: "Tracks" }].map(t => <button role="tab" aria-selected={tab === t.k} key={t.k} onClick={() => setTab(t.k)} style={{ padding: "8px 14px", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: tab === t.k ? c.color : "#999", background: "none", borderBottom: tab === t.k ? `2px solid ${c.color}` : "2px solid transparent", marginBottom: -2, position: "relative" }}>{t.l}{t.k === "queue" && pending.length > 0 && <span aria-label={`${pending.length} pending`} style={{ position: "absolute", top: 4, right: 2, minWidth: 16, height: 16, borderRadius: 8, background: "#CF202E", color: "#fff", fontFamily: F.b, fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{pending.length}</span>}</button>)}
+        </nav>
 
         {/* OVERVIEW */}
         {tab === "overview" && <div>
@@ -927,19 +930,19 @@ export default function App() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
             <Lbl s={{ marginBottom: 0 }}>Students (Your Records)</Lbl>
             <div style={{ display: "flex", gap: 4 }}>
-              <input value={gridSearch} onChange={e => setGridSearch(e.target.value)} placeholder="Filter..." style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 10, color: "#666", background: "#fff", width: 80, outline: "none" }} />
-              <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: "2px 6px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 10, color: "#666", background: "#fff", cursor: "pointer" }}><option value="first">First</option><option value="last">Last</option><option value="grade">Track</option></select>
-              <button onClick={exportCSV} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 10, color: "#666", background: "#fff", cursor: "pointer" }}>📥 CSV</button>
-              <button onClick={refresh} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 10, color: "#666", background: "#fff", cursor: "pointer" }}>↻ Refresh</button>
+              <input value={gridSearch} onChange={e => setGridSearch(e.target.value)} placeholder="Filter..." aria-label="Filter students" style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 10, color: "#666", background: "#fff", width: 80, outline: "none" }} />
+              <select aria-label="Sort order" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: "2px 6px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 10, color: "#666", background: "#fff", cursor: "pointer" }}><option value="first">First</option><option value="last">Last</option><option value="grade">Track</option></select>
+              <button aria-label="Export CSV" onClick={exportCSV} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 10, color: "#666", background: "#fff", cursor: "pointer" }}>📥 CSV</button>
+              <button aria-label="Refresh data" onClick={refresh} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 10, color: "#666", background: "#fff", cursor: "pointer" }}>↻ Refresh</button>
             </div>
           </div>
 
           <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 16px", borderBottom: "2px solid #F0EEEA", background: "#FAFAF7" }}>
               <div style={{ width: 24 }} />
-              <div style={{ width: 120, fontFamily: F.b, fontSize: 8, fontWeight: 600, color: "#CCC" }}>Student</div>
-              <div style={{ flex: 1, display: "flex", gap: 2 }}>{relAssignments.map(id => { const x = c.assignments.find(a => a.id === id); return <div key={id} style={{ flex: 1, minWidth: 12, maxWidth: 22, fontFamily: F.b, fontSize: 6, fontWeight: 600, color: "#CCC", textAlign: "center", overflow: "hidden" }} title={x?.name}>{(x?.name || "").substring(0, 4)}</div>; })}</div>
-              <div style={{ width: 50, fontFamily: F.b, fontSize: 8, fontWeight: 600, color: "#CCC", textAlign: "right" }}>Self</div>
+              <div style={{ width: 120, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#CCC" }}>Student</div>
+              <div style={{ flex: 1, display: "flex", gap: 2 }}>{relAssignments.map(id => { const x = c.assignments.find(a => a.id === id); return <div key={id} style={{ flex: 1, minWidth: 12, maxWidth: 22, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#CCC", textAlign: "center", overflow: "hidden" }} title={x?.name}>{(x?.name || "").substring(0, 4)}</div>; })}</div>
+              <div style={{ width: 50, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#CCC", textAlign: "right" }}>Self</div>
             </div>
             {(() => { const gq = gridSearch.toLowerCase(); const gridFiltered = gq ? sorted.filter(s => `${s.first} ${s.last}`.toLowerCase().includes(gq) || `${s.last}, ${s.first}`.toLowerCase().includes(gq)) : sorted; return gridFiltered.map((s, si) => {
               const ig = calcGrade(iS[s.id] || {}, relAssignments, ck); const sg = calcGrade(sC[s.id] || {}, relAssignments, ck);
@@ -949,7 +952,7 @@ export default function App() {
                 <div style={{ width: 120, flexShrink: 0, fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sortBy === "last" ? `${s.last}, ${s.first}` : s.name}</div>
                 <div style={{ flex: 1, display: "flex", gap: 2 }}>
                   {relAssignments.map(id => { const st = (iS[s.id] || {})[id] || "";
-                    return <div key={id} title={c.assignments.find(a => a.id === id)?.name} style={{ flex: 1, minWidth: 12, maxWidth: 22, height: 16, borderRadius: 3, background: st === "mastery" ? "#D4EDDA" : st === "revision" ? "#FFF3CD" : "#F5F4F0", border: !st ? "1.5px dashed #E8E6E1" : "1.5px solid transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 6, fontWeight: 700, color: st === "mastery" ? "#2D6A4F" : st === "revision" ? "#856404" : "transparent" }}>{st === "mastery" ? "M" : st === "revision" ? "R" : ""}</div>;
+                    return <div key={id} title={c.assignments.find(a => a.id === id)?.name} style={{ flex: 1, minWidth: 12, maxWidth: 22, height: 16, borderRadius: 3, background: st === "mastery" ? "#D4EDDA" : st === "revision" ? "#FFF3CD" : "#F5F4F0", border: !st ? "1.5px dashed #E8E6E1" : "1.5px solid transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: st === "mastery" ? "#2D6A4F" : st === "revision" ? "#856404" : "transparent" }}>{st === "mastery" ? "M" : st === "revision" ? "R" : ""}</div>;
                   })}
                 </div>
                 <div style={{ width: 50, textAlign: "right", fontFamily: F.b, fontSize: 9, color: mm ? "#E65100" : "#CCC" }}>{sg === "early" ? "—" : sg}{mm ? " ⚠" : ""}</div>
@@ -974,7 +977,7 @@ export default function App() {
           <div style={{ marginTop: 20 }}>
             <Lbl s={{ marginBottom: 8 }}>Token Lookup</Lbl>
             <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", padding: "12px 16px" }}>
-              <input value={tokSearch} onChange={e => { setTokSearch(e.target.value); setTokExpand(null); }} placeholder="Search student name..." 
+              <input value={tokSearch} onChange={e => { setTokSearch(e.target.value); setTokExpand(null); }} placeholder="Search student name..." aria-label="Search student by name" 
                 style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, boxSizing: "border-box", outline: "none", marginBottom: tokSearch.length > 0 ? 8 : 0 }} />
               {tokSearch.length > 0 && (() => {
                 const q = tokSearch.toLowerCase();
@@ -1016,7 +1019,7 @@ export default function App() {
               </div>)}
             </div>
             <div style={{ marginTop: 10 }}>
-              <input value={gridSearch} onChange={e => setGridSearch(e.target.value)} placeholder="Look up a student's class prep..." style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, boxSizing: "border-box", outline: "none" }} />
+              <input value={gridSearch} onChange={e => setGridSearch(e.target.value)} placeholder="Look up a student's class prep..." aria-label="Search student class prep" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, boxSizing: "border-box", outline: "none" }} />
               {gridSearch.length > 0 && (() => {
                 const q = gridSearch.toLowerCase();
                 const matches = students.filter(s => `${s.first} ${s.last}`.toLowerCase().includes(q) || `${s.last}, ${s.first}`.toLowerCase().includes(q));
@@ -1171,7 +1174,7 @@ export default function App() {
                 return <div key={id} style={{ borderBottom: i < grp.ids.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px" }}
                     onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                    <div onClick={() => handleToggleRel(id)} style={{ width: 34, height: 18, borderRadius: 9, background: isR ? c.color : "#E0DDD8", position: "relative", transition: "background .3s", flexShrink: 0, cursor: "pointer" }}><div style={{ width: 12, height: 12, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: isR ? 19 : 3, transition: "left .3s", boxShadow: "0 1px 2px rgba(0,0,0,.15)" }} /></div>
+                    <button role="switch" aria-checked={isR} aria-label={a?.name || cp?.name || id} onClick={() => handleToggleRel(id)} style={{ width: 34, height: 18, borderRadius: 9, background: isR ? c.color : "#E0DDD8", border: "none", padding: 0, position: "relative", transition: "background .3s", flexShrink: 0, cursor: "pointer" }}><div style={{ width: 12, height: 12, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: isR ? 19 : 3, transition: "left .3s", boxShadow: "0 1px 2px rgba(0,0,0,.15)" }} /></button>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{a.name}</div>
                       {dd && !isEditingDue && <div style={{ fontFamily: F.b, fontSize: 10, color: "#888", marginTop: 1 }}>Due: {dd}</div>}
@@ -1180,7 +1183,7 @@ export default function App() {
                     {a.eval === "mastery" ? <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" /> : <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
                   </div>
                   {isEditingDue && <div style={{ padding: "4px 16px 10px 60px", display: "flex", gap: 6 }}>
-                    <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class Mon 3/24" autoFocus
+                    <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class Mon 3/24" aria-label="Due date" autoFocus
                       style={{ flex: 1, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }}
                       onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, id, editDueVal); setEditDue(null); refresh(); } }} />
                     <button onClick={async () => { await upsertDueDate(ck, id, editDueVal); setEditDue(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
@@ -1198,7 +1201,7 @@ export default function App() {
               return <div key={cp.id} style={{ borderBottom: i < c.classPrep.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px" }}
                   onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                  <div onClick={() => handleToggleRel(cp.id)} style={{ width: 34, height: 18, borderRadius: 9, background: isR ? c.color : "#E0DDD8", position: "relative", transition: "background .3s", flexShrink: 0, cursor: "pointer" }}><div style={{ width: 12, height: 12, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: isR ? 19 : 3, transition: "left .3s", boxShadow: "0 1px 2px rgba(0,0,0,.15)" }} /></div>
+                  <button role="switch" aria-checked={isR} aria-label={cp.name} onClick={() => handleToggleRel(cp.id)} style={{ width: 34, height: 18, borderRadius: 9, background: isR ? c.color : "#E0DDD8", position: "relative", transition: "background .3s", flexShrink: 0, cursor: "pointer", border: "none", padding: 0 }}><div style={{ width: 12, height: 12, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: isR ? 19 : 3, transition: "left .3s", boxShadow: "0 1px 2px rgba(0,0,0,.15)" }} /></button>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{cp.name}</div>
                     {dd && !isEditingDue && <div style={{ fontFamily: F.b, fontSize: 10, color: "#888", marginTop: 1 }}>Due: {dd}</div>}
@@ -1207,7 +1210,7 @@ export default function App() {
                   <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />
                 </div>
                 {isEditingDue && <div style={{ padding: "4px 16px 10px 60px", display: "flex", gap: 6 }}>
-                  <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class Mon 3/24" autoFocus style={{ flex: 1, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, cp.id, editDueVal); setEditDue(null); refresh(); } }} />
+                  <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class Mon 3/24" aria-label="Due date" autoFocus style={{ flex: 1, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, cp.id, editDueVal); setEditDue(null); refresh(); } }} />
                   <button onClick={async () => { await upsertDueDate(ck, cp.id, editDueVal); setEditDue(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
                   <button onClick={async () => { await upsertDueDate(ck, cp.id, ''); setEditDue(null); refresh(); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#999", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 10, cursor: "pointer" }}>Clear</button>
                 </div>}
@@ -1221,7 +1224,7 @@ export default function App() {
             Students submit tokens for revisions or late work. Review in Brightspace, then update here.
           </div>
           <div style={{ display: "flex", gap: 0, marginBottom: 12, background: "#F5F4F0", borderRadius: 8, padding: 3 }}>
-            {[{ k: "pending", l: `Pending (${pending.length})` }, { k: "resolved", l: "Resolved" }, { k: "all", l: "All" }].map(f => <button key={f.k} onClick={() => setQueueFilter(f.k)} style={{ flex: 1, padding: "6px 10px", borderRadius: 6, border: "none", fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer", background: queueFilter === f.k ? "#fff" : "transparent", color: queueFilter === f.k ? "#1A1A1A" : "#999", boxShadow: queueFilter === f.k ? "0 1px 3px rgba(0,0,0,.1)" : "none" }}>{f.l}</button>)}
+            {[{ k: "pending", l: `Pending (${pending.length})` }, { k: "resolved", l: "Resolved" }, { k: "all", l: "All" }].map(f => <button aria-pressed={queueFilter === f.k} key={f.k} onClick={() => setQueueFilter(f.k)} style={{ flex: 1, padding: "6px 10px", borderRadius: 6, border: "none", fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer", background: queueFilter === f.k ? "#fff" : "transparent", color: queueFilter === f.k ? "#1A1A1A" : "#999", boxShadow: queueFilter === f.k ? "0 1px 3px rgba(0,0,0,.1)" : "none" }}>{f.l}</button>)}
           </div>
           {queueFilter === "pending" && pending.length === 0 && <div style={{ background: "#D4EDDA", borderRadius: 10, padding: "24px", textAlign: "center", marginBottom: 16 }}><div style={{ fontSize: 22, marginBottom: 4 }}>✓</div><div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: "#2D6A4F" }}>All caught up!</div></div>}
           {(() => {
@@ -1280,7 +1283,7 @@ export default function App() {
             </div>
           </div>
         </div>}
-      </div>
+      </main>
     </div>
   );
 }
