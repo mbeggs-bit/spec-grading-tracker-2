@@ -405,6 +405,10 @@ export default function App() {
             {isSignup ? "Already have an account? Sign in" : "First time? Create account"}
           </button>
         </div>
+        <div style={{ marginTop: 20, padding: "12px 16px", background: "#F9F8F5", borderRadius: 8, border: "1px solid #E8E6E1" }}>
+          <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 4 }}>Accessibility Statement</div>
+          <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", lineHeight: 1.5 }}>MyTrack is committed to ensuring digital accessibility for all users. This application conforms to WCAG 2.1 Level AA standards and is designed to work with screen readers, keyboard navigation, and assistive technologies. If you experience any accessibility barriers, please contact Dr. Beggs at <a href="mailto:mbeggs@ucmo.edu" style={{ color: "#1565C0" }}>mbeggs@ucmo.edu</a>.</div>
+        </div>
       </div>
     </main>
   );
