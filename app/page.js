@@ -1097,51 +1097,65 @@ export default function App() {
 
                 {upcoming.length > 0 && <div style={{ marginBottom: 14 }}>
                   <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 6 }}>Plans due in the next 7 days</div>
-                  <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-                    {upcoming.map((ts, i) => {
-                      const a = c.assignments.find(x => x.id === ts.assignment_id);
-                      const sName = `${ts.profiles?.first_name || ''} ${ts.profiles?.last_name || ''}`.trim();
-                      const initials = `${(ts.profiles?.first_name || '')[0] || ''}${(ts.profiles?.last_name || '')[0] || ''}`;
-                      const dueDate = new Date(ts.plan_due_date + 'T00:00:00');
+                  {(() => {
+                    // Group by due date, then by assignment
+                    const dateMap = {};
+                    upcoming.forEach(ts => {
+                      const key = ts.plan_due_date + '|' + ts.assignment_id;
+                      if (!dateMap[key]) dateMap[key] = { dueDate: ts.plan_due_date, aid: ts.assignment_id, students: [] };
+                      dateMap[key].students.push(ts);
+                    });
+                    const groups = Object.values(dateMap).sort((a, b) => a.dueDate === b.dueDate ? a.aid.localeCompare(b.aid) : a.dueDate.localeCompare(b.dueDate));
+                    return groups.map((grp, gi) => {
+                      const a = c.assignments.find(x => x.id === grp.aid);
+                      const dueDate = new Date(grp.dueDate + 'T00:00:00');
                       const daysUntil = Math.floor((dueDate - today) / (1000 * 60 * 60 * 24));
                       const badgeColor = daysUntil <= 0 ? { bg: "#FFF3CD", c: "#856404" } : daysUntil <= 2 ? { bg: "#FAEEDA", c: "#633806" } : { bg: "#F5F4F0", c: "#666" };
                       const dueLabel = daysUntil < 0 ? "Overdue" : daysUntil === 0 ? "Due tonight 11:59 PM" : daysUntil === 1 ? "Due tomorrow" : `${daysUntil} days`;
-                      const st = (iS[ts.profile_id] || {})[ts.assignment_id] || '';
-                      const circBg = st === 'mastery' ? '#D4EDDA' : st === 'revision' ? '#FFF3CD' : '#DCEEFB';
-                      const circColor = st === 'mastery' ? '#2D6A4F' : st === 'revision' ? '#856404' : '#1565C0';
-                      const noteKey = `teach_${ts.profile_id}_${ts.assignment_id}`;
-                      const isEditingNote = noteFor === noteKey;
-                      const existingNote = (iN[ts.profile_id] || {})[ts.assignment_id];
-                      return <div key={ts.id} style={{ borderBottom: i < upcoming.length - 1 ? "1px solid #F5F3EF" : "none", opacity: st === 'mastery' ? 0.5 : 1 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px" }}>
-                          <div style={{ width: 36, height: 36, borderRadius: "50%", background: circBg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: circColor, flexShrink: 0 }}>{st === 'mastery' ? '✓' : st === 'revision' ? 'R' : initials}</div>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, textDecoration: st === 'mastery' ? 'line-through' : 'none', color: st === 'mastery' ? '#767676' : '#1A1A1A' }}>{sName}</div>
-                            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{a?.name || ts.assignment_id} · Teaching {formatDate(ts.teach_date)}{st ? ` · ${st === 'mastery' ? 'Mastered' : 'Needs revision'}` : ''}</div>
-                          </div>
-                          <div style={{ textAlign: "right", marginRight: 4 }}>
-                            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>Plan due</div>
-                            <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{formatDate(ts.plan_due_date)}</div>
+                      return <div key={gi} style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden", marginBottom: 8 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", background: "#FAFAF7", borderBottom: "1px solid #F0EEEA" }}>
+                          <div>
+                            <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600 }}>{a?.name || grp.aid}</span>
+                            <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginLeft: 8 }}>Due: {formatDate(grp.dueDate)}</span>
                           </div>
                           <Pill t={dueLabel} bg={badgeColor.bg} c={badgeColor.c} />
                         </div>
-                        {!st && <div style={{ display: "flex", gap: 4, padding: "0 16px 8px 62px", alignItems: "center" }}>
-                          <button aria-label={`Mark ${sName} mastered`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'mastery'); refresh(); }} style={{ padding: "4px 10px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>M</button>
-                          <button aria-label={`Mark ${sName} revision`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'revision'); refresh(); }} style={{ padding: "4px 10px", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>R</button>
-                          <button aria-label={`Add note for ${sName}`} onClick={() => { setNoteFor(isEditingNote ? null : noteKey); setNoteVal(existingNote || ''); }} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: existingNote ? "#856404" : "#767676", cursor: "pointer", background: "#fff" }}>{existingNote ? "✎ Note" : "+ Note"}</button>
-                        </div>}
-                        {st === 'revision' && <div style={{ display: "flex", gap: 4, padding: "0 16px 8px 62px", alignItems: "center" }}>
-                          <button aria-label={`Mark ${sName} mastered`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'mastery'); refresh(); }} style={{ padding: "4px 10px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>→ M</button>
-                          <button aria-label={`Add note for ${sName}`} onClick={() => { setNoteFor(isEditingNote ? null : noteKey); setNoteVal(existingNote || ''); }} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: existingNote ? "#856404" : "#767676", cursor: "pointer", background: "#fff" }}>{existingNote ? "✎ Note" : "+ Note"}</button>
-                        </div>}
-                        {existingNote && !isEditingNote && <div style={{ padding: "0 16px 6px 62px", fontFamily: F.b, fontSize: 11, color: "#666", fontStyle: "italic" }}>Note: {existingNote}</div>}
-                        {isEditingNote && <div style={{ padding: "0 16px 8px 62px", display: "flex", gap: 6 }}>
-                          <input value={noteVal} onChange={e => setNoteVal(e.target.value)} placeholder="Feedback note..." aria-label="Feedback note" autoFocus style={{ flex: 1, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={async e => { if (e.key === "Enter") { await handleInstrNote(ts.profile_id, ts.assignment_id, noteVal); setNoteFor(null); } }} />
-                          <button onClick={async () => { await handleInstrNote(ts.profile_id, ts.assignment_id, noteVal); setNoteFor(null); }} style={{ padding: "4px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
-                        </div>}
+                        {grp.students.map((ts, si) => {
+                          const sName = `${ts.profiles?.first_name || ''} ${ts.profiles?.last_name || ''}`.trim();
+                          const initials = `${(ts.profiles?.first_name || '')[0] || ''}${(ts.profiles?.last_name || '')[0] || ''}`;
+                          const st = (iS[ts.profile_id] || {})[ts.assignment_id] || '';
+                          const circBg = st === 'mastery' ? '#D4EDDA' : st === 'revision' ? '#FFF3CD' : '#DCEEFB';
+                          const circColor = st === 'mastery' ? '#2D6A4F' : st === 'revision' ? '#856404' : '#1565C0';
+                          const noteKey = `teach_${ts.profile_id}_${ts.assignment_id}`;
+                          const isEditingNote = noteFor === noteKey;
+                          const existingNote = (iN[ts.profile_id] || {})[ts.assignment_id];
+                          return <div key={ts.id} style={{ borderBottom: si < grp.students.length - 1 ? "1px solid #F5F3EF" : "none", opacity: st === 'mastery' ? 0.5 : 1 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px" }}>
+                              <div style={{ width: 32, height: 32, borderRadius: "50%", background: circBg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: circColor, flexShrink: 0 }}>{st === 'mastery' ? '✓' : st === 'revision' ? 'R' : initials}</div>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, textDecoration: st === 'mastery' ? 'line-through' : 'none', color: st === 'mastery' ? '#767676' : '#1A1A1A' }}>{sName}</div>
+                                <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>Teaching {formatDate(ts.teach_date)}{st ? ` · ${st === 'mastery' ? 'Mastered' : 'Needs revision'}` : ''}</div>
+                              </div>
+                              {!st && <div style={{ display: "flex", gap: 4 }}>
+                                <button aria-label={`Mark ${sName} mastered`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'mastery'); refresh(); }} style={{ padding: "4px 10px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>M</button>
+                                <button aria-label={`Mark ${sName} revision`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'revision'); refresh(); }} style={{ padding: "4px 10px", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>R</button>
+                                <button aria-label={`Add note for ${sName}`} onClick={() => { setNoteFor(isEditingNote ? null : noteKey); setNoteVal(existingNote || ''); }} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: existingNote ? "#856404" : "#767676", cursor: "pointer", background: "#fff" }}>{existingNote ? "✎" : "+"}</button>
+                              </div>}
+                              {st === 'revision' && <div style={{ display: "flex", gap: 4 }}>
+                                <button aria-label={`Mark ${sName} mastered`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'mastery'); refresh(); }} style={{ padding: "4px 10px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>→ M</button>
+                                <button aria-label={`Add note for ${sName}`} onClick={() => { setNoteFor(isEditingNote ? null : noteKey); setNoteVal(existingNote || ''); }} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: existingNote ? "#856404" : "#767676", cursor: "pointer", background: "#fff" }}>{existingNote ? "✎" : "+"}</button>
+                              </div>}
+                            </div>
+                            {existingNote && !isEditingNote && <div style={{ padding: "0 16px 6px 58px", fontFamily: F.b, fontSize: 11, color: "#666", fontStyle: "italic" }}>Note: {existingNote}</div>}
+                            {isEditingNote && <div style={{ padding: "0 16px 8px 58px", display: "flex", gap: 6 }}>
+                              <input value={noteVal} onChange={e => setNoteVal(e.target.value)} placeholder="Feedback note..." aria-label="Feedback note" autoFocus style={{ flex: 1, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={async e => { if (e.key === "Enter") { await handleInstrNote(ts.profile_id, ts.assignment_id, noteVal); setNoteFor(null); } }} />
+                              <button onClick={async () => { await handleInstrNote(ts.profile_id, ts.assignment_id, noteVal); setNoteFor(null); }} style={{ padding: "4px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
+                            </div>}
+                          </div>;
+                        })}
                       </div>;
-                    })}
-                  </div>
+                    });
+                  })()}
                 </div>}
 
                 {/* Scheduled by date - collapsible */}
