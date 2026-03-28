@@ -797,13 +797,15 @@ export default function App() {
             <button onClick={() => { setBatch(false); setBatchSearch(''); }} aria-label="Back to overview" style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>← Overview</button>
             <h1 style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: "#555", margin: 0 }}>Grade by Assignment</h1>
           </div>
-          <div style={{ display: "flex", gap: 6 }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <input value={batchSearch} onChange={e => setBatchSearch(e.target.value)} placeholder="Filter..." aria-label="Filter students" style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: "#fff", width: 80, outline: "none" }} />
             <select aria-label="Sort order" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: "#fff" }}><option value="first">First</option><option value="last">Last</option></select>
-            <select aria-label="Select assignment" value={batchAsgn} onChange={e => setBatchAsgn(e.target.value)} style={{ padding: "5px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, background: "#fff" }}>
-              {relAssignments.map(id => { const x = c.assignments.find(a => a.id === id); return <option key={id} value={id}>{x?.name || id}</option>; })}
-            </select>
           </div>
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          <select aria-label="Select assignment" value={batchAsgn} onChange={e => setBatchAsgn(e.target.value)} style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, background: "#fff" }}>
+            {relAssignments.map(id => { const x = c.assignments.find(a => a.id === id); return <option key={id} value={id}>{x?.name || id}</option>; })}
+          </select>
         </div>
         {ba && <div>
           <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -1071,7 +1073,7 @@ export default function App() {
 
               // Upcoming (plan due in next 7 days)
               const upcoming = teachSel.filter(ts => {
-                const due = new Date(ts.plan_due_date + 'T12:00:00');
+                const due = new Date(ts.plan_due_date + 'T00:00:00');
                 return due >= today && due <= sevenDays;
               }).sort((a, b) => new Date(a.plan_due_date) - new Date(b.plan_due_date));
 
@@ -1100,8 +1102,8 @@ export default function App() {
                       const a = c.assignments.find(x => x.id === ts.assignment_id);
                       const sName = `${ts.profiles?.first_name || ''} ${ts.profiles?.last_name || ''}`.trim();
                       const initials = `${(ts.profiles?.first_name || '')[0] || ''}${(ts.profiles?.last_name || '')[0] || ''}`;
-                      const dueDate = new Date(ts.plan_due_date + 'T12:00:00');
-                      const daysUntil = Math.round((dueDate - today) / (1000 * 60 * 60 * 24));
+                      const dueDate = new Date(ts.plan_due_date + 'T00:00:00');
+                      const daysUntil = Math.floor((dueDate - today) / (1000 * 60 * 60 * 24));
                       const badgeColor = daysUntil <= 0 ? { bg: "#FFF3CD", c: "#856404" } : daysUntil <= 2 ? { bg: "#FAEEDA", c: "#633806" } : { bg: "#F5F4F0", c: "#666" };
                       const dueLabel = daysUntil < 0 ? "Overdue" : daysUntil === 0 ? "Due tonight 11:59 PM" : daysUntil === 1 ? "Due tomorrow" : `${daysUntil} days`;
                       const st = (iS[ts.profile_id] || {})[ts.assignment_id] || '';
