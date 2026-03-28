@@ -199,7 +199,12 @@ async function removeTeachingSelection(profileId, courseKey, assignmentId) {
    TINY COMPONENTS
    ================================================================ */
 function Pill({ t, bg = "#F8F7F4", c = "#767676" }) { return <span role="status" aria-label={t} style={{ display: "inline-block", padding: "2px 7px", borderRadius: 4, fontFamily: F.b, fontSize: 11, fontWeight: 600, background: bg, color: c, whiteSpace: "nowrap" }}>{t}</span>; }
-function Lbl({ children, s = {} }) { return <h2 style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".07em", color: "#6B6B6B", marginBottom: 10, ...s }}>{children}</h2>; }
+function Lbl({ children, s = {}, onClick, expanded }) { 
+  if (onClick !== undefined) {
+    return <button aria-expanded={expanded} onClick={onClick} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", fontFamily: F.b, fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".07em", color: "#555", marginBottom: 10, padding: "8px 0", background: "none", border: "none", borderBottom: "1px solid #E8E6E1", cursor: "pointer", ...s }}><span>{children}</span><span style={{ fontSize: 12, color: "#767676", transform: expanded ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span></button>;
+  }
+  return <h2 style={{ fontFamily: F.b, fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".07em", color: "#555", marginBottom: 10, padding: "8px 0", borderBottom: "1px solid #E8E6E1", ...s }}>{children}</h2>; 
+}
 function GradeRing({ grade, size = 50, label = "" }) { const m = TM[grade] || TM.F; const on = grade !== "F" && grade !== "early"; return <div role="img" aria-label={label || `Grade track: ${grade}`} style={{ width: size, height: size, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: on ? m.c : "#F0EEEA", border: `3px solid ${on ? m.c : "#E0DDD8"}`, transition: "all .4s" }}><span style={{ fontSize: size * .38, fontWeight: 700, fontFamily: F.d, color: on ? "#fff" : "#767676", lineHeight: 1 }}>{grade === "early" ? "—" : grade}</span></div>; }
 function Loading() { return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}><div style={{ fontFamily: F.b, color: "#6B6B6B", fontSize: 14 }}>Loading...</div></div>; }
 
@@ -248,6 +253,12 @@ export default function App() {
   const [batchSearch, setBatchSearch] = useState('');
   const [teachDateFilter, setTeachDateFilter] = useState('all');
   const [expScheduled, setExpScheduled] = useState(false);
+  const [expStudents, setExpStudents] = useState(true);
+  const [expStruggles, setExpStruggles] = useState(true);
+  const [expTokLookup, setExpTokLookup] = useState(false);
+  const [expClassPrep, setExpClassPrep] = useState(true);
+  const [expTeachSched, setExpTeachSched] = useState(true);
+  const [expFinalGrades, setExpFinalGrades] = useState(false);
   const [expTracks, setExpTracks] = useState(false);
   const [expTokens, setExpTokens] = useState(false);
   const [expPrep, setExpPrep] = useState(false);
@@ -944,16 +955,16 @@ export default function App() {
           </div>
 
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
-            <Lbl s={{ marginBottom: 0 }}>Students (Your Records)</Lbl>
-            <div style={{ display: "flex", gap: 4 }}>
+            <Lbl s={{ marginBottom: 0, flex: 1 }} onClick={() => setExpStudents(!expStudents)} expanded={expStudents}>Students (Your Records)</Lbl>
+            {expStudents && <div style={{ display: "flex", gap: 4 }}>
               <input value={gridSearch} onChange={e => setGridSearch(e.target.value)} placeholder="Filter..." aria-label="Filter students" style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#666", background: "#fff", width: 80, outline: "none" }} />
               <select aria-label="Sort order" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: "2px 6px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#666", background: "#fff", cursor: "pointer" }}><option value="first">First</option><option value="last">Last</option><option value="grade">Track</option></select>
               <button aria-label="Export CSV" onClick={exportCSV} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#666", background: "#fff", cursor: "pointer" }}>📥 CSV</button>
               <button aria-label="Refresh data" onClick={refresh} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#666", background: "#fff", cursor: "pointer" }}>↻ Refresh</button>
-            </div>
+            </div>}
           </div>
 
-          <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+          {expStudents && <><div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 16px", borderBottom: "2px solid #F0EEEA", background: "#FAFAF7" }}>
               <div style={{ width: 24 }} />
               <div style={{ width: 120, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676" }}>Student</div>
@@ -976,10 +987,11 @@ export default function App() {
             }); })()}
           </div>
           <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 8 }}>"Self" = student self-reported track. ⚠ = mismatch.{gridSearch && ` Showing ${gridSearch} filter.`}</div>
+          </>}
 
           {insights.length > 0 && <div style={{ marginTop: 20 }}>
-            <Lbl s={{ marginBottom: 8 }}>Where Students Are Struggling</Lbl>
-            <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+            <Lbl s={{ marginBottom: 8 }} onClick={() => setExpStruggles(!expStruggles)} expanded={expStruggles}>Where Students Are Struggling</Lbl>
+            {expStruggles && <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
               {insights.map((a, i) => <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderBottom: i < insights.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                 <div style={{ width: 28, height: 28, borderRadius: 7, background: "#FFF3CD", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.b, fontSize: 12, fontWeight: 700, color: "#856404", flexShrink: 0 }}>{a.rc}</div>
                 <div style={{ flex: 1 }}>
@@ -987,12 +999,12 @@ export default function App() {
                   <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{a.rc}R · {a.mc}M · {a.ns} no status</div>
                 </div>
               </div>)}
-            </div>
+            </div>}
           </div>}
 
           <div style={{ marginTop: 20 }}>
-            <Lbl s={{ marginBottom: 8 }}>Token Lookup</Lbl>
-            <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", padding: "12px 16px" }}>
+            <Lbl s={{ marginBottom: 8 }} onClick={() => setExpTokLookup(!expTokLookup)} expanded={expTokLookup}>Token Lookup</Lbl>
+            {expTokLookup && <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", padding: "12px 16px" }}>
               <input value={tokSearch} onChange={e => { setTokSearch(e.target.value); setTokExpand(null); }} placeholder="Search student name..." aria-label="Search student by name" 
                 style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, boxSizing: "border-box", outline: "none", marginBottom: tokSearch.length > 0 ? 8 : 0 }} />
               {tokSearch.length > 0 && (() => {
@@ -1023,12 +1035,12 @@ export default function App() {
                   </div>;
                 });
               })()}
-            </div>
+            </div>}
           </div>
 
           {cpSum.length > 0 && <div style={{ marginTop: 20 }}>
-            <Lbl s={{ marginBottom: 8 }}>Class Preparation Completion</Lbl>
-            <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+            <Lbl s={{ marginBottom: 8 }} onClick={() => setExpClassPrep(!expClassPrep)} expanded={expClassPrep}>Class Preparation Completion</Lbl>
+            {expClassPrep && <><div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
               {cpSum.map((cp, i) => <div key={cp.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderBottom: i < cpSum.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                 <div style={{ width: 28, height: 28, borderRadius: 7, background: cp.done === students.length ? "#D4EDDA" : "#F5F4F0", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.b, fontSize: 12, fontWeight: 700, color: cp.done === students.length ? "#2D6A4F" : "#767676", flexShrink: 0 }}>{cp.done}</div>
                 <div style={{ flex: 1 }}><div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{cp.name}</div><div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{cp.done} of {students.length}</div></div>
@@ -1051,12 +1063,12 @@ export default function App() {
                 </div>);
               })()}
             </div>
-          </div>}
+          </>}</div>}
 
           {/* Teaching Schedule Dashboard */}
           {teachDates.length > 0 && <div style={{ marginTop: 20 }}>
-            <Lbl s={{ marginBottom: 8 }}>Teaching Schedule</Lbl>
-            {(() => {
+            <Lbl s={{ marginBottom: 8 }} onClick={() => setExpTeachSched(!expTeachSched)} expanded={expTeachSched}>Teaching Schedule</Lbl>
+            {expTeachSched && (() => {
               const formatDate = (d) => { const dt = new Date(d + 'T12:00:00'); return dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }); };
               const assignmentIds = [...new Set(teachDates.filter(td => !td.closed).map(td => td.assignment_id))];
               const today = new Date(); today.setHours(0,0,0,0);
@@ -1326,8 +1338,8 @@ export default function App() {
             </div>;
           })}
           <div style={{ marginTop: 16 }}>
-            <Lbl s={{ marginBottom: 8 }}>Final Grades Summary</Lbl>
-            <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+            <Lbl s={{ marginBottom: 8 }} onClick={() => setExpFinalGrades(!expFinalGrades)} expanded={expFinalGrades}>Final Grades Summary</Lbl>
+            {expFinalGrades && <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
               {[...students].sort((a, b) => (a.last || "").localeCompare(b.last || "")).map((s, i) => {
                 const g = calcGrade(iS[s.id] || {}, relAssignments, ck); const m = TM[g] || TM.F;
                 return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", borderBottom: i < students.length - 1 ? "1px solid #F5F3EF" : "none" }}>
@@ -1335,7 +1347,7 @@ export default function App() {
                   <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500 }}>{s.last}, {s.first}</div>
                 </div>;
               })}
-            </div>
+            </div>}
           </div>
         </div>}
       </main>
