@@ -250,6 +250,7 @@ export default function App() {
   const [tokExpand, setTokExpand] = useState(null);
   const [tokSearch, setTokSearch] = useState('');
   const [gridSearch, setGridSearch] = useState('');
+  const [cpGridSearch, setCpGridSearch] = useState('');
   const [batchSearch, setBatchSearch] = useState('');
   const [teachDateFilter, setTeachDateFilter] = useState('all');
   const [expScheduled, setExpScheduled] = useState(false);
@@ -989,19 +990,6 @@ export default function App() {
           <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 8 }}>"Self" = student self-reported track. ⚠ = mismatch.{gridSearch && ` Showing ${gridSearch} filter.`}</div>
           </>}
 
-          {insights.length > 0 && <div style={{ marginTop: 20 }}>
-            <Lbl s={{ marginBottom: 8 }} onClick={() => setExpStruggles(!expStruggles)} expanded={expStruggles}>Where Students Are Struggling</Lbl>
-            {expStruggles && <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-              {insights.map((a, i) => <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderBottom: i < insights.length - 1 ? "1px solid #F5F3EF" : "none" }}>
-                <div style={{ width: 28, height: 28, borderRadius: 7, background: "#FFF3CD", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.b, fontSize: 12, fontWeight: 700, color: "#856404", flexShrink: 0 }}>{a.rc}</div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{a.name}</div>
-                  <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{a.rc}R · {a.mc}M · {a.ns} no status</div>
-                </div>
-              </div>)}
-            </div>}
-          </div>}
-
           <div style={{ marginTop: 20 }}>
             <Lbl s={{ marginBottom: 8 }} onClick={() => setExpTokLookup(!expTokLookup)} expanded={expTokLookup}>Token Lookup</Lbl>
             {expTokLookup && <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", padding: "12px 16px" }}>
@@ -1039,31 +1027,37 @@ export default function App() {
           </div>
 
           {cpSum.length > 0 && <div style={{ marginTop: 20 }}>
-            <Lbl s={{ marginBottom: 8 }} onClick={() => setExpClassPrep(!expClassPrep)} expanded={expClassPrep}>Class Preparation Completion</Lbl>
-            {expClassPrep && <><div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-              {cpSum.map((cp, i) => <div key={cp.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderBottom: i < cpSum.length - 1 ? "1px solid #F5F3EF" : "none" }}>
-                <div style={{ width: 28, height: 28, borderRadius: 7, background: cp.done === students.length ? "#D4EDDA" : "#F5F4F0", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.b, fontSize: 12, fontWeight: 700, color: cp.done === students.length ? "#2D6A4F" : "#767676", flexShrink: 0 }}>{cp.done}</div>
-                <div style={{ flex: 1 }}><div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{cp.name}</div><div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{cp.done} of {students.length}</div></div>
-              </div>)}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
+              <Lbl s={{ marginBottom: 0, flex: 1 }} onClick={() => setExpClassPrep(!expClassPrep)} expanded={expClassPrep}>Class Preparation</Lbl>
+              {expClassPrep && <div style={{ display: "flex", gap: 4 }}>
+                <input value={cpGridSearch} onChange={e => setCpGridSearch(e.target.value)} placeholder="Filter..." aria-label="Filter class prep students" style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#666", background: "#fff", width: 80, outline: "none" }} />
+              </div>}
             </div>
-            <div style={{ marginTop: 10 }}>
-              <input value={gridSearch} onChange={e => setGridSearch(e.target.value)} placeholder="Look up a student's class prep..." aria-label="Search student class prep" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, boxSizing: "border-box", outline: "none" }} />
-              {gridSearch.length > 0 && (() => {
-                const q = gridSearch.toLowerCase();
-                const matches = students.filter(s => `${s.first} ${s.last}`.toLowerCase().includes(q) || `${s.last}, ${s.first}`.toLowerCase().includes(q));
-                if (matches.length === 0) return <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", padding: "8px 0" }}>No students found.</div>;
-                return matches.map(s => <div key={s.id} style={{ marginTop: 6, padding: "8px 12px", background: "#FAFAF7", borderRadius: 8 }}>
-                  <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{s.last}, {s.first}</div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                    {(c.classPrep || []).map(cp => {
-                      const done = !!(cP[s.id] || {})[cp.id];
-                      return <span key={cp.id} style={{ padding: "3px 8px", borderRadius: 4, fontFamily: F.b, fontSize: 11, background: done ? "#D4EDDA" : "#F5F4F0", color: done ? "#2D6A4F" : "#767676" }}>{done ? "✓ " : ""}{cp.name}</span>;
+            {expClassPrep && <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 16px", borderBottom: "2px solid #F0EEEA", background: "#FAFAF7" }}>
+                <div style={{ width: 100, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676" }}>Student</div>
+                <div style={{ flex: 1, display: "flex", gap: 2 }}>{(c.classPrep || []).map(cp => {
+                  const abbr = cp.name.split(' ').map(w => w[0]).join('').substring(0, 4);
+                  return <div key={cp.id} style={{ flex: 1, minWidth: 12, maxWidth: 28, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", textAlign: "center", overflow: "hidden" }} title={cp.name}>{abbr}</div>;
+                })}</div>
+                <div style={{ width: 40, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", textAlign: "right" }}>{cpSum.map(cp => `${cp.done}`).join('/')}</div>
+              </div>
+              {(() => { const cpq = cpGridSearch.toLowerCase(); const cpFiltered = cpq ? sorted.filter(s => `${s.first} ${s.last}`.toLowerCase().includes(cpq) || `${s.last}, ${s.first}`.toLowerCase().includes(cpq)) : sorted; return cpFiltered.map((s, si) => {
+                const sCp = cP[s.id] || {};
+                const doneCount = (c.classPrep || []).filter(cp => !!sCp[cp.id]).length;
+                const allDone = doneCount === (c.classPrep || []).length;
+                return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < cpFiltered.length - 1 ? "1px solid #F5F3EF" : "none" }}>
+                  <div style={{ width: 100, flexShrink: 0, fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.last}, {s.first}</div>
+                  <div style={{ flex: 1, display: "flex", gap: 2 }}>
+                    {(c.classPrep || []).map(cp => { const done = !!sCp[cp.id];
+                      return <div key={cp.id} title={`${cp.name}: ${done ? 'Complete' : 'Not complete'}`} style={{ flex: 1, minWidth: 12, maxWidth: 28, height: 16, borderRadius: 3, background: done ? "#D4EDDA" : "#F5F4F0", border: done ? "1.5px solid #B7DFBF" : "1.5px dashed #E8E6E1", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: done ? "#2D6A4F" : "transparent" }}>{done ? "✓" : ""}</div>;
                     })}
                   </div>
-                </div>);
-              })()}
-            </div>
-          </>}</div>}
+                  <div style={{ width: 40, textAlign: "right", fontFamily: F.b, fontSize: 11, color: allDone ? "#2D6A4F" : "#767676" }}>{doneCount}/{(c.classPrep || []).length}</div>
+                </div>;
+              }); })()}
+            </div>}
+          </div>}
 
           {/* Teaching Schedule Dashboard */}
           {teachDates.length > 0 && <div style={{ marginTop: 20 }}>
