@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { COURSES, TM, CAL_LINK, BRAND, calcGrade, getBlockers, tokBal, pastCutoff, getTokenCutoff, getTokenTarget } from '../lib/courses';
+import { COURSES, TM, CAL_LINK, BRAND, calcGrade, getBlockers, tokBal, pastCutoff, getTokenCutoff, getTokenTarget, getCourseSections } from '../lib/courses';
 
 const F = { d: "'Source Serif 4',Georgia,serif", b: "'DM Sans',sans-serif" };
 
@@ -26,23 +26,23 @@ async function loadReleasedAssignments(courseKey) {
 }
 
 async function loadDueDates(courseKey) {
-  const { data } = await supabase.from('assignment_due_dates').select('assignment_id, due_label').eq('course_key', courseKey);
+  const { data } = await supabase.from('assignment_due_dates').select('assignment_id, due_label, due_date').eq('course_key', courseKey);
   const map = {};
-  (data || []).forEach(r => { map[r.assignment_id] = r.due_label; });
+  (data || []).forEach(r => { map[r.assignment_id] = { label: r.due_label, date: r.due_date || null }; });
   return map;
 }
 
-async function upsertDueDate(courseKey, assignmentId, dueLabel) {
-  if (!dueLabel) {
+async function upsertDueDate(courseKey, assignmentId, dueLabel, dueDate) {
+  if (!dueLabel && !dueDate) {
     await supabase.from('assignment_due_dates').delete().match({ course_key: courseKey, assignment_id: assignmentId });
   } else {
-    await supabase.from('assignment_due_dates').upsert({ course_key: courseKey, assignment_id: assignmentId, due_label: dueLabel, updated_at: new Date().toISOString() }, { onConflict: 'course_key,assignment_id' });
+    await supabase.from('assignment_due_dates').upsert({ course_key: courseKey, assignment_id: assignmentId, due_label: dueLabel || null, due_date: dueDate || null, updated_at: new Date().toISOString() }, { onConflict: 'course_key,assignment_id' });
   }
 }
 
 async function loadStudentsForCourse(courseKey) {
-  const { data } = await supabase.from('enrollments').select('profile_id, profiles(id, email, first_name, last_name, role)').eq('course_key', courseKey);
-  return (data || []).filter(e => e.profiles?.role === 'student').map(e => ({ id: e.profiles.id, first: e.profiles.first_name, last: e.profiles.last_name, email: e.profiles.email, name: `${e.profiles.first_name} ${e.profiles.last_name}` }));
+  const { data } = await supabase.from('enrollments').select('profile_id, section, profiles(id, email, first_name, last_name, role)').eq('course_key', courseKey);
+  return (data || []).filter(e => e.profiles?.role === 'student').map(e => ({ id: e.profiles.id, first: e.profiles.first_name, last: e.profiles.last_name, email: e.profiles.email, name: `${e.profiles.first_name} ${e.profiles.last_name}`, section: e.section || null }));
 }
 
 async function loadInstrStatuses(courseKey) {
@@ -253,6 +253,8 @@ export default function App() {
   const [cpGridSearch, setCpGridSearch] = useState('');
   const [batchSearch, setBatchSearch] = useState('');
   const [teachDateFilter, setTeachDateFilter] = useState('all');
+  const [sectionFilter, setSectionFilter] = useState('all');
+  const [editDueDate, setEditDueDate] = useState('');
   const [expScheduled, setExpScheduled] = useState(false);
   const [expStudents, setExpStudents] = useState(true);
   const [expStruggles, setExpStruggles] = useState(true);
@@ -362,8 +364,8 @@ export default function App() {
     if (!existingProfile) {
       // Create new profile with the auth ID
       await supabase.from('profiles').insert({ id: authId, email, first_name: signupFirst.trim(), last_name: signupLast.trim(), role: 'student' });
-      // Create enrollment
-      await supabase.from('enrollments').insert({ profile_id: authId, course_key: courseCode.course_key });
+      // Create enrollment with section if course code has one
+      await supabase.from('enrollments').insert({ profile_id: authId, course_key: courseCode.course_key, section: courseCode.section || null });
     } else if (existingProfile.id !== authId) {
       // Profile exists but with wrong ID — this shouldn't happen with new flow but just in case
       setLoginErr('Account issue — contact Dr. Beggs.');
@@ -546,6 +548,70 @@ export default function App() {
             {grade === "A" && <div style={{ marginTop: 12, padding: "10px 14px", background: "#D4EDDA", borderRadius: 8, fontFamily: F.b, fontSize: 12, color: "#2D6A4F" }}>You're on the highest track — keep it up!</div>}
           </div>
 
+          {/* Upcoming Due Dates Feed — Student */}
+          {(() => {
+            const today = new Date(); today.setHours(0,0,0,0);
+            const sevenOut = new Date(today); sevenOut.setDate(sevenOut.getDate() + 7);
+            const formatFeedDate = (d) => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+            const feedItems = [];
+            // Assignment due dates — only incomplete items
+            relAssignments.forEach(id => {
+              if (myChecks[id]) return; // skip completed
+              const dd = dueDates[id];
+              if (dd?.date) {
+                const dDate = new Date(dd.date + 'T00:00:00');
+                if (dDate >= today && dDate <= sevenOut) {
+                  const a = c.assignments.find(x => x.id === id);
+                  feedItems.push({ date: dd.date, name: a?.name || id, label: dd.label, type: a?.eval === 'mastery' ? 'mastery' : 'completion' });
+                }
+              }
+            });
+            // Class prep due dates — only incomplete
+            (c.classPrep || []).forEach(cp => {
+              if (myPrep[cp.id]) return;
+              const dd = dueDates[cp.id];
+              if (dd?.date) {
+                const dDate = new Date(dd.date + 'T00:00:00');
+                if (dDate >= today && dDate <= sevenOut) {
+                  feedItems.push({ date: dd.date, name: cp.name, label: dd.label, type: 'prep' });
+                }
+              }
+            });
+            // Teaching plan due dates
+            teachSel.forEach(ts => {
+              if (ts.plan_due_date) {
+                const pDate = new Date(ts.plan_due_date + 'T00:00:00');
+                if (pDate >= today && pDate <= sevenOut) {
+                  const a = c.assignments.find(x => x.id === ts.assignment_id);
+                  feedItems.push({ date: ts.plan_due_date, name: `${a?.name || ts.assignment_id} — plan due`, type: 'teaching' });
+                }
+              }
+            });
+            feedItems.sort((a, b) => a.date.localeCompare(b.date));
+            if (feedItems.length === 0) return null;
+            return <div role="region" aria-label="Upcoming due dates" style={{ marginBottom: 14, background: "#fff", borderRadius: 10, border: `1px solid ${c.colorLight || '#E8E6E1'}`, overflow: "hidden" }}>
+              <div style={{ padding: "10px 14px", background: "#FAFAF7", borderBottom: "1px solid #F0EEEA", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <h2 style={{ fontFamily: F.b, fontSize: 12, fontWeight: 700, color: "#555", margin: 0 }}>📋 Due This Week</h2>
+                <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{feedItems.length} item{feedItems.length !== 1 ? 's' : ''}</span>
+              </div>
+              {feedItems.map((item, ii) => {
+                const dDate = new Date(item.date + 'T00:00:00');
+                const daysUntil = Math.floor((dDate - today) / (1000 * 60 * 60 * 24));
+                const urgLabel = daysUntil <= 0 ? "Today" : daysUntil === 1 ? "Tomorrow" : formatFeedDate(item.date);
+                const urgColor = daysUntil <= 0 ? { bg: "#FFF3CD", c: "#856404" } : daysUntil <= 2 ? { bg: "#FAEEDA", c: "#633806" } : { bg: "#F5F4F0", c: "#666" };
+                return <div key={ii} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderBottom: ii < feedItems.length - 1 ? "1px solid #F5F3EF" : "none" }}>
+                  <Pill t={urgLabel} bg={urgColor.bg} c={urgColor.c} />
+                  <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", flex: 1 }}>{item.name}</span>
+                  {item.label && <span style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>{item.label}</span>}
+                  {item.type === 'teaching' && <Pill t="Plan" bg="#DCEEFB" c="#1565C0" />}
+                  {item.type === 'mastery' && <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />}
+                  {item.type === 'completion' && <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
+                  {item.type === 'prep' && <Pill t="Prep" bg="#F0F8FF" c="#1565C0" />}
+                </div>;
+              })}
+            </div>;
+          })()}
+
           {/* Checklist */}
           <Lbl>My Progress</Lbl>
           <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", marginBottom: 14, lineHeight: 1.6, padding: "10px 14px", background: "#F9F8F5", borderRadius: 8 }}>
@@ -564,7 +630,7 @@ export default function App() {
                     <div style={{ width: 22, height: 22, borderRadius: 6, border: "2px dashed #E0DDD8", flexShrink: 0 }} />
                     <div style={{ flex: 1 }}>
                       <span style={{ fontFamily: F.b, fontSize: 13, color: "#767676" }}>{a.name}</span>
-                      {dueDates[a.id] && <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{dueDates[a.id]}</div>}
+                      {dueDates[a.id]?.label && <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{dueDates[a.id].label}</div>}
                     </div>
                     <span style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>Coming soon</span>
                   </div>;
@@ -578,7 +644,7 @@ export default function App() {
                       </div>
                       <div style={{ flex: 1 }}>
                         <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, color: isChecked ? "#767676" : "#1A1A1A", textDecoration: isChecked ? "line-through" : "none", textDecorationColor: "#DDD" }}>{a.name}</span>
-                        {dueDates[a.id] && <div style={{ fontFamily: F.b, fontSize: 11, color: isChecked ? "#767676" : "#6B6B6B", marginTop: 1 }}>{dueDates[a.id]}</div>}
+                        {dueDates[a.id]?.label && <div style={{ fontFamily: F.b, fontSize: 11, color: isChecked ? "#767676" : "#6B6B6B", marginTop: 1 }}>{dueDates[a.id].label}</div>}
                       </div>
                       {a.eval === "mastery" && <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />}
                       {a.eval === "completion" && <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
@@ -683,7 +749,7 @@ export default function App() {
                 <div style={{ width: 20, height: 20, borderRadius: 5, border: done ? "none" : "2px solid #D0CEC9", background: done ? c.color : "#fff", display: "flex", alignItems: "center", justifyContent: "center", transition: "all .2s", flexShrink: 0 }}>{done && <span style={{ color: "#fff", fontSize: 11, fontWeight: 700 }}>✓</span>}</div>
                 <div style={{ flex: 1 }}>
                   <span style={{ fontFamily: F.b, fontSize: 12, color: done ? "#767676" : "#1A1A1A", textDecoration: done ? "line-through" : "none" }}>{cp.name}</span>
-                  {dueDates[cp.id] && <div style={{ fontFamily: F.b, fontSize: 11, color: done ? "#767676" : "#6B6B6B", marginTop: 1 }}>{dueDates[cp.id]}</div>}
+                  {dueDates[cp.id]?.label && <div style={{ fontFamily: F.b, fontSize: 11, color: done ? "#767676" : "#6B6B6B", marginTop: 1 }}>{dueDates[cp.id].label}</div>}
                 </div>
                 <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />
               </div>;
@@ -768,7 +834,13 @@ export default function App() {
     refresh();
   };
 
-  const sorted = [...students].sort((a, b) => {
+  // Section filtering — null-safe for Spring 2026 courses
+  const courseSections = getCourseSections(ck);
+  const hasSections = students.some(s => s.section);
+  const sectionKeys = hasSections ? [...new Set(students.map(s => s.section).filter(Boolean))] : [];
+  const filteredStudents = sectionFilter === 'all' ? students : students.filter(s => s.section === sectionFilter);
+
+  const sorted = [...filteredStudents].sort((a, b) => {
     if (sortBy === "first") return (a.first || "").localeCompare(b.first || "");
     if (sortBy === "last") return (a.last || "").localeCompare(b.last || "");
     const o = { A: 0, B: 1, C: 2, D: 3, F: 4, early: 5 };
@@ -776,18 +848,20 @@ export default function App() {
   });
 
   const dist = { A: 0, B: 0, C: 0, D: 0, F: 0, early: 0 };
-  students.forEach(s => { const g = calcGrade(iS[s.id] || {}, relAssignments, ck); dist[g] = (dist[g] || 0) + 1; });
+  filteredStudents.forEach(s => { const g = calcGrade(iS[s.id] || {}, relAssignments, ck); dist[g] = (dist[g] || 0) + 1; });
 
-  const insights = relAssignments.map(id => { const a = c.assignments.find(x => x.id === id); const rc = students.filter(s => (iS[s.id] || {})[id] === "revision").length; const mc = students.filter(s => (iS[s.id] || {})[id] === "mastery").length; return { ...a, rc, mc, ns: students.length - rc - mc }; }).filter(a => a.rc > 0).sort((a, b) => b.rc - a.rc);
-  const cpSum = (c.classPrep || []).map(cp => ({ ...cp, done: students.filter(s => (cP[s.id] || {})[cp.id]).length }));
+  const insights = relAssignments.map(id => { const a = c.assignments.find(x => x.id === id); const rc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "revision").length; const mc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "mastery").length; return { ...a, rc, mc, ns: filteredStudents.length - rc - mc }; }).filter(a => a.rc > 0).sort((a, b) => b.rc - a.rc);
+  const cpSum = (c.classPrep || []).map(cp => ({ ...cp, done: filteredStudents.filter(s => (cP[s.id] || {})[cp.id]).length }));
 
   const exportCSV = () => {
+    const filteredStudents = sectionFilter === 'all' ? students : students.filter(s => s.section === sectionFilter);
     const allA = c.assignments.filter(x => relAssignments.includes(x.id)); const cpI = c.classPrep || [];
-    const header = ["Last", "First", "Email", ...allA.map(x => x.name + " (Instr)"), ...allA.map(x => x.name + " (Student)"), ...cpI.map(x => x.name + " (Prep)"), "Tokens Used", "Tokens Avail", "Instr Track", "Student Track"].join(",");
-    const rows = students.map(st => {
+    const hasSections = students.some(s => s.section);
+    const header = ["Last", "First", "Email", ...(hasSections ? ["Section"] : []), ...allA.map(x => x.name + " (Instr)"), ...allA.map(x => x.name + " (Student)"), ...cpI.map(x => x.name + " (Prep)"), "Tokens Used", "Tokens Avail", "Instr Track", "Student Track"].join(",");
+    const rows = filteredStudents.map(st => {
       const si = iS[st.id] || {}; const sc = sC[st.id] || {}; const cp2 = cP[st.id] || {}; const tk = (toks[st.id] || []).length;
       const ig = calcGrade(si, rel, ck); const sg = calcGrade(sc, rel, ck); const tok = tokBal(tk, 0);
-      return [st.last, st.first, st.email, ...allA.map(x => si[x.id] === "mastery" ? "M" : si[x.id] === "revision" ? "R" : ""), ...allA.map(x => sc[x.id] ? "Y" : ""), ...cpI.map(x => cp2[x.id] ? "Y" : ""), tok.used, tok.avail, ig === "early" ? "" : ig, sg === "early" ? "" : sg].map(v => `"${v}"`).join(",");
+      return [st.last, st.first, st.email, ...(hasSections ? [st.section || ''] : []), ...allA.map(x => si[x.id] === "mastery" ? "M" : si[x.id] === "revision" ? "R" : ""), ...allA.map(x => sc[x.id] ? "Y" : ""), ...cpI.map(x => cp2[x.id] ? "Y" : ""), tok.used, tok.avail, ig === "early" ? "" : ig, sg === "early" ? "" : sg].map(v => `"${v}"`).join(",");
     });
     const csvContent = header + "\n" + rows.join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" }); const url = URL.createObjectURL(blob);
@@ -894,7 +968,7 @@ export default function App() {
           <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ fontFamily: F.d, fontSize: 17, fontWeight: 600 }}>{currentPrep.name}</span>
             <Pill t={`${doneCount} of ${students.length}`} bg={doneCount === students.length ? "#D4EDDA" : "#F5F4F0"} c={doneCount === students.length ? "#2D6A4F" : "#767676"} />
-            {dueDates[prepItem] && <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>Due: {dueDates[prepItem]}</span>}
+            {dueDates[prepItem]?.label && <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>Due: {dueDates[prepItem].label}</span>}
           </div>
           <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
             <button onClick={() => markAllPrep(true)} style={{ padding: "6px 14px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>Mark All Complete</button>
@@ -930,8 +1004,12 @@ export default function App() {
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button onClick={handleLogout} aria-label="Sign out" style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>← Sign out</button>
             <div style={{ width: 1, height: 14, background: "#E0DDD8" }} aria-hidden="true" />
-            <select aria-label="Select course" value={ck} onChange={e => setCk(e.target.value)} style={{ fontFamily: F.d, fontSize: 14, fontWeight: 600, border: "none", background: "none", cursor: "pointer", outline: "none" }}>{user.courses.map(k => <option key={k} value={k}>{COURSES[k]?.short || k}</option>)}</select>
-            <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{students.length} students</span>
+            <select aria-label="Select course" value={ck} onChange={e => { setCk(e.target.value); setSectionFilter('all'); }} style={{ fontFamily: F.d, fontSize: 14, fontWeight: 600, border: "none", background: "none", cursor: "pointer", outline: "none" }}>{user.courses.map(k => <option key={k} value={k}>{COURSES[k]?.short || k}</option>)}</select>
+            {hasSections && <select aria-label="Filter by section" value={sectionFilter} onChange={e => setSectionFilter(e.target.value)} style={{ fontFamily: F.b, fontSize: 11, border: "1px solid #E0DDD8", borderRadius: 5, padding: "3px 8px", background: "#fff", cursor: "pointer", color: sectionFilter === 'all' ? "#6B6B6B" : c.color, fontWeight: sectionFilter === 'all' ? 400 : 600 }}>
+              <option value="all">All sections</option>
+              {sectionKeys.map(s => <option key={s} value={s}>{courseSections?.[s]?.name || s}</option>)}
+            </select>}
+            <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{filteredStudents.length} student{filteredStudents.length !== 1 ? 's' : ''}{sectionFilter !== 'all' ? ` (${sectionFilter})` : ''}</span>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             {pending.length > 0 && tab !== "queue" && <button onClick={() => setTab("queue")} aria-label={`${pending.length} pending token submissions`} style={{ padding: "3px 10px", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>{pending.length} token{pending.length !== 1 ? "s" : ""}</button>}
@@ -948,6 +1026,80 @@ export default function App() {
 
         {/* OVERVIEW */}
         {tab === "overview" && <div>
+          {/* Upcoming Due Dates Feed */}
+          {(() => {
+            const today = new Date(); today.setHours(0,0,0,0);
+            const sevenOut = new Date(today); sevenOut.setDate(sevenOut.getDate() + 7);
+            const formatFeedDate = (d) => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+            const feedItems = [];
+            // Assignment + class prep due dates (from real date column)
+            const allItemIds = [...c.assignments.map(a => a.id), ...(c.classPrep || []).map(cp => cp.id)];
+            allItemIds.forEach(id => {
+              const dd = dueDates[id];
+              if (dd?.date) {
+                const dDate = new Date(dd.date + 'T00:00:00');
+                if (dDate >= today && dDate <= sevenOut) {
+                  const a = c.assignments.find(x => x.id === id);
+                  const cp = (c.classPrep || []).find(x => x.id === id);
+                  feedItems.push({ date: dd.date, name: a?.name || cp?.name || id, label: dd.label, type: a ? (a.eval === 'mastery' ? 'mastery' : 'completion') : 'prep', source: 'assignment' });
+                }
+              }
+            });
+            // Teaching plan due dates
+            teachSel.forEach(ts => {
+              if (ts.plan_due_date) {
+                const pDate = new Date(ts.plan_due_date + 'T00:00:00');
+                if (pDate >= today && pDate <= sevenOut) {
+                  const a = c.assignments.find(x => x.id === ts.assignment_id);
+                  const sName = `${ts.profiles?.first_name || ''} ${ts.profiles?.last_name || ''}`.trim();
+                  // Only include if student is in current section filter
+                  if (sectionFilter === 'all' || filteredStudents.some(s => s.id === ts.profile_id)) {
+                    feedItems.push({ date: ts.plan_due_date, name: `${a?.name || ts.assignment_id} plan`, label: sName, type: 'teaching', source: 'teaching', studentId: ts.profile_id });
+                  }
+                }
+              }
+            });
+            feedItems.sort((a, b) => a.date.localeCompare(b.date));
+            if (feedItems.length === 0) return null;
+            // Group by date
+            const dateGroups = {};
+            feedItems.forEach(item => {
+              if (!dateGroups[item.date]) dateGroups[item.date] = [];
+              dateGroups[item.date].push(item);
+            });
+            const groupedDates = Object.keys(dateGroups).sort();
+            return <div role="region" aria-label="Upcoming due dates" style={{ marginBottom: 18, background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+              <div style={{ padding: "10px 16px", background: "#FAFAF7", borderBottom: "1px solid #F0EEEA", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <h2 style={{ fontFamily: F.b, fontSize: 12, fontWeight: 700, color: "#555", margin: 0 }}>📋 Due This Week</h2>
+                <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{feedItems.length} item{feedItems.length !== 1 ? 's' : ''}</span>
+              </div>
+              {groupedDates.map((dateStr, di) => {
+                const items = dateGroups[dateStr];
+                const dDate = new Date(dateStr + 'T00:00:00');
+                const daysUntil = Math.floor((dDate - today) / (1000 * 60 * 60 * 24));
+                const urgency = daysUntil <= 0 ? { bg: "#FFF3CD", c: "#856404", label: "Today" } : daysUntil === 1 ? { bg: "#FAEEDA", c: "#633806", label: "Tomorrow" } : { bg: "#F5F4F0", c: "#666", label: formatFeedDate(dateStr) };
+                return <div key={dateStr} style={{ padding: "8px 16px", borderBottom: di < groupedDates.length - 1 ? "1px solid #F5F3EF" : "none" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                    <Pill t={urgency.label} bg={urgency.bg} c={urgency.c} />
+                  </div>
+                  {items.map((item, ii) => {
+                    const typeBg = item.type === 'mastery' ? { bg: "#FFF0F0", c: "#C0392B" } : item.type === 'prep' ? { bg: "#F0F8FF", c: "#1565C0" } : item.type === 'teaching' ? { bg: "#DCEEFB", c: "#1565C0" } : { bg: "#F0F8FF", c: "#1565C0" };
+                    return <div key={ii} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
+                      <div style={{ width: 6, height: 6, borderRadius: "50%", background: typeBg.c, flexShrink: 0 }} aria-hidden="true" />
+                      <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", flex: 1 }}>{item.name}</span>
+                      {item.label && item.source === 'teaching' && <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{item.label}</span>}
+                      {item.label && item.source === 'assignment' && <span style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>{item.label}</span>}
+                      {item.type === 'teaching' && <Pill t="Plan" bg="#DCEEFB" c="#1565C0" />}
+                      {item.type === 'mastery' && <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />}
+                      {item.type === 'completion' && <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
+                      {item.type === 'prep' && <Pill t="Prep" bg="#F0F8FF" c="#1565C0" />}
+                    </div>;
+                  })}
+                </div>;
+              })}
+            </div>;
+          })()}
+
           <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
             {["A", "B", "C", "D", "F"].map(g => <div key={g} style={{ flex: 1, minWidth: 55, background: TM[g].bg, borderRadius: 8, padding: "10px", textAlign: "center" }}>
               <div style={{ fontSize: 20, fontWeight: 700, fontFamily: F.d, color: TM[g].c }}>{dist[g] || 0}</div>
@@ -1096,7 +1248,7 @@ export default function App() {
                 <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
                   {glance.map(g => <div key={g.aid} style={{ flex: 1, minWidth: 100, background: g.closed ? "#F5F4F0" : "#F0F8FF", padding: "10px 12px", borderRadius: 8, border: `1px solid ${g.closed ? "#E8E6E1" : "#DCEEFB"}` }}>
                     <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 2 }}>{g.name}</div>
-                    <div style={{ fontFamily: F.d, fontSize: 18, fontWeight: 600, color: g.closed ? "#767676" : "#1565C0" }}>{g.scheduled}/{students.length}</div>
+                    <div style={{ fontFamily: F.d, fontSize: 18, fontWeight: 600, color: g.closed ? "#767676" : "#1565C0" }}>{g.scheduled}/{filteredStudents.length}</div>
                     <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{g.closed ? "closed" : "scheduled"}</div>
                   </div>)}
                 </div>
@@ -1231,24 +1383,25 @@ export default function App() {
           {c.groups.map((grp, gi) => <div key={gi} style={{ marginBottom: 14 }}>
             {grp.name && <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: c.color, marginBottom: 4 }}>{grp.name}</div>}
             <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-              {grp.ids.map((id, i) => { const a = c.assignments.find(x => x.id === id); if (!a) return null; const isR = rel.includes(id); const dd = dueDates[id]; const isEditingDue = editDue === id;
+              {grp.ids.map((id, i) => { const a = c.assignments.find(x => x.id === id); if (!a) return null; const isR = rel.includes(id); const ddObj = dueDates[id]; const ddLabel = ddObj?.label; const ddDate = ddObj?.date; const isEditingDue = editDue === id;
                 return <div key={id} style={{ borderBottom: i < grp.ids.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px" }}
                     onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                    <button role="switch" aria-checked={isR} aria-label={a?.name || cp?.name || id} onClick={() => handleToggleRel(id)} style={{ width: 34, height: 18, borderRadius: 9, background: isR ? c.color : "#E0DDD8", border: "none", padding: 0, position: "relative", transition: "background .3s", flexShrink: 0, cursor: "pointer" }}><div style={{ width: 12, height: 12, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: isR ? 19 : 3, transition: "left .3s", boxShadow: "0 1px 2px rgba(0,0,0,.15)" }} /></button>
+                    <button role="switch" aria-checked={isR} aria-label={a?.name || id} onClick={() => handleToggleRel(id)} style={{ width: 34, height: 18, borderRadius: 9, background: isR ? c.color : "#E0DDD8", border: "none", padding: 0, position: "relative", transition: "background .3s", flexShrink: 0, cursor: "pointer" }}><div style={{ width: 12, height: 12, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: isR ? 19 : 3, transition: "left .3s", boxShadow: "0 1px 2px rgba(0,0,0,.15)" }} /></button>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{a.name}</div>
-                      {dd && !isEditingDue && <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 1 }}>Due: {dd}</div>}
+                      {(ddLabel || ddDate) && !isEditingDue && <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 1 }}>Due: {ddLabel || ''}{ddLabel && ddDate ? ' · ' : ''}{ddDate ? new Date(ddDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}</div>}
                     </div>
-                    <button onClick={(e) => { e.stopPropagation(); setEditDue(isEditingDue ? null : id); setEditDueVal(dd || ''); }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: dd ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{dd ? "✎ Due" : "+ Due date"}</button>
+                    <button onClick={(e) => { e.stopPropagation(); setEditDue(isEditingDue ? null : id); setEditDueVal(ddLabel || ''); setEditDueDate(ddDate || ''); }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: (ddLabel || ddDate) ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{(ddLabel || ddDate) ? "✎ Due" : "+ Due date"}</button>
                     {a.eval === "mastery" ? <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" /> : <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
                   </div>
-                  {isEditingDue && <div style={{ padding: "4px 16px 10px 60px", display: "flex", gap: 6 }}>
-                    <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class Mon 3/24" aria-label="Due date" autoFocus
-                      style={{ flex: 1, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }}
-                      onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, id, editDueVal); setEditDue(null); refresh(); } }} />
-                    <button onClick={async () => { await upsertDueDate(ck, id, editDueVal); setEditDue(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
-                    <button onClick={async () => { await upsertDueDate(ck, id, ''); setEditDue(null); refresh(); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
+                  {isEditingDue && <div style={{ padding: "4px 16px 10px 60px", display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class Mon 3/24" aria-label="Due date label"
+                      style={{ flex: 2, minWidth: 140, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }}
+                      onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, id, editDueVal, editDueDate); setEditDue(null); refresh(); } }} />
+                    <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label="Due date" style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
+                    <button onClick={async () => { await upsertDueDate(ck, id, editDueVal, editDueDate); setEditDue(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
+                    <button onClick={async () => { await upsertDueDate(ck, id, '', ''); setEditDue(null); refresh(); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
                   </div>}
                 </div>;
               })}
@@ -1258,22 +1411,23 @@ export default function App() {
           {(c.classPrep && c.classPrep.length > 0) && <>
           <Lbl s={{ marginTop: 20 }}>Class Preparation — toggle to release, set due dates</Lbl>
           <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-            {c.classPrep.map((cp, i) => { const isR = rel.includes(cp.id); const dd = dueDates[cp.id]; const isEditingDue = editDue === cp.id;
+            {c.classPrep.map((cp, i) => { const isR = rel.includes(cp.id); const ddObj = dueDates[cp.id]; const ddLabel = ddObj?.label; const ddDate = ddObj?.date; const isEditingDue = editDue === cp.id;
               return <div key={cp.id} style={{ borderBottom: i < c.classPrep.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px" }}
                   onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                   <button role="switch" aria-checked={isR} aria-label={cp.name} onClick={() => handleToggleRel(cp.id)} style={{ width: 34, height: 18, borderRadius: 9, background: isR ? c.color : "#E0DDD8", position: "relative", transition: "background .3s", flexShrink: 0, cursor: "pointer", border: "none", padding: 0 }}><div style={{ width: 12, height: 12, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: isR ? 19 : 3, transition: "left .3s", boxShadow: "0 1px 2px rgba(0,0,0,.15)" }} /></button>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{cp.name}</div>
-                    {dd && !isEditingDue && <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 1 }}>Due: {dd}</div>}
+                    {(ddLabel || ddDate) && !isEditingDue && <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 1 }}>Due: {ddLabel || ''}{ddLabel && ddDate ? ' · ' : ''}{ddDate ? new Date(ddDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}</div>}
                   </div>
-                  <button onClick={(e) => { e.stopPropagation(); setEditDue(isEditingDue ? null : cp.id); setEditDueVal(dd || ''); }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: dd ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{dd ? "✎ Due" : "+ Due date"}</button>
+                  <button onClick={(e) => { e.stopPropagation(); setEditDue(isEditingDue ? null : cp.id); setEditDueVal(ddLabel || ''); setEditDueDate(ddDate || ''); }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: (ddLabel || ddDate) ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{(ddLabel || ddDate) ? "✎ Due" : "+ Due date"}</button>
                   <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />
                 </div>
-                {isEditingDue && <div style={{ padding: "4px 16px 10px 60px", display: "flex", gap: 6 }}>
-                  <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class Mon 3/24" aria-label="Due date" autoFocus style={{ flex: 1, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, cp.id, editDueVal); setEditDue(null); refresh(); } }} />
-                  <button onClick={async () => { await upsertDueDate(ck, cp.id, editDueVal); setEditDue(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
-                  <button onClick={async () => { await upsertDueDate(ck, cp.id, ''); setEditDue(null); refresh(); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
+                {isEditingDue && <div style={{ padding: "4px 16px 10px 60px", display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class Mon 3/24" aria-label="Due date label" autoFocus style={{ flex: 2, minWidth: 140, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, cp.id, editDueVal, editDueDate); setEditDue(null); refresh(); } }} />
+                  <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label="Due date" style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
+                  <button onClick={async () => { await upsertDueDate(ck, cp.id, editDueVal, editDueDate); setEditDue(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
+                  <button onClick={async () => { await upsertDueDate(ck, cp.id, '', ''); setEditDue(null); refresh(); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
                 </div>}
               </div>;
             })}
@@ -1320,8 +1474,8 @@ export default function App() {
 
         {/* TRACKS */}
         {tab === "tracks" && <div>
-          <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 14 }}>Based on <strong>your</strong> records.</div>
-          {["A", "B", "C", "D"].map(g => { const t = c.tracks[g]; const m = TM[g]; const on = students.filter(s => calcGrade(iS[s.id] || {}, relAssignments, ck) === g);
+          <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 14 }}>Based on <strong>your</strong> records.{sectionFilter !== 'all' ? ` Showing ${courseSections?.[sectionFilter]?.name || sectionFilter} section.` : ''}</div>
+          {["A", "B", "C", "D"].map(g => { const t = c.tracks[g]; const m = TM[g]; const on = filteredStudents.filter(s => calcGrade(iS[s.id] || {}, relAssignments, ck) === g);
             return <div key={g} style={{ marginBottom: 12, background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
               <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid #F0EEEA" }}>
                 <div style={{ width: 28, height: 28, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 14, fontWeight: 700, color: m.c }}>{g}</div>
@@ -1334,9 +1488,9 @@ export default function App() {
           <div style={{ marginTop: 16 }}>
             <Lbl s={{ marginBottom: 8 }} onClick={() => setExpFinalGrades(!expFinalGrades)} expanded={expFinalGrades}>Final Grades Summary</Lbl>
             {expFinalGrades && <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-              {[...students].sort((a, b) => (a.last || "").localeCompare(b.last || "")).map((s, i) => {
+              {[...filteredStudents].sort((a, b) => (a.last || "").localeCompare(b.last || "")).map((s, i) => {
                 const g = calcGrade(iS[s.id] || {}, relAssignments, ck); const m = TM[g] || TM.F;
-                return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", borderBottom: i < students.length - 1 ? "1px solid #F5F3EF" : "none" }}>
+                return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", borderBottom: i < filteredStudents.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                   <div style={{ width: 26, height: 26, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 12, fontWeight: 700, color: m.c }}>{g === "early" ? "—" : g}</div>
                   <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500 }}>{s.last}, {s.first}</div>
                 </div>;
