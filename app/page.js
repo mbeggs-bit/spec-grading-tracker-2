@@ -242,6 +242,7 @@ export default function App() {
   const [tfNote, setTfNote] = useState('');
   const [tfLink, setTfLink] = useState('');
   const [tfExtra, setTfExtra] = useState('');
+  const [tfSubmitting, setTfSubmitting] = useState(false);
   const [noteFor, setNoteFor] = useState(null);
   const [noteVal, setNoteVal] = useState('');
   const [editDue, setEditDue] = useState(null);
@@ -483,11 +484,16 @@ export default function App() {
       refresh();
     };
     const handleToken = async () => {
-      if (!modal) return;
-      const note = tfType === 'extra' ? `Extra token: ${tfExtra}${tfNote ? ' — ' + tfNote : ''}` : tfNote;
-      await submitToken(myId, ck, modal.id, tfType === 'extra' ? 'revision' : tfType, note, tfLink);
-      setModal(null); setTfNote(''); setTfType('revision'); setTfLink(''); setTfExtra('');
-      refresh();
+      if (!modal || tfSubmitting) return;
+      setTfSubmitting(true);
+      try {
+        const note = tfType === 'extra' ? `Extra token: ${tfExtra}${tfNote ? ' — ' + tfNote : ''}` : tfNote;
+        await submitToken(myId, ck, modal.id, tfType === 'extra' ? 'revision' : tfType, note, tfLink);
+        setModal(null); setTfNote(''); setTfType('revision'); setTfLink(''); setTfExtra('');
+        refresh();
+      } finally {
+        setTfSubmitting(false);
+      }
     };
 
     const hasGroupToken = (gid) => myToks.some(t => t.assignment_id === gid);
@@ -674,7 +680,7 @@ export default function App() {
               <input value={tfLink} onChange={e => setTfLink(e.target.value)} placeholder="Paste a link to your work (Google Doc, Slides, Canva, etc.)" aria-label="Link to your work" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 8, boxSizing: "border-box" }} />
               <input value={tfNote} onChange={e => setTfNote(e.target.value)} placeholder="Note for Dr. Beggs (optional)" aria-label="Note for Dr. Beggs" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 14, boxSizing: "border-box" }} />
               <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={handleToken} style={{ padding: "8px 18px", background: c.color, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600 }}>Submit Token</button>
+                <button onClick={handleToken} disabled={tfSubmitting} style={{ padding: "8px 18px", background: tfSubmitting ? "#E0DDD8" : c.color, color: "#fff", border: "none", borderRadius: 6, cursor: tfSubmitting ? "not-allowed" : "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600 }}>{tfSubmitting ? "Submitting..." : "Submit Token"}</button>
                 <button onClick={() => setModal(null)} style={{ padding: "8px 14px", background: "#F0EEEA", color: "#6B6B6B", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 12 }}>Cancel</button>
               </div>
               <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 8 }}>{tfType === "extra" ? "Uses 1 extra token. Requires prior approval from Dr. Beggs." : `Uses 1 of your ${tok.avail} token${tok.avail !== 1 ? "s" : ""}.`}</div>
