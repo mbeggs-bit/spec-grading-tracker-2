@@ -388,9 +388,9 @@ export default function App() {
     <main style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
       <div style={{ maxWidth: 420, width: "100%", padding: "0 20px" }}>
         <div style={{ textAlign: "center", marginBottom: 36 }}>
-          <div aria-hidden="true" style={{ display: "inline-block", padding: "4px 10px", background: "#CF202E", color: "#fff", fontFamily: F.b, fontSize: 11, fontWeight: 600, letterSpacing: ".1em", textTransform: "uppercase", borderRadius: 3, marginBottom: 14 }}>MyTrack</div>
-          <h1 style={{ fontSize: 30, fontWeight: 700, color: "#1A1A1A", lineHeight: 1.15, marginBottom: 6 }}>Own your learning.</h1>
-          <p style={{ fontFamily: F.b, fontSize: 13, color: "#6B6B6B" }}>Track your growth. Make decisions. Pursue mastery.</p>
+          <div aria-hidden="true" style={{ display: "inline-block", padding: "4px 10px", background: "#CF202E", color: "#fff", fontFamily: F.b, fontSize: 11, fontWeight: 600, letterSpacing: ".1em", textTransform: "uppercase", borderRadius: 3, marginBottom: 14 }}>Lumos</div>
+          <h1 style={{ fontSize: 30, fontWeight: 700, color: "#1A1A1A", lineHeight: 1.15, marginBottom: 6 }}>Learning, illuminated.</h1>
+          <p style={{ fontFamily: F.b, fontSize: 13, color: "#6B6B6B" }}>Own your learning. Track your growth. Pursue mastery.</p>
         </div>
         <div role="region" aria-label={isSignup ? "Create account" : "Sign in"} style={{ background: "#fff", border: "1px solid #E8E6E1", borderRadius: 10, padding: "20px" }}>
           <h2 style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "#6B6B6B", marginBottom: 10 }}>
@@ -422,7 +422,7 @@ export default function App() {
         </div>
         <div style={{ marginTop: 20, padding: "12px 16px", background: "#F9F8F5", borderRadius: 8, border: "1px solid #E8E6E1" }}>
           <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 4 }}>Accessibility Statement</div>
-          <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", lineHeight: 1.5 }}>MyTrack is committed to ensuring digital accessibility for all users. This application conforms to WCAG 2.1 Level AA standards and is designed to work with screen readers, keyboard navigation, and assistive technologies. If you experience any accessibility barriers, please contact Dr. Beggs at <a href="mailto:mbeggs@ucmo.edu" style={{ color: "#1565C0" }}>mbeggs@ucmo.edu</a>.</div>
+          <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", lineHeight: 1.5 }}>Lumos is committed to ensuring digital accessibility for all users. This application conforms to WCAG 2.1 Level AA standards and is designed to work with screen readers, keyboard navigation, and assistive technologies. If you experience any accessibility barriers, please contact Dr. Beggs at <a href="mailto:mbeggs@ucmo.edu" style={{ color: "#1565C0" }}>mbeggs@ucmo.edu</a>.</div>
         </div>
       </div>
     </main>
