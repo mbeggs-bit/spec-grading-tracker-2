@@ -1,5 +1,5 @@
 import './globals.css';
-export const metadata = { title: 'Spec Grading Tracker', description: 'Own your learning.' };
+export const metadata = { title: 'Lumos', description: 'Learning, illuminated.' };
 export default function RootLayout({ children }) {
   return (<html lang="en"><body>{children}</body></html>);
 }
