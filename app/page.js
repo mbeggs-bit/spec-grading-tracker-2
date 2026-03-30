@@ -1032,7 +1032,7 @@ export default function App() {
 
         {/* OVERVIEW */}
         {tab === "overview" && <div>
-          {/* Upcoming Due Dates Feed */}
+          {/* Upcoming Due Dates Feed — Assignment-level summary */}
           {(() => {
             const today = new Date(); today.setHours(0,0,0,0);
             const sevenOut = new Date(today); sevenOut.setDate(sevenOut.getDate() + 7);
@@ -1047,27 +1047,31 @@ export default function App() {
                 if (dDate >= today && dDate <= sevenOut) {
                   const a = c.assignments.find(x => x.id === id);
                   const cp = (c.classPrep || []).find(x => x.id === id);
-                  feedItems.push({ date: dd.date, name: a?.name || cp?.name || id, label: dd.label, type: a ? (a.eval === 'mastery' ? 'mastery' : 'completion') : 'prep', source: 'assignment' });
+                  feedItems.push({ date: dd.date, name: a?.name || cp?.name || id, label: dd.label, type: a ? (a.eval === 'mastery' ? 'mastery' : 'completion') : 'prep' });
                 }
               }
             });
-            // Teaching plan due dates
+            // Teaching plan due dates — aggregate by assignment + teach_date
+            const teachAgg = {};
             teachSel.forEach(ts => {
               if (ts.plan_due_date) {
                 const pDate = new Date(ts.plan_due_date + 'T00:00:00');
                 if (pDate >= today && pDate <= sevenOut) {
-                  const a = c.assignments.find(x => x.id === ts.assignment_id);
-                  const sName = `${ts.profiles?.first_name || ''} ${ts.profiles?.last_name || ''}`.trim();
-                  // Only include if student is in current section filter
                   if (sectionFilter === 'all' || filteredStudents.some(s => s.id === ts.profile_id)) {
-                    feedItems.push({ date: ts.plan_due_date, name: `${a?.name || ts.assignment_id} plan`, label: sName, type: 'teaching', source: 'teaching', studentId: ts.profile_id });
+                    const key = ts.assignment_id + '|' + ts.teach_date;
+                    if (!teachAgg[key]) teachAgg[key] = { aid: ts.assignment_id, teachDate: ts.teach_date, planDue: ts.plan_due_date, count: 0 };
+                    teachAgg[key].count++;
                   }
                 }
               }
             });
-            feedItems.sort((a, b) => a.date.localeCompare(b.date));
+            Object.values(teachAgg).forEach(g => {
+              const a = c.assignments.find(x => x.id === g.aid);
+              feedItems.push({ date: g.planDue, name: a?.name || g.aid, teachDate: g.teachDate, count: g.count, type: 'teaching' });
+            });
+            feedItems.sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name));
             if (feedItems.length === 0) return null;
-            // Group by date
+            // Group by due date
             const dateGroups = {};
             feedItems.forEach(item => {
               if (!dateGroups[item.date]) dateGroups[item.date] = [];
@@ -1088,19 +1092,16 @@ export default function App() {
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                     <Pill t={urgency.label} bg={urgency.bg} c={urgency.c} />
                   </div>
-                  {items.map((item, ii) => {
-                    const typeBg = item.type === 'mastery' ? { bg: "#FFF0F0", c: "#C0392B" } : item.type === 'prep' ? { bg: "#F0F8FF", c: "#1565C0" } : item.type === 'teaching' ? { bg: "#DCEEFB", c: "#1565C0" } : { bg: "#F0F8FF", c: "#1565C0" };
-                    return <div key={ii} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
-                      <div style={{ width: 6, height: 6, borderRadius: "50%", background: typeBg.c, flexShrink: 0 }} aria-hidden="true" />
-                      <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", flex: 1 }}>{item.name}</span>
-                      {item.label && item.source === 'teaching' && <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{item.label}</span>}
-                      {item.label && item.source === 'assignment' && <span style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>{item.label}</span>}
-                      {item.type === 'teaching' && <Pill t="Plan" bg="#DCEEFB" c="#1565C0" />}
-                      {item.type === 'mastery' && <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />}
-                      {item.type === 'completion' && <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
-                      {item.type === 'prep' && <Pill t="Prep" bg="#F0F8FF" c="#1565C0" />}
-                    </div>;
-                  })}
+                  {items.map((item, ii) => <div key={ii} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
+                    <div style={{ width: 6, height: 6, borderRadius: "50%", background: item.type === 'teaching' ? "#1565C0" : item.type === 'mastery' ? "#C0392B" : "#1565C0", flexShrink: 0 }} aria-hidden="true" />
+                    <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", flex: 1 }}>{item.name}</span>
+                    {item.type === 'teaching' && <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>teaching {formatFeedDate(item.teachDate)} · {item.count} student{item.count !== 1 ? 's' : ''}</span>}
+                    {item.label && item.type !== 'teaching' && <span style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>{item.label}</span>}
+                    {item.type === 'teaching' && <Pill t="Plan" bg="#DCEEFB" c="#1565C0" />}
+                    {item.type === 'mastery' && <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />}
+                    {item.type === 'completion' && <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
+                    {item.type === 'prep' && <Pill t="Prep" bg="#F0F8FF" c="#1565C0" />}
+                  </div>)}
                 </div>;
               })}
             </div>;
