@@ -254,6 +254,7 @@ export default function App() {
   const [cpGridSearch, setCpGridSearch] = useState('');
   const [batchSearch, setBatchSearch] = useState('');
   const [teachDateFilter, setTeachDateFilter] = useState('all');
+  const [teachSearch, setTeachSearch] = useState('');
   const [sectionFilter, setSectionFilter] = useState('all');
   const [editDueDate, setEditDueDate] = useState('');
   const [expScheduled, setExpScheduled] = useState(false);
@@ -1107,6 +1108,174 @@ export default function App() {
             </div>;
           })()}
 
+          {/* Teaching Schedule — right after Due This Week */}
+          {teachDates.length > 0 && (() => {
+            const formatDate = (d) => { const dt = new Date(d + 'T12:00:00'); return dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }); };
+            const openAids = [...new Set(teachDates.filter(td => !td.closed).map(td => td.assignment_id))];
+            const today = new Date(); today.setHours(0,0,0,0);
+            const sevenDays = new Date(today); sevenDays.setDate(sevenDays.getDate() + 7);
+
+            // At a glance cards
+            const allAids = [...new Set(teachDates.map(td => td.assignment_id))];
+            const glance = allAids.map(aid => {
+              const a = c.assignments.find(x => x.id === aid);
+              const scheduled = teachSel.filter(ts => ts.assignment_id === aid && (sectionFilter === 'all' || filteredStudents.some(s => s.id === ts.profile_id))).length;
+              const closed = teachDates.filter(td => td.assignment_id === aid).every(d => d.closed);
+              return { aid, name: a?.name || aid, scheduled, closed };
+            });
+
+            // All selections (section-filtered)
+            const allSel = teachSel.filter(ts => openAids.includes(ts.assignment_id) && (sectionFilter === 'all' || filteredStudents.some(s => s.id === ts.profile_id))).sort((a, b) => new Date(a.teach_date) - new Date(b.teach_date));
+            const allTeachDates = [...new Set(allSel.map(ts => ts.teach_date))].sort();
+
+            // Group all selections by teach_date + assignment
+            const buildGroups = (sels) => {
+              const dateMap = {};
+              sels.forEach(ts => {
+                const key = ts.teach_date + '|' + ts.assignment_id;
+                if (!dateMap[key]) dateMap[key] = { teachDate: ts.teach_date, aid: ts.assignment_id, planDue: ts.plan_due_date, students: [] };
+                dateMap[key].students.push(ts);
+              });
+              return Object.values(dateMap).sort((a, b) => a.teachDate === b.teachDate ? a.aid.localeCompare(b.aid) : a.teachDate.localeCompare(b.teachDate));
+            };
+
+            // Determine which selections to show
+            const isSearching = teachDateFilter !== 'all' || teachSearch.length > 0;
+            let visibleSels = allSel;
+
+            // Apply date filter
+            if (teachDateFilter !== 'all') {
+              visibleSels = visibleSels.filter(ts => ts.teach_date === teachDateFilter);
+            }
+
+            // Apply name search
+            if (teachSearch.length > 0) {
+              const sq = teachSearch.toLowerCase();
+              visibleSels = visibleSels.filter(ts => {
+                const nm = `${ts.profiles?.first_name || ''} ${ts.profiles?.last_name || ''}`.toLowerCase();
+                return nm.includes(sq) || `${ts.profiles?.last_name || ''}, ${ts.profiles?.first_name || ''}`.toLowerCase().includes(sq);
+              });
+            }
+
+            // If not searching, only show upcoming (next 7 days) with ungraded students
+            if (!isSearching) {
+              visibleSels = visibleSels.filter(ts => {
+                const due = new Date(ts.plan_due_date + 'T00:00:00');
+                return due >= today && due <= sevenDays;
+              });
+            }
+
+            const groups = buildGroups(visibleSels);
+
+            // For default view: hide groups where ALL students are mastered
+            const visibleGroups = isSearching ? groups : groups.filter(grp => grp.students.some(ts => (iS[ts.profile_id] || {})[grp.aid] !== 'mastery'));
+
+            // Not yet scheduled
+            const scheduledStudentIds = new Set(teachSel.map(ts => ts.profile_id + '_' + ts.assignment_id));
+            const unscheduled = [];
+            openAids.forEach(aid => {
+              filteredStudents.forEach(s => {
+                if (!scheduledStudentIds.has(s.id + '_' + aid)) unscheduled.push({ ...s, aid });
+              });
+            });
+
+            return <div style={{ marginBottom: 18 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
+                <Lbl s={{ marginBottom: 0, flex: 1 }} onClick={() => setExpTeachSched(!expTeachSched)} expanded={expTeachSched}>Teaching Schedule</Lbl>
+                {expTeachSched && <div style={{ display: "flex", gap: 4 }}>
+                  <input value={teachSearch} onChange={e => setTeachSearch(e.target.value)} placeholder="Search student..." aria-label="Search teaching schedule by student name" style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#666", background: "#fff", width: 100, outline: "none" }} />
+                  <select aria-label="Filter by teaching date" value={teachDateFilter} onChange={e => setTeachDateFilter(e.target.value)} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: "#fff", cursor: "pointer" }}>
+                    <option value="all">Upcoming</option>
+                    {allTeachDates.map(d => <option key={d} value={d}>{formatDate(d)}</option>)}
+                  </select>
+                </div>}
+              </div>
+              {expTeachSched && <>
+                {/* At a glance */}
+                <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+                  {glance.map(g => <div key={g.aid} style={{ flex: 1, minWidth: 100, background: g.closed ? "#F5F4F0" : "#F0F8FF", padding: "10px 12px", borderRadius: 8, border: `1px solid ${g.closed ? "#E8E6E1" : "#DCEEFB"}` }}>
+                    <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 2 }}>{g.name}</div>
+                    <div style={{ fontFamily: F.d, fontSize: 18, fontWeight: 600, color: g.closed ? "#767676" : "#1565C0" }}>{g.scheduled}/{filteredStudents.length}</div>
+                    <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{g.closed ? "closed" : "scheduled"}</div>
+                  </div>)}
+                </div>
+
+                {/* Scheduled Lessons */}
+                {visibleGroups.length > 0 && <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 6 }}>{isSearching ? `Results${teachDateFilter !== 'all' ? ' for ' + formatDate(teachDateFilter) : ''}${teachSearch ? ' matching "' + teachSearch + '"' : ''}` : 'Scheduled Lessons'}</div>
+                  {visibleGroups.map((grp, gi) => {
+                    const a = c.assignments.find(x => x.id === grp.aid);
+                    const dueDate = new Date(grp.planDue + 'T00:00:00');
+                    const daysUntil = Math.floor((dueDate - today) / (1000 * 60 * 60 * 24));
+                    const isPast = daysUntil < 0;
+                    const badgeColor = isPast ? { bg: "#F5F4F0", c: "#767676" } : daysUntil <= 0 ? { bg: "#FFF3CD", c: "#856404" } : daysUntil <= 2 ? { bg: "#FAEEDA", c: "#633806" } : { bg: "#F5F4F0", c: "#666" };
+                    const dueLabel = isPast ? formatDate(grp.planDue) : daysUntil === 0 ? "Plans due tonight" : daysUntil === 1 ? "Plans due tomorrow" : `Plans due ${formatDate(grp.planDue)}`;
+                    return <div key={gi} style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden", marginBottom: 8 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", background: "#FAFAF7", borderBottom: "1px solid #F0EEEA" }}>
+                        <div>
+                          <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600 }}>{a?.name || grp.aid}</span>
+                          <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginLeft: 8 }}>Teaching {formatDate(grp.teachDate)}</span>
+                        </div>
+                        <Pill t={dueLabel} bg={badgeColor.bg} c={badgeColor.c} />
+                      </div>
+                      {grp.students.map((ts, si) => {
+                        const sName = `${ts.profiles?.first_name || ''} ${ts.profiles?.last_name || ''}`.trim();
+                        const initials = `${(ts.profiles?.first_name || '')[0] || ''}${(ts.profiles?.last_name || '')[0] || ''}`;
+                        const st = (iS[ts.profile_id] || {})[ts.assignment_id] || '';
+                        const circBg = st === 'mastery' ? '#D4EDDA' : st === 'revision' ? '#FFF3CD' : '#DCEEFB';
+                        const circColor = st === 'mastery' ? '#2D6A4F' : st === 'revision' ? '#856404' : '#1565C0';
+                        const noteKey = `teach_${ts.profile_id}_${ts.assignment_id}`;
+                        const isEditingNote = noteFor === noteKey;
+                        const existingNote = (iN[ts.profile_id] || {})[ts.assignment_id];
+                        return <div key={ts.id} style={{ borderBottom: si < grp.students.length - 1 ? "1px solid #F5F3EF" : "none", opacity: st === 'mastery' ? 0.5 : 1 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px" }}>
+                            <div style={{ width: 32, height: 32, borderRadius: "50%", background: circBg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: circColor, flexShrink: 0 }}>{st === 'mastery' ? '✓' : st === 'revision' ? 'R' : initials}</div>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, textDecoration: st === 'mastery' ? 'line-through' : 'none', color: st === 'mastery' ? '#767676' : '#1A1A1A' }}>{sName}</div>
+                              <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>Teaching {formatDate(ts.teach_date)}{st ? ` · ${st === 'mastery' ? 'Mastered' : 'Needs revision'}` : ''}</div>
+                            </div>
+                            {!st && <div style={{ display: "flex", gap: 4 }}>
+                              <button aria-label={`Mark ${sName} mastered`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'mastery'); refresh(); }} style={{ padding: "4px 10px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>M</button>
+                              <button aria-label={`Mark ${sName} revision`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'revision'); refresh(); }} style={{ padding: "4px 10px", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>R</button>
+                              <button aria-label={`Add note for ${sName}`} onClick={() => { setNoteFor(isEditingNote ? null : noteKey); setNoteVal(existingNote || ''); }} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: existingNote ? "#856404" : "#767676", cursor: "pointer", background: "#fff" }}>{existingNote ? "✎" : "+"}</button>
+                            </div>}
+                            {st === 'revision' && <div style={{ display: "flex", gap: 4 }}>
+                              <button aria-label={`Mark ${sName} mastered`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'mastery'); refresh(); }} style={{ padding: "4px 10px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>→ M</button>
+                              <button aria-label={`Add note for ${sName}`} onClick={() => { setNoteFor(isEditingNote ? null : noteKey); setNoteVal(existingNote || ''); }} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: existingNote ? "#856404" : "#767676", cursor: "pointer", background: "#fff" }}>{existingNote ? "✎" : "+"}</button>
+                            </div>}
+                          </div>
+                          {existingNote && !isEditingNote && <div style={{ padding: "0 16px 6px 58px", fontFamily: F.b, fontSize: 11, color: "#666", fontStyle: "italic" }}>Note: {existingNote}</div>}
+                          {isEditingNote && <div style={{ padding: "0 16px 8px 58px", display: "flex", gap: 6 }}>
+                            <input value={noteVal} onChange={e => setNoteVal(e.target.value)} placeholder="Feedback note..." aria-label="Feedback note" autoFocus style={{ flex: 1, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={async e => { if (e.key === "Enter") { await handleInstrNote(ts.profile_id, ts.assignment_id, noteVal); setNoteFor(null); } }} />
+                            <button onClick={async () => { await handleInstrNote(ts.profile_id, ts.assignment_id, noteVal); setNoteFor(null); }} style={{ padding: "4px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
+                          </div>}
+                        </div>;
+                      })}
+                    </div>;
+                  })}
+                </div>}
+                {visibleGroups.length === 0 && isSearching && <div style={{ padding: "14px", textAlign: "center", fontFamily: F.b, fontSize: 11, color: "#767676", background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", marginBottom: 14 }}>No results found.</div>}
+                {visibleGroups.length === 0 && !isSearching && <div style={{ padding: "14px", textAlign: "center", fontFamily: F.b, fontSize: 12, color: "#2D6A4F", background: "#D4EDDA", borderRadius: 10, marginBottom: 14 }}>✓ All upcoming plans graded!</div>}
+
+                {/* Not yet scheduled */}
+                {unscheduled.length > 0 && <div>
+                  <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 8 }}>Not yet scheduled</div>
+                  {openAids.map(aid => {
+                    const a = c.assignments.find(x => x.id === aid);
+                    const unsched = unscheduled.filter(u => u.aid === aid);
+                    if (unsched.length === 0) return null;
+                    return <div key={aid} style={{ marginBottom: 10 }}>
+                      <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#6B6B6B", marginBottom: 4 }}>{a?.name || aid} ({unsched.length})</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                        {unsched.map((s, i) => <span key={i} style={{ padding: "3px 8px", background: "#FFF3E0", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#E65100" }}>{s.last}, {s.first}</span>)}
+                      </div>
+                    </div>;
+                  })}
+                </div>}
+              </>}
+            </div>;
+          })()}
+
           <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
             {["A", "B", "C", "D", "F"].map(g => <div key={g} style={{ flex: 1, minWidth: 55, background: TM[g].bg, borderRadius: 8, padding: "10px", textAlign: "center" }}>
               <div style={{ fontSize: 20, fontWeight: 700, fontFamily: F.d, color: TM[g].c }}>{dist[g] || 0}</div>
@@ -1218,170 +1387,6 @@ export default function App() {
             </div>}
           </div>}
 
-          {/* Teaching Schedule Dashboard */}
-          {teachDates.length > 0 && <div style={{ marginTop: 20 }}>
-            <Lbl s={{ marginBottom: 8 }} onClick={() => setExpTeachSched(!expTeachSched)} expanded={expTeachSched}>Teaching Schedule</Lbl>
-            {expTeachSched && (() => {
-              const formatDate = (d) => { const dt = new Date(d + 'T12:00:00'); return dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }); };
-              const assignmentIds = [...new Set(teachDates.filter(td => !td.closed).map(td => td.assignment_id))];
-              const today = new Date(); today.setHours(0,0,0,0);
-              const sevenDays = new Date(today); sevenDays.setDate(sevenDays.getDate() + 7);
-
-              // At a glance
-              const allAids = [...new Set(teachDates.map(td => td.assignment_id))];
-              const glance = allAids.map(aid => {
-                const a = c.assignments.find(x => x.id === aid);
-                const scheduled = teachSel.filter(ts => ts.assignment_id === aid).length;
-                const closed = teachDates.filter(td => td.assignment_id === aid).every(d => d.closed);
-                return { aid, name: a?.name || aid, scheduled, closed };
-              });
-
-              // Upcoming (plan due in next 7 days)
-              const upcoming = teachSel.filter(ts => {
-                const due = new Date(ts.plan_due_date + 'T00:00:00');
-                return due >= today && due <= sevenDays;
-              }).sort((a, b) => new Date(a.plan_due_date) - new Date(b.plan_due_date));
-
-              // Not yet scheduled
-              const scheduledStudentIds = new Set(teachSel.map(ts => ts.profile_id + '_' + ts.assignment_id));
-              const unscheduled = [];
-              assignmentIds.forEach(aid => {
-                students.forEach(s => {
-                  if (!scheduledStudentIds.has(s.id + '_' + aid)) unscheduled.push({ ...s, aid });
-                });
-              });
-
-              return <>
-                <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-                  {glance.map(g => <div key={g.aid} style={{ flex: 1, minWidth: 100, background: g.closed ? "#F5F4F0" : "#F0F8FF", padding: "10px 12px", borderRadius: 8, border: `1px solid ${g.closed ? "#E8E6E1" : "#DCEEFB"}` }}>
-                    <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 2 }}>{g.name}</div>
-                    <div style={{ fontFamily: F.d, fontSize: 18, fontWeight: 600, color: g.closed ? "#767676" : "#1565C0" }}>{g.scheduled}/{filteredStudents.length}</div>
-                    <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{g.closed ? "closed" : "scheduled"}</div>
-                  </div>)}
-                </div>
-
-                {upcoming.length > 0 && <div style={{ marginBottom: 14 }}>
-                  <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 6 }}>Plans due in the next 7 days</div>
-                  {(() => {
-                    // Group by due date, then by assignment
-                    const dateMap = {};
-                    upcoming.forEach(ts => {
-                      const key = ts.plan_due_date + '|' + ts.assignment_id;
-                      if (!dateMap[key]) dateMap[key] = { dueDate: ts.plan_due_date, aid: ts.assignment_id, students: [] };
-                      dateMap[key].students.push(ts);
-                    });
-                    const groups = Object.values(dateMap).sort((a, b) => a.dueDate === b.dueDate ? a.aid.localeCompare(b.aid) : a.dueDate.localeCompare(b.dueDate));
-                    return groups.map((grp, gi) => {
-                      const a = c.assignments.find(x => x.id === grp.aid);
-                      const dueDate = new Date(grp.dueDate + 'T00:00:00');
-                      const daysUntil = Math.floor((dueDate - today) / (1000 * 60 * 60 * 24));
-                      const badgeColor = daysUntil <= 0 ? { bg: "#FFF3CD", c: "#856404" } : daysUntil <= 2 ? { bg: "#FAEEDA", c: "#633806" } : { bg: "#F5F4F0", c: "#666" };
-                      const dueLabel = daysUntil < 0 ? "Overdue" : daysUntil === 0 ? "Due tonight 11:59 PM" : daysUntil === 1 ? "Due tomorrow" : `${daysUntil} days`;
-                      return <div key={gi} style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden", marginBottom: 8 }}>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", background: "#FAFAF7", borderBottom: "1px solid #F0EEEA" }}>
-                          <div>
-                            <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600 }}>{a?.name || grp.aid}</span>
-                            <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginLeft: 8 }}>Due: {formatDate(grp.dueDate)}</span>
-                          </div>
-                          <Pill t={dueLabel} bg={badgeColor.bg} c={badgeColor.c} />
-                        </div>
-                        {grp.students.map((ts, si) => {
-                          const sName = `${ts.profiles?.first_name || ''} ${ts.profiles?.last_name || ''}`.trim();
-                          const initials = `${(ts.profiles?.first_name || '')[0] || ''}${(ts.profiles?.last_name || '')[0] || ''}`;
-                          const st = (iS[ts.profile_id] || {})[ts.assignment_id] || '';
-                          const circBg = st === 'mastery' ? '#D4EDDA' : st === 'revision' ? '#FFF3CD' : '#DCEEFB';
-                          const circColor = st === 'mastery' ? '#2D6A4F' : st === 'revision' ? '#856404' : '#1565C0';
-                          const noteKey = `teach_${ts.profile_id}_${ts.assignment_id}`;
-                          const isEditingNote = noteFor === noteKey;
-                          const existingNote = (iN[ts.profile_id] || {})[ts.assignment_id];
-                          return <div key={ts.id} style={{ borderBottom: si < grp.students.length - 1 ? "1px solid #F5F3EF" : "none", opacity: st === 'mastery' ? 0.5 : 1 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px" }}>
-                              <div style={{ width: 32, height: 32, borderRadius: "50%", background: circBg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: circColor, flexShrink: 0 }}>{st === 'mastery' ? '✓' : st === 'revision' ? 'R' : initials}</div>
-                              <div style={{ flex: 1 }}>
-                                <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, textDecoration: st === 'mastery' ? 'line-through' : 'none', color: st === 'mastery' ? '#767676' : '#1A1A1A' }}>{sName}</div>
-                                <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>Teaching {formatDate(ts.teach_date)}{st ? ` · ${st === 'mastery' ? 'Mastered' : 'Needs revision'}` : ''}</div>
-                              </div>
-                              {!st && <div style={{ display: "flex", gap: 4 }}>
-                                <button aria-label={`Mark ${sName} mastered`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'mastery'); refresh(); }} style={{ padding: "4px 10px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>M</button>
-                                <button aria-label={`Mark ${sName} revision`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'revision'); refresh(); }} style={{ padding: "4px 10px", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>R</button>
-                                <button aria-label={`Add note for ${sName}`} onClick={() => { setNoteFor(isEditingNote ? null : noteKey); setNoteVal(existingNote || ''); }} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: existingNote ? "#856404" : "#767676", cursor: "pointer", background: "#fff" }}>{existingNote ? "✎" : "+"}</button>
-                              </div>}
-                              {st === 'revision' && <div style={{ display: "flex", gap: 4 }}>
-                                <button aria-label={`Mark ${sName} mastered`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'mastery'); refresh(); }} style={{ padding: "4px 10px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>→ M</button>
-                                <button aria-label={`Add note for ${sName}`} onClick={() => { setNoteFor(isEditingNote ? null : noteKey); setNoteVal(existingNote || ''); }} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: existingNote ? "#856404" : "#767676", cursor: "pointer", background: "#fff" }}>{existingNote ? "✎" : "+"}</button>
-                              </div>}
-                            </div>
-                            {existingNote && !isEditingNote && <div style={{ padding: "0 16px 6px 58px", fontFamily: F.b, fontSize: 11, color: "#666", fontStyle: "italic" }}>Note: {existingNote}</div>}
-                            {isEditingNote && <div style={{ padding: "0 16px 8px 58px", display: "flex", gap: 6 }}>
-                              <input value={noteVal} onChange={e => setNoteVal(e.target.value)} placeholder="Feedback note..." aria-label="Feedback note" autoFocus style={{ flex: 1, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={async e => { if (e.key === "Enter") { await handleInstrNote(ts.profile_id, ts.assignment_id, noteVal); setNoteFor(null); } }} />
-                              <button onClick={async () => { await handleInstrNote(ts.profile_id, ts.assignment_id, noteVal); setNoteFor(null); }} style={{ padding: "4px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
-                            </div>}
-                          </div>;
-                        })}
-                      </div>;
-                    });
-                  })()}
-                </div>}
-
-                {/* Scheduled by date - collapsible */}
-                {(() => {
-                  const allSel = teachSel.filter(ts => assignmentIds.includes(ts.assignment_id)).sort((a, b) => new Date(a.teach_date) - new Date(b.teach_date));
-                  if (allSel.length === 0) return null;
-                  const allDates = [...new Set(allSel.map(ts => ts.teach_date))].sort();
-                  const filtered = teachDateFilter === 'all' ? allSel : allSel.filter(ts => ts.teach_date === teachDateFilter);
-                  const dateGroups = {};
-                  filtered.forEach(ts => {
-                    const key = ts.assignment_id + '|' + ts.teach_date;
-                    if (!dateGroups[key]) dateGroups[key] = { aid: ts.assignment_id, date: ts.teach_date, sels: [] };
-                    dateGroups[key].sels.push(ts);
-                  });
-                  const groups = Object.values(dateGroups).sort((a, b) => new Date(a.date) - new Date(b.date));
-                  return <div style={{ marginBottom: 14 }}>
-                    <button aria-expanded={expScheduled} onClick={() => setExpScheduled(!expScheduled)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", padding: "8px 0", background: "none", border: "none", cursor: "pointer" }}>
-                      <span style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555" }}>Scheduled ({allSel.length} students)</span>
-                      <span style={{ fontSize: 11, color: "#767676", transform: expScheduled ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
-                    </button>
-                    {expScheduled && <>
-                    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
-                      <select aria-label="Filter by teaching date" value={teachDateFilter} onChange={e => setTeachDateFilter(e.target.value)} style={{ padding: "3px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: "#fff", cursor: "pointer" }}>
-                        <option value="all">All dates</option>
-                        {allDates.map(d => <option key={d} value={d}>{formatDate(d)}</option>)}
-                      </select>
-                    </div>
-                    <div style={{ background: "#fff", borderRadius: 8, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-                      {groups.map((g, gi) => { const a = c.assignments.find(x => x.id === g.aid); return <div key={gi} style={{ padding: "8px 12px", borderBottom: gi < groups.length - 1 ? "1px solid #F5F3EF" : "none" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                          <div><span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600 }}>{formatDate(g.date)}</span><span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginLeft: 8 }}>{a?.name || g.aid}</span></div>
-                          <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>Plan due: {formatDate(new Date(new Date(g.date + 'T12:00:00').getTime() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10))}</div>
-                        </div>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                          {g.sels.map(ts => { const nm = `${ts.profiles?.last_name || ''}, ${ts.profiles?.first_name || ''}`; const st = (iS[ts.profile_id] || {})[g.aid] || ''; const stBg = st === 'mastery' ? '#D4EDDA' : st === 'revision' ? '#FFF3CD' : '#DCEEFB'; const stColor = st === 'mastery' ? '#2D6A4F' : st === 'revision' ? '#856404' : '#1565C0'; const stLabel = st === 'mastery' ? ' ✓M' : st === 'revision' ? ' R' : ''; return <span key={ts.id} style={{ padding: "3px 8px", background: stBg, borderRadius: 4, fontFamily: F.b, fontSize: 11, color: stColor, textDecoration: st === 'mastery' ? 'line-through' : 'none', textDecorationColor: '#B7DFBF' }}>{nm}{stLabel}</span>; })}
-                        </div>
-                      </div>; })}
-                      {groups.length === 0 && <div style={{ padding: "12px", textAlign: "center", fontFamily: F.b, fontSize: 11, color: "#767676" }}>No one scheduled for this date.</div>}
-                    </div>
-                    </>}
-                  </div>;
-                })()}
-
-                {/* Not yet scheduled */}
-                {unscheduled.length > 0 && <div>
-                  <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 8 }}>Not yet scheduled</div>
-                  {assignmentIds.map(aid => {
-                    const a = c.assignments.find(x => x.id === aid);
-                    const unsched = unscheduled.filter(u => u.aid === aid);
-                    if (unsched.length === 0) return null;
-                    return <div key={aid} style={{ marginBottom: 10 }}>
-                      <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#6B6B6B", marginBottom: 4 }}>{a?.name || aid} ({unsched.length})</div>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                        {unsched.map((s, i) => <span key={i} style={{ padding: "3px 8px", background: "#FFF3E0", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#E65100" }}>{s.last}, {s.first}</span>)}
-                      </div>
-                    </div>;
-                  })}
-                </div>}
-              </>;
-            })()}
-          </div>}
         </div>}
 
         {/* MANAGE */}
