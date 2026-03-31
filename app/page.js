@@ -1157,11 +1157,13 @@ export default function App() {
               });
             }
 
-            // If not searching, only show upcoming (next 7 days) with ungraded students
+            // If not searching, show: (a) any past lessons with ungraded students, (b) upcoming lessons in next 7 days
             if (!isSearching) {
               visibleSels = visibleSels.filter(ts => {
                 const due = new Date(ts.plan_due_date + 'T00:00:00');
-                return due >= today && due <= sevenDays;
+                const isUpcoming = due >= today && due <= sevenDays;
+                const isPastUngraded = due < today && (iS[ts.profile_id] || {})[ts.assignment_id] !== 'mastery';
+                return isUpcoming || isPastUngraded;
               });
             }
 
