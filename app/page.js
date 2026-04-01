@@ -1007,7 +1007,7 @@ export default function App() {
     <div>
       <a href="#main-content" className="skip-link">Skip to main content</a>
       <header style={{ borderBottom: "1px solid #E8E6E1", background: "#fff", position: "sticky", top: 0, zIndex: 10 }}>
-        <div style={{ maxWidth: 1000, margin: "0 auto", padding: "10px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+        <div style={{ maxWidth: 1100, margin: "0 auto", padding: "10px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button onClick={handleLogout} aria-label="Sign out" style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>← Sign out</button>
             <div style={{ width: 1, height: 14, background: "#E0DDD8" }} aria-hidden="true" />
@@ -1026,7 +1026,7 @@ export default function App() {
         </div>
       </header>
 
-      <main id="main-content" style={{ maxWidth: 1000, margin: "0 auto", padding: "18px 20px" }}>
+      <main id="main-content" style={{ maxWidth: 1100, margin: "0 auto", padding: "18px 20px" }}>
         <nav role="tablist" aria-label="Dashboard sections" style={{ display: "flex", gap: 0, marginBottom: 18, borderBottom: "2px solid #F0EEEA" }}>
           {[{ k: "overview", l: "Overview" }, { k: "manage", l: "Manage" }, { k: "queue", l: "Tokens" }, { k: "tracks", l: "Tracks" }].map(t => <button role="tab" aria-selected={tab === t.k} key={t.k} onClick={() => setTab(t.k)} style={{ padding: "8px 14px", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: tab === t.k ? c.color : "#767676", background: "none", borderBottom: tab === t.k ? `2px solid ${c.color}` : "2px solid transparent", marginBottom: -2, position: "relative" }}>{t.l}{t.k === "queue" && pending.length > 0 && <span aria-label={`${pending.length} pending`} style={{ position: "absolute", top: 4, right: 2, minWidth: 16, height: 16, borderRadius: 8, background: "#CF202E", color: "#fff", fontFamily: F.b, fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{pending.length}</span>}</button>)}
         </nav>
@@ -1296,24 +1296,29 @@ export default function App() {
           </div>
 
           {expStudents && <><div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 16px", borderBottom: "2px solid #F0EEEA", background: "#FAFAF7" }}>
-              <div style={{ width: 24 }} />
-              <div style={{ width: 120, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676" }}>Student</div>
-              <div style={{ flex: 1, display: "flex", gap: 2 }}>{relAssignments.map(id => { const x = c.assignments.find(a => a.id === id); return <div key={id} style={{ flex: 1, minWidth: 12, maxWidth: 22, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", textAlign: "center", overflow: "hidden" }} title={x?.name}>{(x?.name || "").substring(0, 4)}</div>; })}</div>
-              <div style={{ width: 50, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", textAlign: "right" }}>Self</div>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "8px 16px 6px", borderBottom: "2px solid #F0EEEA", background: "#FAFAF7" }}>
+              <div style={{ width: 24, flexShrink: 0 }} />
+              <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676" }}>Student</div>
+              <div style={{ flex: 1, display: "flex", gap: 3 }}>{relAssignments.map(id => { const x = c.assignments.find(a => a.id === id);
+                const words = (x?.name || "").split(' ');
+                const abbr = words.length >= 3 ? words.filter(w => w.length > 1).map(w => w[0]).join('').substring(0, 5) : (x?.name || "").substring(0, 6);
+                return <div key={id} style={{ flex: 1, minWidth: 28, maxWidth: 40, display: "flex", alignItems: "flex-end", justifyContent: "center" }} title={x?.name} aria-label={x?.name}>
+                  <div style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", fontFamily: F.b, fontSize: 10, fontWeight: 600, color: "#555", textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", maxHeight: 72, lineHeight: 1.2, paddingBottom: 2 }}>{x?.name || ""}</div>
+                </div>; })}</div>
+              <div style={{ width: 50, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", textAlign: "right" }}>Self</div>
             </div>
             {(() => { const gq = gridSearch.toLowerCase(); const gridFiltered = gq ? sorted.filter(s => `${s.first} ${s.last}`.toLowerCase().includes(gq) || `${s.last}, ${s.first}`.toLowerCase().includes(gq)) : sorted; return gridFiltered.map((s, si) => {
               const ig = calcGrade(iS[s.id] || {}, relAssignments, ck); const sg = calcGrade(sC[s.id] || {}, relAssignments, ck);
               const m = TM[ig] || TM.F; const mm = ig !== sg && ig !== "early" && sg !== "early";
               return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < sorted.length - 1 ? "1px solid #F5F3EF" : "none", background: mm ? "#FFF8F0" : "transparent" }}>
                 <div style={{ width: 22, height: 22, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 11, fontWeight: 700, color: m.c, flexShrink: 0 }}>{ig === "early" ? "—" : ig}</div>
-                <div style={{ width: 120, flexShrink: 0, fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sortBy === "last" ? `${s.last}, ${s.first}` : s.name}</div>
-                <div style={{ flex: 1, display: "flex", gap: 2 }}>
+                <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sortBy === "last" ? `${s.last}, ${s.first}` : s.name}</div>
+                <div style={{ flex: 1, display: "flex", gap: 3 }}>
                   {relAssignments.map(id => { const st = (iS[s.id] || {})[id] || "";
-                    return <div key={id} title={c.assignments.find(a => a.id === id)?.name} style={{ flex: 1, minWidth: 12, maxWidth: 22, height: 16, borderRadius: 3, background: st === "mastery" ? "#D4EDDA" : st === "revision" ? "#FFF3CD" : "#F5F4F0", border: !st ? "1.5px dashed #E8E6E1" : "1.5px solid transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: st === "mastery" ? "#2D6A4F" : st === "revision" ? "#856404" : "transparent" }}>{st === "mastery" ? "M" : st === "revision" ? "R" : ""}</div>;
+                    return <div key={id} title={c.assignments.find(a => a.id === id)?.name} style={{ flex: 1, minWidth: 28, maxWidth: 40, height: 22, borderRadius: 4, background: st === "mastery" ? "#D4EDDA" : st === "revision" ? "#FFF3CD" : "#F5F4F0", border: !st ? "1.5px dashed #E8E6E1" : "1.5px solid transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: st === "mastery" ? "#2D6A4F" : st === "revision" ? "#856404" : "transparent" }}>{st === "mastery" ? "M" : st === "revision" ? "R" : ""}</div>;
                   })}
                 </div>
-                <div style={{ width: 50, textAlign: "right", fontFamily: F.b, fontSize: 11, color: mm ? "#E65100" : "#767676" }}>{sg === "early" ? "—" : sg}{mm ? " ⚠" : ""}</div>
+                <div style={{ width: 50, flexShrink: 0, textAlign: "right", fontFamily: F.b, fontSize: 11, color: mm ? "#E65100" : "#767676" }}>{sg === "early" ? "—" : sg}{mm ? " ⚠" : ""}</div>
               </div>;
             }); })()}
           </div>
@@ -1364,26 +1369,27 @@ export default function App() {
               </div>}
             </div>
             {expClassPrep && <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 16px", borderBottom: "2px solid #F0EEEA", background: "#FAFAF7" }}>
-                <div style={{ width: 100, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676" }}>Student</div>
-                <div style={{ flex: 1, display: "flex", gap: 2 }}>{(c.classPrep || []).map(cp => {
-                  const abbr = cp.name.split(' ').map(w => w[0]).join('').substring(0, 4);
-                  return <div key={cp.id} style={{ flex: 1, minWidth: 12, maxWidth: 28, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", textAlign: "center", overflow: "hidden" }} title={cp.name}>{abbr}</div>;
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "8px 16px 6px", borderBottom: "2px solid #F0EEEA", background: "#FAFAF7" }}>
+                <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676" }}>Student</div>
+                <div style={{ flex: 1, display: "flex", gap: 3 }}>{(c.classPrep || []).map(cp => {
+                  return <div key={cp.id} style={{ flex: 1, minWidth: 28, maxWidth: 40, display: "flex", alignItems: "flex-end", justifyContent: "center" }} title={cp.name} aria-label={cp.name}>
+                    <div style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", fontFamily: F.b, fontSize: 10, fontWeight: 600, color: "#555", textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", maxHeight: 72, lineHeight: 1.2, paddingBottom: 2 }}>{cp.name}</div>
+                  </div>;
                 })}</div>
-                <div style={{ width: 40, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", textAlign: "right" }}>{cpSum.map(cp => `${cp.done}`).join('/')}</div>
+                <div style={{ width: 50, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", textAlign: "right" }}>{cpSum.map(cp => `${cp.done}`).join('/')}</div>
               </div>
               {(() => { const cpq = cpGridSearch.toLowerCase(); const cpFiltered = cpq ? sorted.filter(s => `${s.first} ${s.last}`.toLowerCase().includes(cpq) || `${s.last}, ${s.first}`.toLowerCase().includes(cpq)) : sorted; return cpFiltered.map((s, si) => {
                 const sCp = cP[s.id] || {};
                 const doneCount = (c.classPrep || []).filter(cp => !!sCp[cp.id]).length;
                 const allDone = doneCount === (c.classPrep || []).length;
                 return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < cpFiltered.length - 1 ? "1px solid #F5F3EF" : "none" }}>
-                  <div style={{ width: 100, flexShrink: 0, fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.last}, {s.first}</div>
-                  <div style={{ flex: 1, display: "flex", gap: 2 }}>
+                  <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.last}, {s.first}</div>
+                  <div style={{ flex: 1, display: "flex", gap: 3 }}>
                     {(c.classPrep || []).map(cp => { const done = !!sCp[cp.id];
-                      return <div key={cp.id} title={`${cp.name}: ${done ? 'Complete' : 'Not complete'}`} style={{ flex: 1, minWidth: 12, maxWidth: 28, height: 16, borderRadius: 3, background: done ? "#D4EDDA" : "#F5F4F0", border: done ? "1.5px solid #B7DFBF" : "1.5px dashed #E8E6E1", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: done ? "#2D6A4F" : "transparent" }}>{done ? "✓" : ""}</div>;
+                      return <div key={cp.id} title={`${cp.name}: ${done ? 'Complete' : 'Not complete'}`} style={{ flex: 1, minWidth: 28, maxWidth: 40, height: 22, borderRadius: 4, background: done ? "#D4EDDA" : "#F5F4F0", border: done ? "1.5px solid #B7DFBF" : "1.5px dashed #E8E6E1", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: done ? "#2D6A4F" : "transparent" }}>{done ? "✓" : ""}</div>;
                     })}
                   </div>
-                  <div style={{ width: 40, textAlign: "right", fontFamily: F.b, fontSize: 11, color: allDone ? "#2D6A4F" : "#767676" }}>{doneCount}/{(c.classPrep || []).length}</div>
+                  <div style={{ width: 50, flexShrink: 0, textAlign: "right", fontFamily: F.b, fontSize: 11, color: allDone ? "#2D6A4F" : "#767676" }}>{doneCount}/{(c.classPrep || []).length}</div>
                 </div>;
               }); })()}
             </div>}
