@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { COURSES, TM, CAL_LINK, BRAND, calcGrade, getBlockers, tokBal, pastCutoff, getTokenCutoff, getTokenTarget, getCourseSections } from '../lib/courses';
 
@@ -311,7 +311,41 @@ export default function App() {
     if (isInitial) setDataLoading(false);
   }
 
+  // Full refresh — only used when multiple tables changed (e.g. queue resolve)
   const refresh = () => loadCourseData(false);
+
+  // Targeted partial refresh — only re-fetch specific tables
+  const partialRefresh = useCallback(async (tables) => {
+    if (!ck || !user) return;
+    const isStudent = user.profile.role === 'student';
+    const pid = isStudent ? user.profile.id : null;
+    const updates = {};
+    const fetches = [];
+    if (tables.includes('iS')) fetches.push(loadInstrStatuses(ck).then(d => { updates.iS = d; }));
+    if (tables.includes('iN')) fetches.push(loadInstrNotes(ck).then(d => { updates.iN = d; }));
+    if (tables.includes('sC')) fetches.push(loadStudentChecks(ck, pid).then(d => { updates.sC = d; }));
+    if (tables.includes('cP')) fetches.push(loadClassPrep(ck, pid).then(d => { updates.cP = d; }));
+    if (tables.includes('toks')) fetches.push(loadTokens(ck, pid).then(d => { updates.toks = d; }));
+    if (tables.includes('fq')) fetches.push(loadFeedbackQueue(ck).then(d => { updates.fq = d; }));
+    if (tables.includes('rel')) fetches.push(loadReleasedAssignments(ck).then(d => { updates.rel = d; }));
+    if (tables.includes('dueDates')) fetches.push(loadDueDates(ck).then(d => { updates.dueDates = d; }));
+    if (tables.includes('teachSel')) fetches.push(loadTeachingSelections(ck, pid).then(d => { updates.teachSel = d; }));
+    await Promise.all(fetches);
+    setCourseData(prev => ({ ...prev, ...updates }));
+  }, [ck, user]);
+
+  // Optimistic state updater — apply a local mutation immediately, persist to DB in background
+  const optimistic = useCallback((localUpdate, dbAction, refreshTables) => {
+    // 1. Immediately update UI
+    setCourseData(prev => localUpdate(prev));
+    // 2. Persist to DB, then do a targeted refresh to reconcile
+    dbAction().then(() => {
+      if (refreshTables) partialRefresh(refreshTables);
+    }).catch(() => {
+      // On error, do a full refresh to restore correct state
+      loadCourseData(false);
+    });
+  }, [partialRefresh]);
 
   async function handleLogin() {
     setLoginErr('');
@@ -477,12 +511,32 @@ export default function App() {
     const cutoff = pastCutoff(ck);
 
     const handleCheck = async (aid) => {
-      await toggleStudentCheck(myId, ck, aid);
-      refresh();
+      const wasChecked = !!myChecks[aid];
+      optimistic(
+        prev => {
+          const newSC = { ...prev.sC };
+          if (!newSC[myId]) newSC[myId] = {};
+          newSC[myId] = { ...newSC[myId] };
+          if (wasChecked) { delete newSC[myId][aid]; } else { newSC[myId][aid] = true; }
+          return { ...prev, sC: newSC };
+        },
+        () => toggleStudentCheck(myId, ck, aid),
+        ['sC']
+      );
     };
     const handlePrep = async (pid) => {
-      await toggleClassPrep(myId, ck, pid);
-      refresh();
+      const wasDone = !!myPrep[pid];
+      optimistic(
+        prev => {
+          const newCP = { ...prev.cP };
+          if (!newCP[myId]) newCP[myId] = {};
+          newCP[myId] = { ...newCP[myId] };
+          if (wasDone) { delete newCP[myId][pid]; } else { newCP[myId][pid] = true; }
+          return { ...prev, cP: newCP };
+        },
+        () => toggleClassPrep(myId, ck, pid),
+        ['cP']
+      );
     };
     const handleToken = async () => {
       if (!modal || tfSubmitting) return;
@@ -491,7 +545,7 @@ export default function App() {
         const note = tfType === 'extra' ? `Extra token: ${tfExtra}${tfNote ? ' — ' + tfNote : ''}` : tfNote;
         await submitToken(myId, ck, modal.id, tfType === 'extra' ? 'revision' : tfType, note, tfLink);
         setModal(null); setTfNote(''); setTfType('revision'); setTfLink(''); setTfExtra('');
-        refresh();
+        partialRefresh(['toks', 'fq']);
       } finally {
         setTfSubmitting(false);
       }
@@ -720,12 +774,12 @@ export default function App() {
                         <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>Plan due</div>
                         <div style={{ fontFamily: F.b, fontSize: 14, fontWeight: 500 }}>{formatDate(mySel.plan_due_date)}</div>
                       </div>
-                      {!allClosed && <button aria-label="Change teaching date" onClick={async () => { await removeTeachingSelection(myId, ck, aid); refresh(); }} style={{ padding: "4px 10px", background: "#fff", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: "#6B6B6B", cursor: "pointer" }}>Change</button>}
+                      {!allClosed && <button aria-label="Change teaching date" onClick={async () => { await removeTeachingSelection(myId, ck, aid); partialRefresh(['teachSel']); }} style={{ padding: "4px 10px", background: "#fff", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: "#6B6B6B", cursor: "pointer" }}>Change</button>}
                     </div>
                   </div> : !allClosed ? <div>
                     <div style={{ fontFamily: F.b, fontSize: 11, color: "#555", marginBottom: 6 }}>Pick your teaching date:</div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                      {dates.filter(d => !d.closed).map(d => <button key={d.teach_date} aria-label={`Pick teaching date: ${formatDate(d.teach_date)}`} onClick={async () => { await pickTeachingDate(myId, ck, aid, d.teach_date); refresh(); }}
+                      {dates.filter(d => !d.closed).map(d => <button key={d.teach_date} aria-label={`Pick teaching date: ${formatDate(d.teach_date)}`} onClick={async () => { await pickTeachingDate(myId, ck, aid, d.teach_date); partialRefresh(['teachSel']); }}
                         style={{ padding: "5px 10px", background: "#fff", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer", position: "relative" }}
                         onMouseEnter={e => { e.currentTarget.style.background = "#DCEEFB"; e.currentTarget.style.borderColor = "#1565C0"; }}
                         onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#E0DDD8"; }}>
@@ -815,30 +869,79 @@ export default function App() {
   const pending = fq.filter(f => !f.resolved);
 
   const handleInstrUpdate = async (pid, aid, val) => {
-    await upsertInstrStatus(pid, ck, aid, val);
-    refresh();
+    optimistic(
+      prev => {
+        const newIS = { ...prev.iS };
+        if (!newIS[pid]) newIS[pid] = {};
+        newIS[pid] = { ...newIS[pid] };
+        if (val) { newIS[pid][aid] = val; } else { delete newIS[pid][aid]; }
+        return { ...prev, iS: newIS };
+      },
+      () => upsertInstrStatus(pid, ck, aid, val),
+      null // no reconcile needed — optimistic state is authoritative
+    );
   };
   const handleInstrNote = async (pid, aid, note) => {
-    await upsertInstrNote(pid, ck, aid, note);
-    refresh();
+    optimistic(
+      prev => {
+        const newIN = { ...prev.iN };
+        if (!newIN[pid]) newIN[pid] = {};
+        newIN[pid] = { ...newIN[pid], [aid]: note };
+        return { ...prev, iN: newIN };
+      },
+      () => upsertInstrNote(pid, ck, aid, note),
+      null
+    );
   };
   const handleToggleRel = async (aid) => {
-    await toggleReleased(ck, aid);
-    refresh();
+    optimistic(
+      prev => {
+        const newRel = prev.rel.includes(aid) ? prev.rel.filter(id => id !== aid) : [...prev.rel, aid];
+        return { ...prev, rel: newRel };
+      },
+      () => toggleReleased(ck, aid),
+      ['rel']
+    );
   };
   const handleResolve = async (qId, pid, aid, res) => {
-    await resolveQueueItem(qId, pid, ck, aid, res);
-    refresh();
+    // Optimistically mark queue item resolved
+    optimistic(
+      prev => {
+        const newFq = prev.fq.map(item => item.id === qId ? { ...item, resolved: true, resolution: res, resolved_at: new Date().toISOString() } : item);
+        // Also optimistically update instructor status if M or R
+        let newIS = prev.iS;
+        if (res === 'M' || res === 'R') {
+          newIS = { ...prev.iS };
+          if (!newIS[pid]) newIS[pid] = {};
+          newIS[pid] = { ...newIS[pid], [aid]: res === 'M' ? 'mastery' : 'revision' };
+        }
+        return { ...prev, fq: newFq, iS: newIS };
+      },
+      () => resolveQueueItem(qId, pid, ck, aid, res),
+      ['fq', 'iS'] // reconcile both after DB write (resolveQueueItem does email lookup)
+    );
   };
   const handleReturn = async (qId, pid, aid) => {
     if (confirm('Return this token to the student? This will delete the submission.')) {
       await returnToken(qId, pid, ck, aid);
-      refresh();
+      partialRefresh(['fq', 'toks']);
     }
   };
   const markAllInstr = async (aid, val) => {
-    for (const s of students) { await upsertInstrStatus(s.id, ck, aid, val); }
-    refresh();
+    // Optimistic: update all students at once
+    optimistic(
+      prev => {
+        const newIS = { ...prev.iS };
+        students.forEach(s => {
+          if (!newIS[s.id]) newIS[s.id] = {};
+          newIS[s.id] = { ...newIS[s.id] };
+          if (val) { newIS[s.id][aid] = val; } else { delete newIS[s.id][aid]; }
+        });
+        return { ...prev, iS: newIS };
+      },
+      async () => { for (const s of students) { await upsertInstrStatus(s.id, ck, aid, val); } },
+      ['iS']
+    );
   };
 
   // Section filtering — null-safe for Spring 2026 courses
@@ -847,18 +950,21 @@ export default function App() {
   const sectionKeys = hasSections ? [...new Set(students.map(s => s.section).filter(Boolean))] : [];
   const filteredStudents = sectionFilter === 'all' ? students : students.filter(s => s.section === sectionFilter);
 
-  const sorted = [...filteredStudents].sort((a, b) => {
+  const sorted = useMemo(() => [...filteredStudents].sort((a, b) => {
     if (sortBy === "first") return (a.first || "").localeCompare(b.first || "");
     if (sortBy === "last") return (a.last || "").localeCompare(b.last || "");
     const o = { A: 0, B: 1, C: 2, D: 3, F: 4, early: 5 };
     return (o[calcGrade(iS[a.id] || {}, relAssignments, ck)] || 5) - (o[calcGrade(iS[b.id] || {}, relAssignments, ck)] || 5);
-  });
+  }), [filteredStudents, sortBy, iS, relAssignments, ck]);
 
-  const dist = { A: 0, B: 0, C: 0, D: 0, F: 0, early: 0 };
-  filteredStudents.forEach(s => { const g = calcGrade(iS[s.id] || {}, relAssignments, ck); dist[g] = (dist[g] || 0) + 1; });
+  const dist = useMemo(() => {
+    const d = { A: 0, B: 0, C: 0, D: 0, F: 0, early: 0 };
+    filteredStudents.forEach(s => { const g = calcGrade(iS[s.id] || {}, relAssignments, ck); d[g] = (d[g] || 0) + 1; });
+    return d;
+  }, [filteredStudents, iS, relAssignments, ck]);
 
-  const insights = relAssignments.map(id => { const a = c.assignments.find(x => x.id === id); const rc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "revision").length; const mc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "mastery").length; return { ...a, rc, mc, ns: filteredStudents.length - rc - mc }; }).filter(a => a.rc > 0).sort((a, b) => b.rc - a.rc);
-  const cpSum = (c.classPrep || []).map(cp => ({ ...cp, done: filteredStudents.filter(s => (cP[s.id] || {})[cp.id]).length }));
+  const insights = useMemo(() => relAssignments.map(id => { const a = c.assignments.find(x => x.id === id); const rc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "revision").length; const mc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "mastery").length; return { ...a, rc, mc, ns: filteredStudents.length - rc - mc }; }).filter(a => a.rc > 0).sort((a, b) => b.rc - a.rc), [relAssignments, filteredStudents, iS, c.assignments]);
+  const cpSum = useMemo(() => (c.classPrep || []).map(cp => ({ ...cp, done: filteredStudents.filter(s => (cP[s.id] || {})[cp.id]).length })), [c.classPrep, filteredStudents, cP]);
 
   const exportCSV = () => {
     const filteredStudents = sectionFilter === 'all' ? students : students.filter(s => s.section === sectionFilter);
@@ -952,7 +1058,7 @@ export default function App() {
         if (checked && !done) await toggleClassPrep(s.id, ck, prepItem);
         if (!checked && done) await toggleClassPrep(s.id, ck, prepItem);
       }
-      refresh();
+      partialRefresh(['cP']);
     };
     const doneCount = students.filter(s => (cP[s.id] || {})[prepItem]).length;
     return (
@@ -985,8 +1091,8 @@ export default function App() {
             {pSorted.map((s, si) => {
               const done = !!(cP[s.id] || {})[prepItem];
               const sLabel = sortBy === "last" ? `${s.last}, ${s.first}` : `${s.first} ${s.last}`;
-              return <div key={s.id} role="checkbox" aria-checked={done} aria-label={`${sLabel}: ${currentPrep?.name || ''}`} tabIndex={0} onClick={async () => { await toggleClassPrep(s.id, ck, prepItem); refresh(); }}
-                onKeyDown={async e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); await toggleClassPrep(s.id, ck, prepItem); refresh(); } }}
+              return <div key={s.id} role="checkbox" aria-checked={done} aria-label={`${sLabel}: ${currentPrep?.name || ''}`} tabIndex={0} onClick={async () => { await toggleClassPrep(s.id, ck, prepItem); partialRefresh(['cP']); }}
+                onKeyDown={async e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); await toggleClassPrep(s.id, ck, prepItem); partialRefresh(['cP']); } }}
                 style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 16px", borderBottom: si < pSorted.length - 1 ? "1px solid #F5F3EF" : "none", cursor: "pointer" }}
                 onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                 <div style={{ width: 22, height: 22, borderRadius: 6, border: done ? "none" : "2px solid #D0CEC9", background: done ? "#2D6A4F" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -1237,12 +1343,12 @@ export default function App() {
                               <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>Teaching {formatDate(ts.teach_date)}{st ? ` · ${st === 'mastery' ? 'Mastered' : 'Needs revision'}` : ''}</div>
                             </div>
                             {!st && <div style={{ display: "flex", gap: 4 }}>
-                              <button aria-label={`Mark ${sName} mastered`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'mastery'); refresh(); }} style={{ padding: "4px 10px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>M</button>
-                              <button aria-label={`Mark ${sName} revision`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'revision'); refresh(); }} style={{ padding: "4px 10px", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>R</button>
+                              <button aria-label={`Mark ${sName} mastered`} onClick={() => handleInstrUpdate(ts.profile_id, ts.assignment_id, 'mastery')} style={{ padding: "4px 10px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>M</button>
+                              <button aria-label={`Mark ${sName} revision`} onClick={() => handleInstrUpdate(ts.profile_id, ts.assignment_id, 'revision')} style={{ padding: "4px 10px", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>R</button>
                               <button aria-label={`Add note for ${sName}`} onClick={() => { setNoteFor(isEditingNote ? null : noteKey); setNoteVal(existingNote || ''); }} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: existingNote ? "#856404" : "#767676", cursor: "pointer", background: "#fff" }}>{existingNote ? "✎" : "+"}</button>
                             </div>}
                             {st === 'revision' && <div style={{ display: "flex", gap: 4 }}>
-                              <button aria-label={`Mark ${sName} mastered`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'mastery'); refresh(); }} style={{ padding: "4px 10px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>→ M</button>
+                              <button aria-label={`Mark ${sName} mastered`} onClick={() => handleInstrUpdate(ts.profile_id, ts.assignment_id, 'mastery')} style={{ padding: "4px 10px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>→ M</button>
                               <button aria-label={`Add note for ${sName}`} onClick={() => { setNoteFor(isEditingNote ? null : noteKey); setNoteVal(existingNote || ''); }} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: existingNote ? "#856404" : "#767676", cursor: "pointer", background: "#fff" }}>{existingNote ? "✎" : "+"}</button>
                             </div>}
                           </div>
@@ -1419,10 +1525,10 @@ export default function App() {
                     <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label="Due date" style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
                     <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class, By end of day" aria-label="Due date note"
                       style={{ flex: 2, minWidth: 140, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }}
-                      onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, id, editDueVal, editDueDate); setEditDue(null); refresh(); } }} />
+                      onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, id, editDueVal, editDueDate); setEditDue(null); partialRefresh(['dueDates']); } }} />
                     <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label="Due date" style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
-                    <button onClick={async () => { await upsertDueDate(ck, id, editDueVal, editDueDate); setEditDue(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
-                    <button onClick={async () => { await upsertDueDate(ck, id, '', ''); setEditDue(null); refresh(); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
+                    <button onClick={async () => { await upsertDueDate(ck, id, editDueVal, editDueDate); setEditDue(null); partialRefresh(['dueDates']); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
+                    <button onClick={async () => { await upsertDueDate(ck, id, '', ''); setEditDue(null); partialRefresh(['dueDates']); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
                   </div>}
                 </div>;
               })}
@@ -1446,10 +1552,10 @@ export default function App() {
                 </div>
                 {isEditingDue && <div style={{ padding: "4px 16px 10px 60px", display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label="Due date" autoFocus style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
-                  <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class, By end of day" aria-label="Due date note" style={{ flex: 2, minWidth: 140, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, cp.id, editDueVal, editDueDate); setEditDue(null); refresh(); } }} />
+                  <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class, By end of day" aria-label="Due date note" style={{ flex: 2, minWidth: 140, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, cp.id, editDueVal, editDueDate); setEditDue(null); partialRefresh(['dueDates']); } }} />
                   <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label="Due date" style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
-                  <button onClick={async () => { await upsertDueDate(ck, cp.id, editDueVal, editDueDate); setEditDue(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
-                  <button onClick={async () => { await upsertDueDate(ck, cp.id, '', ''); setEditDue(null); refresh(); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
+                  <button onClick={async () => { await upsertDueDate(ck, cp.id, editDueVal, editDueDate); setEditDue(null); partialRefresh(['dueDates']); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
+                  <button onClick={async () => { await upsertDueDate(ck, cp.id, '', ''); setEditDue(null); partialRefresh(['dueDates']); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
                 </div>}
               </div>;
             })}
