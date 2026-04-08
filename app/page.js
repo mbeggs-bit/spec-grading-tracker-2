@@ -207,6 +207,12 @@ function Lbl({ children, s = {}, onClick, expanded }) {
 }
 function GradeRing({ grade, size = 50, label = "" }) { const m = TM[grade] || TM.F; const on = grade !== "F" && grade !== "early"; return <div role="img" aria-label={label || `Grade track: ${grade}`} style={{ width: size, height: size, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: on ? m.c : "#F0EEEA", border: `3px solid ${on ? m.c : "#E0DDD8"}`, transition: "all .4s" }}><span style={{ fontSize: size * .38, fontWeight: 700, fontFamily: F.d, color: on ? "#fff" : "#767676", lineHeight: 1 }}>{grade === "early" ? "—" : grade}</span></div>; }
 function Loading() { return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}><div style={{ fontFamily: F.b, color: "#6B6B6B", fontSize: 14 }}>Loading...</div></div>; }
+function Toast({ message }) {
+  return <>
+    <style>{`@keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(12px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } } @keyframes toastOut { from { opacity: 1; } to { opacity: 0; } }`}</style>
+    <div role="status" aria-live="polite" style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#1A1A1A", color: "#fff", padding: "10px 20px", borderRadius: 8, fontFamily: F.b, fontSize: 12, fontWeight: 500, boxShadow: "0 4px 12px rgba(0,0,0,.2)", zIndex: 200, animation: "toastIn .25s ease, toastOut .3s ease 1.8s forwards", pointerEvents: "none" }}>✓ {message}</div>
+  </>;
+}
 
 /* ================================================================
    MAIN APP
@@ -268,10 +274,33 @@ export default function App() {
   const [expTokens, setExpTokens] = useState(false);
   const [expPrep, setExpPrep] = useState(false);
   const [expTeach, setExpTeach] = useState(true);
+  const [toast, setToast] = useState(null); // { message, key }
+  const [lastRefresh, setLastRefresh] = useState(null); // timestamp of last data load
+  const [resetSent, setResetSent] = useState(false);
+  const [batchFocus, setBatchFocus] = useState(-1); // index of focused student in batch grading
 
-  // Check auth on mount
+  // Check auth on mount + keep session alive
   useEffect(() => {
     checkAuth();
+    // Listen for auth state changes (handles token refresh, session expiry)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED' && !session) {
+        setUser(null); setCk(null);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Toast auto-clear
+  useEffect(() => {
+    if (toast) {
+      const t = setTimeout(() => setToast(null), 2200);
+      return () => clearTimeout(t);
+    }
+  }, [toast]);
+
+  const showToast = useCallback((message) => {
+    setToast({ message, key: Date.now() });
   }, []);
 
   async function checkAuth() {
@@ -308,6 +337,7 @@ export default function App() {
       loadTeachingSelections(ck, user.profile.role === 'student' ? user.profile.id : null),
     ]);
     setCourseData({ rel: r, dueDates: dd, students: s, iS: is, iN: inn, sC: sc, cP: cp, toks: t, fq: f, teachDates: td, teachSel: ts });
+    setLastRefresh(new Date());
     if (isInitial) setDataLoading(false);
   }
 
@@ -413,7 +443,19 @@ export default function App() {
 
   async function handleLogout() {
     await supabase.auth.signOut();
-    setUser(null); setCk(null); setLoginEmail(''); setLoginPass(''); setLoginErr(''); setSignupCode(''); setSignupFirst(''); setSignupLast('');
+    setUser(null); setCk(null); setLoginEmail(''); setLoginPass(''); setLoginErr(''); setSignupCode(''); setSignupFirst(''); setSignupLast(''); setResetSent(false);
+  }
+
+  async function handlePasswordReset() {
+    const email = loginEmail.trim().toLowerCase();
+    if (!email || !email.endsWith('@ucmo.edu')) {
+      setLoginErr('Enter your UCM email above first.');
+      return;
+    }
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+    if (error) { setLoginErr(error.message); return; }
+    setResetSent(true);
+    setLoginErr('');
   }
 
   // ---- LOADING ----
@@ -451,10 +493,15 @@ export default function App() {
             style={{ width: "100%", padding: "10px", background: "#CF202E", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
             {isSignup ? "Create Account" : "Sign In"}
           </button>
-          <button onClick={() => { setIsSignup(!isSignup); setLoginErr(''); }}
+          <button onClick={() => { setIsSignup(!isSignup); setLoginErr(''); setResetSent(false); }}
             style={{ width: "100%", padding: "8px", background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>
             {isSignup ? "Already have an account? Sign in" : "First time? Create account"}
           </button>
+          {!isSignup && !resetSent && <button onClick={handlePasswordReset}
+            style={{ width: "100%", padding: "4px", background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 11, color: "#1565C0" }}>
+            Forgot password?
+          </button>}
+          {resetSent && <div role="status" aria-live="polite" style={{ fontFamily: F.b, fontSize: 11, color: "#2D6A4F", textAlign: "center", padding: "6px 0", lineHeight: 1.4 }}>Password reset email sent! Check your UCM inbox.</div>}
         </div>
         <div style={{ marginTop: 20, padding: "12px 16px", background: "#F9F8F5", borderRadius: 8, border: "1px solid #E8E6E1" }}>
           <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 4 }}>Accessibility Statement</div>
@@ -512,6 +559,7 @@ export default function App() {
 
     const handleCheck = async (aid) => {
       const wasChecked = !!myChecks[aid];
+      const aName = c.assignments.find(x => x.id === aid)?.name || aid;
       optimistic(
         prev => {
           const newSC = { ...prev.sC };
@@ -523,9 +571,11 @@ export default function App() {
         () => toggleStudentCheck(myId, ck, aid),
         ['sC']
       );
+      showToast(wasChecked ? `Unchecked: ${aName}` : `Checked off: ${aName}`);
     };
     const handlePrep = async (pid) => {
       const wasDone = !!myPrep[pid];
+      const cpName = (c.classPrep || []).find(x => x.id === pid)?.name || pid;
       optimistic(
         prev => {
           const newCP = { ...prev.cP };
@@ -537,6 +587,7 @@ export default function App() {
         () => toggleClassPrep(myId, ck, pid),
         ['cP']
       );
+      showToast(wasDone ? `Unchecked: ${cpName}` : `Done: ${cpName}`);
     };
     const handleToken = async () => {
       if (!modal || tfSubmitting) return;
@@ -546,6 +597,7 @@ export default function App() {
         await submitToken(myId, ck, modal.id, tfType === 'extra' ? 'revision' : tfType, note, tfLink);
         setModal(null); setTfNote(''); setTfType('revision'); setTfLink(''); setTfExtra('');
         partialRefresh(['toks', 'fq']);
+        showToast('Token submitted!');
       } finally {
         setTfSubmitting(false);
       }
@@ -861,6 +913,7 @@ export default function App() {
             </div>}
           </div>}
         </main>
+        {toast && <Toast key={toast.key} message={toast.message} />}
       </div>
     );
   }
@@ -987,17 +1040,37 @@ export default function App() {
     const bAll = [...students].sort((a, b) => sortBy === "first" ? (a.first || "").localeCompare(b.first || "") : (a.last || "").localeCompare(b.last || ""));
     const bq = batchSearch.toLowerCase();
     const bSorted = bq ? bAll.filter(s => `${s.first} ${s.last}`.toLowerCase().includes(bq) || `${s.last}, ${s.first}`.toLowerCase().includes(bq)) : bAll;
+    // Auto-scroll focused row into view
+    useEffect(() => {
+      if (batchFocus >= 0) {
+        const el = document.getElementById(`batch-row-${batchFocus}`);
+        if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    }, [batchFocus]);
+    const handleBatchKey = (e) => {
+      // Don't intercept when typing in an input
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); setBatchFocus(f => Math.min(f + 1, bSorted.length - 1)); }
+      else if (e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); setBatchFocus(f => Math.max(f - 1, 0)); }
+      else if (batchFocus >= 0 && batchFocus < bSorted.length) {
+        const s = bSorted[batchFocus];
+        if (e.key === 'm' || e.key === 'M') { e.preventDefault(); handleInstrUpdate(s.id, batchAsgn, 'mastery'); }
+        else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); if (ba?.eval !== 'completion') handleInstrUpdate(s.id, batchAsgn, 'revision'); }
+        else if (e.key === '-' || e.key === '0') { e.preventDefault(); handleInstrUpdate(s.id, batchAsgn, null); }
+        else if (e.key === 'n' || e.key === 'N') { e.preventDefault(); setNoteFor(noteFor === s.id ? null : s.id); setNoteVal((iN[s.id] || {})[batchAsgn] || ''); }
+      }
+    };
     return (
-      <div>
+      <div onKeyDown={handleBatchKey} tabIndex={-1}>
         <a href="#main-content" className="skip-link">Skip to main content</a>
         <main id="main-content" style={{ maxWidth: 900, margin: "0 auto", padding: "20px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button onClick={() => { setBatch(false); setBatchSearch(''); }} aria-label="Back to overview" style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>← Overview</button>
+            <button onClick={() => { setBatch(false); setBatchSearch(''); setBatchFocus(-1); }} aria-label="Back to overview" style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>← Overview</button>
             <h1 style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: "#555", margin: 0 }}>Grade by Assignment</h1>
           </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <input value={batchSearch} onChange={e => setBatchSearch(e.target.value)} placeholder="Filter..." aria-label="Filter students" style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: "#fff", width: 80, outline: "none" }} />
+            <input value={batchSearch} onChange={e => { setBatchSearch(e.target.value); setBatchFocus(-1); }} placeholder="Filter..." aria-label="Filter students" style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: "#fff", width: 80, outline: "none" }} />
             <select aria-label="Sort order" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: "#fff" }}><option value="first">First</option><option value="last">Last</option></select>
           </div>
         </div>
@@ -1015,15 +1088,17 @@ export default function App() {
             <button onClick={() => markAllInstr(batchAsgn, "mastery")} style={{ padding: "6px 14px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>{ba.eval === "completion" ? "Mark All Complete" : "Mark All Mastered"}</button>
             <button onClick={() => markAllInstr(batchAsgn, null)} style={{ padding: "6px 14px", background: "#F5F4F0", border: "1px solid #E8E6E1", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#6B6B6B", cursor: "pointer" }}>Reset All</button>
           </div>
+          <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginBottom: 8, padding: "4px 8px", background: "#F9F8F5", borderRadius: 4 }} aria-label="Keyboard shortcuts: arrow keys to navigate, M to master, R to revise, dash to reset, N for note">⌨ <strong>↑↓</strong> navigate · <strong>M</strong> master · {ba.eval !== "completion" && <><strong>R</strong> revise · </>}<strong>–</strong> reset · <strong>N</strong> note</div>
           <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
             {bSorted.map((s, si) => {
               const st = (iS[s.id] || {})[batchAsgn] || ""; const note = (iN[s.id] || {})[batchAsgn]; const isEN = noteFor === s.id;
               const studentChecked = !!(sC[s.id] || {})[batchAsgn];
+              const isFocused = batchFocus === si;
               const opts = ba.eval === "completion"
                 ? [{ v: "mastery", l: "✓ Complete", bg: "#D4EDDA", c: "#2D6A4F" }, { v: "", l: "—", bg: "#F5F4F0", c: "#767676" }]
                 : [{ v: "mastery", l: "Mastered", bg: "#D4EDDA", c: "#2D6A4F" }, { v: "revision", l: "Revise", bg: "#FFF3CD", c: "#856404" }, { v: "", l: "—", bg: "#F5F4F0", c: "#767676" }];
-              return <div key={s.id} style={{ borderBottom: si < bSorted.length - 1 ? "1px solid #F5F3EF" : "none" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px" }}>
+              return <div key={s.id} id={`batch-row-${si}`} style={{ borderBottom: si < bSorted.length - 1 ? "1px solid #F5F3EF" : "none", background: isFocused ? "#F0F8FF" : "transparent", outline: isFocused ? "2px solid #1565C0" : "none", outlineOffset: -2, borderRadius: isFocused ? 2 : 0, transition: "background .15s" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px" }} onClick={() => setBatchFocus(si)}>
                   <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, width: 120, flexShrink: 0 }}>{sortBy === "last" ? `${s.last}, ${s.first}` : `${s.first} ${s.last}`}</div>
                   <div style={{ display: "flex", gap: 4 }}>
                     {opts.map(o => <button key={o.v} aria-label={`${sortBy === "last" ? s.last + " " + s.first : s.first + " " + s.last}: ${o.l}`} onClick={() => handleInstrUpdate(s.id, batchAsgn, o.v || null)} style={{ padding: "5px 10px", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer", background: st === o.v ? o.bg : "#F8F7F4", color: st === o.v ? o.c : "#767676", border: st === o.v ? `2px solid ${o.c}` : "1px solid #E8E6E1" }}>{o.l}</button>)}
@@ -1397,7 +1472,8 @@ export default function App() {
               <input value={gridSearch} onChange={e => setGridSearch(e.target.value)} placeholder="Filter..." aria-label="Filter students" style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#666", background: "#fff", width: 80, outline: "none" }} />
               <select aria-label="Sort order" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: "2px 6px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#666", background: "#fff", cursor: "pointer" }}><option value="first">First</option><option value="last">Last</option><option value="grade">Track</option></select>
               <button aria-label="Export CSV" onClick={exportCSV} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#666", background: "#fff", cursor: "pointer" }}>📥 CSV</button>
-              <button aria-label="Refresh data" onClick={refresh} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#666", background: "#fff", cursor: "pointer" }}>↻ Refresh</button>
+              <button aria-label="Refresh data" onClick={() => { refresh(); }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#666", background: "#fff", cursor: "pointer" }}>↻ Refresh</button>
+              {lastRefresh && <span style={{ fontFamily: F.b, fontSize: 10, color: "#999" }} aria-label={`Data last refreshed at ${lastRefresh.toLocaleTimeString()}`}>{lastRefresh.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>}
             </div>}
           </div>
 
@@ -1526,7 +1602,6 @@ export default function App() {
                     <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class, By end of day" aria-label="Due date note"
                       style={{ flex: 2, minWidth: 140, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }}
                       onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, id, editDueVal, editDueDate); setEditDue(null); partialRefresh(['dueDates']); } }} />
-                    <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label="Due date" style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
                     <button onClick={async () => { await upsertDueDate(ck, id, editDueVal, editDueDate); setEditDue(null); partialRefresh(['dueDates']); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
                     <button onClick={async () => { await upsertDueDate(ck, id, '', ''); setEditDue(null); partialRefresh(['dueDates']); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
                   </div>}
@@ -1553,7 +1628,6 @@ export default function App() {
                 {isEditingDue && <div style={{ padding: "4px 16px 10px 60px", display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label="Due date" autoFocus style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
                   <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class, By end of day" aria-label="Due date note" style={{ flex: 2, minWidth: 140, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, cp.id, editDueVal, editDueDate); setEditDue(null); partialRefresh(['dueDates']); } }} />
-                  <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label="Due date" style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
                   <button onClick={async () => { await upsertDueDate(ck, cp.id, editDueVal, editDueDate); setEditDue(null); partialRefresh(['dueDates']); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
                   <button onClick={async () => { await upsertDueDate(ck, cp.id, '', ''); setEditDue(null); partialRefresh(['dueDates']); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
                 </div>}
