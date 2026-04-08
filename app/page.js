@@ -15,7 +15,12 @@ async function loadUserProfile(email) {
 }
 
 async function loadEnrollments(profileId) {
-  const { data } = await supabase.from('enrollments').select('course_key, section').eq('profile_id', profileId).eq('active', true);
+  // Try with active filter first; fall back if column doesn't exist yet
+  let { data, error } = await supabase.from('enrollments').select('course_key, section').eq('profile_id', profileId).eq('active', true);
+  if (error) {
+    const fallback = await supabase.from('enrollments').select('course_key, section').eq('profile_id', profileId);
+    data = fallback.data;
+  }
   return data || [];
 }
 
@@ -26,7 +31,12 @@ async function loadReleasedAssignments(courseKey) {
 }
 
 async function loadDueDates(courseKey) {
-  const { data } = await supabase.from('assignment_due_dates').select('assignment_id, due_label, due_date, section').eq('course_key', courseKey);
+  let { data, error } = await supabase.from('assignment_due_dates').select('assignment_id, due_label, due_date, section').eq('course_key', courseKey);
+  if (error) {
+    // section column may not exist yet — fall back
+    const fallback = await supabase.from('assignment_due_dates').select('assignment_id, due_label, due_date').eq('course_key', courseKey);
+    data = (fallback.data || []).map(r => ({ ...r, section: null }));
+  }
   const map = {};
   (data || []).forEach(r => {
     const sec = r.section || null;
@@ -211,11 +221,15 @@ async function removeTeachingSelection(profileId, courseKey, assignmentId) {
 
 // COURSE CONFIG (admin)
 async function loadAllCourseConfig() {
-  const { data } = await supabase.from('course_config').select('*');
-  if (data && data.length > 0) {
-    return hydrateFromDB(data);
+  try {
+    const { data, error } = await supabase.from('course_config').select('*');
+    if (!error && data && data.length > 0) {
+      return hydrateFromDB(data);
+    }
+  } catch (e) {
+    // Table doesn't exist yet — use fallback
   }
-  return COURSES_FALLBACK;
+  return COURSES;
 }
 
 async function saveCourseConfig(courseKey, config) {
