@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { COURSES, COURSES_FALLBACK, TM, CAL_LINK, BRAND, calcGrade, getBlockers, tokBal, pastCutoff, getTokenCutoff, getTokenTarget, getCourseSections, hydrateFromDB, courseToDBRow } from '../lib/courses';
+import { COURSES, TM, CAL_LINK, BRAND, calcGrade, calcStudentGrade, getBlockers, getStudentBlockers, tokBal, pastCutoff, getTokenCutoff, getTokenTarget, getCourseSections } from '../lib/courses';
 
 const F = { d: "'Source Serif 4',Georgia,serif", b: "'DM Sans',sans-serif" };
 
@@ -15,13 +15,8 @@ async function loadUserProfile(email) {
 }
 
 async function loadEnrollments(profileId) {
-  // Try with active filter first; fall back if column doesn't exist yet
-  let { data, error } = await supabase.from('enrollments').select('course_key, section').eq('profile_id', profileId).eq('active', true);
-  if (error) {
-    const fallback = await supabase.from('enrollments').select('course_key, section').eq('profile_id', profileId);
-    data = fallback.data;
-  }
-  return data || [];
+  const { data } = await supabase.from('enrollments').select('course_key').eq('profile_id', profileId);
+  return (data || []).map(e => e.course_key);
 }
 
 async function loadReleasedAssignments(courseKey) {
@@ -31,36 +26,17 @@ async function loadReleasedAssignments(courseKey) {
 }
 
 async function loadDueDates(courseKey) {
-  let { data, error } = await supabase.from('assignment_due_dates').select('assignment_id, due_label, due_date, section').eq('course_key', courseKey);
-  if (error) {
-    // section column may not exist yet — fall back
-    const fallback = await supabase.from('assignment_due_dates').select('assignment_id, due_label, due_date').eq('course_key', courseKey);
-    data = (fallback.data || []).map(r => ({ ...r, section: null }));
-  }
+  const { data } = await supabase.from('assignment_due_dates').select('assignment_id, due_label, due_date').eq('course_key', courseKey);
   const map = {};
-  (data || []).forEach(r => {
-    const sec = r.section || null;
-    if (!map[r.assignment_id]) map[r.assignment_id] = {};
-    map[r.assignment_id][sec] = { label: r.due_label, date: r.due_date || null };
-  });
+  (data || []).forEach(r => { map[r.assignment_id] = { label: r.due_label, date: r.due_date || null }; });
   return map;
 }
 
-// Resolve due date for a given assignment + section. Section-specific overrides course-wide (null).
-function resolveDueDate(dueDates, id, section) {
-  const entry = dueDates[id];
-  if (!entry) return null;
-  if (section && entry[section]) return entry[section];
-  return entry[null] || null;
-}
-
-async function upsertDueDate(courseKey, assignmentId, dueLabel, dueDate, section = null) {
+async function upsertDueDate(courseKey, assignmentId, dueLabel, dueDate) {
   if (!dueLabel && !dueDate) {
-    const match = { course_key: courseKey, assignment_id: assignmentId };
-    if (section) match.section = section; else match.section = null;
-    await supabase.from('assignment_due_dates').delete().match(match);
+    await supabase.from('assignment_due_dates').delete().match({ course_key: courseKey, assignment_id: assignmentId });
   } else {
-    await supabase.from('assignment_due_dates').upsert({ course_key: courseKey, assignment_id: assignmentId, due_label: dueLabel || null, due_date: dueDate || null, section: section || null, updated_at: new Date().toISOString() }, { onConflict: 'course_key,assignment_id,section' });
+    await supabase.from('assignment_due_dates').upsert({ course_key: courseKey, assignment_id: assignmentId, due_label: dueLabel || null, due_date: dueDate || null, updated_at: new Date().toISOString() }, { onConflict: 'course_key,assignment_id' });
   }
 }
 
@@ -73,6 +49,13 @@ async function loadInstrStatuses(courseKey) {
   const { data } = await supabase.from('instructor_statuses').select('*').eq('course_key', courseKey);
   const map = {};
   (data || []).forEach(r => { if (!map[r.profile_id]) map[r.profile_id] = {}; map[r.profile_id][r.assignment_id] = r.status; });
+  return map;
+}
+
+async function loadMyInstrStatuses(courseKey, profileId) {
+  const { data } = await supabase.from('instructor_statuses').select('assignment_id, status').eq('course_key', courseKey).eq('profile_id', profileId);
+  const map = {};
+  (data || []).forEach(r => { map[r.assignment_id] = r.status; });
   return map;
 }
 
@@ -219,46 +202,6 @@ async function removeTeachingSelection(profileId, courseKey, assignmentId) {
   await supabase.from('teaching_selections').delete().match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId });
 }
 
-// COURSE CONFIG (admin)
-async function loadAllCourseConfig() {
-  try {
-    const { data, error } = await supabase.from('course_config').select('*');
-    if (!error && data && data.length > 0) {
-      return hydrateFromDB(data);
-    }
-  } catch (e) {
-    // Table doesn't exist yet — use fallback
-  }
-  return COURSES;
-}
-
-async function saveCourseConfig(courseKey, config) {
-  const row = courseToDBRow(courseKey, config);
-  await supabase.from('course_config').upsert(row, { onConflict: 'course_key' });
-}
-
-// TEACHING DATE MANAGEMENT (instructor)
-async function addTeachingDate(courseKey, assignmentId, teachDate) {
-  await supabase.from('teaching_dates').insert({ course_key: courseKey, assignment_id: assignmentId, teach_date: teachDate });
-}
-
-async function removeTeachingDate(id) {
-  await supabase.from('teaching_dates').delete().eq('id', id);
-}
-
-async function toggleTeachingDateClosed(id, closed) {
-  await supabase.from('teaching_dates').update({ closed }).eq('id', id);
-}
-
-// ARCHIVE (semester transition)
-async function archiveCourseEnrollments(courseKey) {
-  await supabase.from('enrollments').update({ active: false }).eq('course_key', courseKey).eq('active', true);
-}
-
-async function clearDueDates(courseKey) {
-  await supabase.from('assignment_due_dates').delete().eq('course_key', courseKey);
-}
-
 /* ================================================================
    TINY COMPONENTS
    ================================================================ */
@@ -289,9 +232,9 @@ export default function App() {
 
   // Course data
   // Course data — single object to prevent multiple re-renders
-  const [courseData, setCourseData] = useState({ rel: [], dueDates: {}, students: [], iS: {}, iN: {}, sC: {}, cP: {}, toks: {}, fq: [], teachDates: [], teachSel: [] });
+  const [courseData, setCourseData] = useState({ rel: [], dueDates: {}, students: [], iS: {}, iN: {}, sC: {}, cP: {}, toks: {}, fq: [], teachDates: [], teachSel: [], myInstrS: {} });
   const [dataLoading, setDataLoading] = useState(false);
-  const { rel, dueDates, students, iS, iN, sC, cP, toks, fq, teachDates, teachSel } = courseData;
+  const { rel, dueDates, students, iS, iN, sC, cP, toks, fq, teachDates, teachSel, myInstrS } = courseData;
 
   // UI state
   const [tab, setTab] = useState('overview');
@@ -311,7 +254,6 @@ export default function App() {
   const [noteVal, setNoteVal] = useState('');
   const [editDue, setEditDue] = useState(null);
   const [editDueVal, setEditDueVal] = useState('');
-  const [editDueSection, setEditDueSection] = useState(null);
   const [queueFilter, setQueueFilter] = useState('pending');
   const [tokExpand, setTokExpand] = useState(null);
   const [tokSearch, setTokSearch] = useState('');
@@ -333,11 +275,6 @@ export default function App() {
   const [expTokens, setExpTokens] = useState(false);
   const [expPrep, setExpPrep] = useState(false);
   const [expTeach, setExpTeach] = useState(true);
-  // Admin state
-  const [adminEdit, setAdminEdit] = useState(null); // which field is being edited
-  const [adminVal, setAdminVal] = useState('');
-  const [addTeachDateAid, setAddTeachDateAid] = useState('');
-  const [addTeachDateVal, setAddTeachDateVal] = useState('');
 
   // Check auth on mount
   useEffect(() => {
@@ -345,17 +282,12 @@ export default function App() {
   }, []);
 
   async function checkAuth() {
-    // Load course config from DB (or fallback)
-    await loadAllCourseConfig();
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user) {
       const profile = await loadUserProfile(session.user.email);
       if (profile) {
-        const enrollData = await loadEnrollments(profile.id);
-        const courses = enrollData.map(e => e.course_key);
-        const mySections = {};
-        enrollData.forEach(e => { mySections[e.course_key] = e.section || null; });
-        setUser({ profile, courses, mySections });
+        const courses = await loadEnrollments(profile.id);
+        setUser({ profile, courses });
         if (courses.length === 1) setCk(courses[0]);
       }
     }
@@ -369,20 +301,22 @@ export default function App() {
 
   async function loadCourseData(isInitial = true) {
     if (isInitial) setDataLoading(true);
-    const [r, dd, s, is, inn, sc, cp, t, f, td, ts] = await Promise.all([
+    const isStudent = user.profile.role === 'student';
+    const [r, dd, s, is, inn, sc, cp, t, f, td, ts, mis] = await Promise.all([
       loadReleasedAssignments(ck),
       loadDueDates(ck),
-      user.profile.role === 'instructor' ? loadStudentsForCourse(ck) : Promise.resolve([]),
-      user.profile.role === 'instructor' ? loadInstrStatuses(ck) : Promise.resolve({}),
-      user.profile.role === 'instructor' ? loadInstrNotes(ck) : Promise.resolve({}),
-      loadStudentChecks(ck, user.profile.role === 'student' ? user.profile.id : null),
-      loadClassPrep(ck, user.profile.role === 'student' ? user.profile.id : null),
-      loadTokens(ck, user.profile.role === 'student' ? user.profile.id : null),
-      user.profile.role === 'instructor' ? loadFeedbackQueue(ck) : Promise.resolve([]),
+      !isStudent ? loadStudentsForCourse(ck) : Promise.resolve([]),
+      !isStudent ? loadInstrStatuses(ck) : Promise.resolve({}),
+      !isStudent ? loadInstrNotes(ck) : Promise.resolve({}),
+      loadStudentChecks(ck, isStudent ? user.profile.id : null),
+      loadClassPrep(ck, isStudent ? user.profile.id : null),
+      loadTokens(ck, isStudent ? user.profile.id : null),
+      !isStudent ? loadFeedbackQueue(ck) : Promise.resolve([]),
       loadTeachingDates(ck),
-      loadTeachingSelections(ck, user.profile.role === 'student' ? user.profile.id : null),
+      loadTeachingSelections(ck, isStudent ? user.profile.id : null),
+      isStudent ? loadMyInstrStatuses(ck, user.profile.id) : Promise.resolve({}),
     ]);
-    setCourseData({ rel: r, dueDates: dd, students: s, iS: is, iN: inn, sC: sc, cP: cp, toks: t, fq: f, teachDates: td, teachSel: ts });
+    setCourseData({ rel: r, dueDates: dd, students: s, iS: is, iN: inn, sC: sc, cP: cp, toks: t, fq: f, teachDates: td, teachSel: ts, myInstrS: mis });
     if (isInitial) setDataLoading(false);
   }
 
@@ -543,12 +477,11 @@ export default function App() {
   // ---- STUDENT VIEW ----
   if (!isInstr) {
     const myId = user.profile.id;
-    const mySection = user.mySections?.[ck] || null;
     const myChecks = sC[myId] || {};
     const myPrep = cP[myId] || {};
     const myToks = toks[myId] || [];
-    const grade = calcGrade(myChecks, relAssignments, ck);
-    const { target, blockers, msg: bMsg } = getBlockers(myChecks, relAssignments, ck);
+    const grade = calcStudentGrade(myChecks, myInstrS, relAssignments, ck);
+    const { target, blockers, msg: bMsg } = getStudentBlockers(myChecks, myInstrS, relAssignments, ck);
     const tok = tokBal(myToks.length, 0);
     const cutoff = pastCutoff(ck);
 
@@ -612,7 +545,16 @@ export default function App() {
                 <div style={{ fontFamily: F.d, fontSize: 22, fontWeight: 700, color: (TM[grade] || TM.F).c }}>
                   {grade === "early" ? "Getting Started" : grade === "F" ? "Check off assignments to build your track" : `${grade} Track`}
                 </div>
-                <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{relAssignments.filter(id => myChecks[id]).length} of {relAssignments.length} checked off</div>
+                <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{(() => {
+                  let confirmed = 0;
+                  relAssignments.forEach(id => {
+                    const a = c.assignments.find(x => x.id === id);
+                    if (!a) return;
+                    if (a.eval === "completion" && myChecks[id]) confirmed++;
+                    else if (myInstrS[id] === "mastery" && myChecks[id]) confirmed++;
+                  });
+                  return `${confirmed} of ${relAssignments.length} confirmed`;
+                })()}</div>
               </div>
               <div style={{ textAlign: "center", padding: "6px 14px", background: "#F9F8F5", borderRadius: 8 }}>
                 <div style={{ display: "flex", gap: 3, justifyContent: "center", marginBottom: 3 }} aria-hidden="true">
@@ -640,7 +582,7 @@ export default function App() {
             // Assignment due dates — only incomplete items
             relAssignments.forEach(id => {
               if (myChecks[id]) return; // skip completed
-              const dd = resolveDueDate(dueDates, id, mySection);
+              const dd = dueDates[id];
               if (dd?.date) {
                 const dDate = new Date(dd.date + 'T00:00:00');
                 if (dDate >= today && dDate <= sevenOut) {
@@ -652,7 +594,7 @@ export default function App() {
             // Class prep due dates — only incomplete
             (c.classPrep || []).forEach(cp => {
               if (myPrep[cp.id]) return;
-              const dd = resolveDueDate(dueDates, cp.id, mySection);
+              const dd = dueDates[cp.id];
               if (dd?.date) {
                 const dDate = new Date(dd.date + 'T00:00:00');
                 if (dDate >= today && dDate <= sevenOut) {
@@ -698,8 +640,8 @@ export default function App() {
           {/* Checklist */}
           <Lbl>My Progress</Lbl>
           <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", marginBottom: 14, lineHeight: 1.6, padding: "10px 14px", background: "#F9F8F5", borderRadius: 8 }}>
-            <strong style={{ color: "#555" }}>Completion items:</strong> Check off once you've submitted your work.<br />
-            <strong style={{ color: "#555" }}>Mastery items:</strong> Wait for Dr. Beggs's feedback — only check off if you've met the specs.
+            <strong style={{ color: "#555" }}>Completion items:</strong> Check off once you've submitted — your grade updates right away.<br />
+            <strong style={{ color: "#555" }}>Mastery items:</strong> Your grade updates once Dr. Beggs confirms mastery <em>and</em> you check it off.
           </div>
 
           {c.groups.map((grp, gi) => {
@@ -709,29 +651,42 @@ export default function App() {
               <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
                 {grpA.map((a, i) => {
                   const isRel = relAssignments.includes(a.id); const isChecked = !!myChecks[a.id];
+                  const instrSt = myInstrS[a.id]; // "mastery", "revision", or undefined
+                  const isMastery = a.eval === "mastery";
+                  // Mastery items: checkbox locked until instructor has marked M or R
+                  const masteryLocked = isMastery && !instrSt;
+                  // Has instructor left feedback (M or R)?
+                  const hasFeedback = isMastery && !!instrSt;
                   if (!isRel) return <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", borderBottom: i < grpA.length - 1 ? "1px solid #F5F3EF" : "none", opacity: .5 }}>
                     <div style={{ width: 22, height: 22, borderRadius: 6, border: "2px dashed #E0DDD8", flexShrink: 0 }} />
                     <div style={{ flex: 1 }}>
                       <span style={{ fontFamily: F.b, fontSize: 13, color: "#767676" }}>{a.name}</span>
-                      {(() => { const dd = resolveDueDate(dueDates, a.id, mySection); return (dd?.date || dd?.label) ? <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{dd.date ? new Date(dd.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dd.date && dd.label ? ' · ' : ''}{dd.label || ''}</div> : null; })()}
+                      {(dueDates[a.id]?.date || dueDates[a.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{dueDates[a.id].date ? new Date(dueDates[a.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[a.id].date && dueDates[a.id].label ? ' · ' : ''}{dueDates[a.id].label || ''}</div>}
                     </div>
                     <span style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>Coming soon</span>
                   </div>;
                   return <div key={a.id} style={{ borderBottom: i < grpA.length - 1 ? "1px solid #F5F3EF" : "none" }}>
-                    <div role="checkbox" aria-checked={isChecked} aria-label={`${a.name} - ${a.eval}`} tabIndex={0} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", cursor: "pointer" }}
-                      onClick={() => handleCheck(a.id)}
-                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCheck(a.id); } }}
-                      onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                      <div style={{ width: 22, height: 22, borderRadius: 6, border: isChecked ? "none" : "2px solid #D0CEC9", background: isChecked ? "#CF202E" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", transition: "all .2s", flexShrink: 0 }}>
+                    <div role="checkbox" aria-checked={isChecked} aria-disabled={masteryLocked} aria-label={`${a.name} - ${a.eval}${masteryLocked ? ' - awaiting instructor feedback' : ''}${hasFeedback && !isChecked ? ' - feedback available, review before checking off' : ''}`} tabIndex={0} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", cursor: masteryLocked ? "default" : "pointer", opacity: masteryLocked ? .7 : 1 }}
+                      onClick={() => { if (!masteryLocked) handleCheck(a.id); }}
+                      onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && !masteryLocked) { e.preventDefault(); handleCheck(a.id); } }}
+                      onMouseEnter={e => { if (!masteryLocked) e.currentTarget.style.background = "#FAFAF7"; }} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                      <div style={{ width: 22, height: 22, borderRadius: 6, border: isChecked ? "none" : masteryLocked ? "2px solid #E8E6E1" : "2px solid #D0CEC9", background: isChecked ? "#CF202E" : masteryLocked ? "#F5F4F0" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", transition: "all .2s", flexShrink: 0 }}>
                         {isChecked && <span style={{ color: "#fff", fontSize: 13, fontWeight: 700 }}>✓</span>}
+                        {masteryLocked && !isChecked && <span style={{ color: "#D0CEC9", fontSize: 11 }} aria-hidden="true">—</span>}
                       </div>
                       <div style={{ flex: 1 }}>
-                        <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, color: isChecked ? "#767676" : "#1A1A1A", textDecoration: isChecked ? "line-through" : "none", textDecorationColor: "#DDD" }}>{a.name}</span>
-                        {(() => { const dd = resolveDueDate(dueDates, a.id, mySection); return (dd?.date || dd?.label) ? <div style={{ fontFamily: F.b, fontSize: 11, color: isChecked ? "#767676" : "#6B6B6B", marginTop: 1 }}>{dd.date ? new Date(dd.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dd.date && dd.label ? ' · ' : ''}{dd.label || ''}</div> : null; })()}
+                        <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, color: isChecked ? "#767676" : masteryLocked ? "#999" : "#1A1A1A", textDecoration: isChecked ? "line-through" : "none", textDecorationColor: "#DDD" }}>{a.name}</span>
+                        {(dueDates[a.id]?.date || dueDates[a.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 11, color: isChecked ? "#767676" : "#6B6B6B", marginTop: 1 }}>{dueDates[a.id].date ? new Date(dueDates[a.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[a.id].date && dueDates[a.id].label ? ' · ' : ''}{dueDates[a.id].label || ''}</div>}
                       </div>
                       {a.eval === "mastery" && <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />}
                       {a.eval === "completion" && <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
                     </div>
+                    {/* Feedback message for mastery items — shows when instructor has acted and student hasn't checked off */}
+                    {hasFeedback && !isChecked && <div style={{ padding: "0 16px 10px 48px" }}>
+                      <div style={{ fontFamily: F.b, fontSize: 11, color: "#555", background: "#FFFCF5", border: "1px solid #FFECB5", borderRadius: 6, padding: "6px 10px", lineHeight: 1.4 }}>
+                        <span aria-hidden="true">📝 </span>Dr. Beggs has left feedback — review your feedback before checking off.
+                      </div>
+                    </div>}
                     {showTokenBtn(a) && isFirstInGroup(a) && <div style={{ padding: "0 16px 10px 48px" }}>
                       <button onClick={(e) => { e.stopPropagation(); const tt = getTokenTarget(a.id, ck); setModal(tt); setTfType("revision"); setTfNote(""); setTfLink(""); setTfExtra(""); }}
                         style={{ padding: "4px 12px", background: "#FFFCF5", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>
@@ -832,7 +787,7 @@ export default function App() {
                 <div style={{ width: 20, height: 20, borderRadius: 5, border: done ? "none" : "2px solid #D0CEC9", background: done ? c.color : "#fff", display: "flex", alignItems: "center", justifyContent: "center", transition: "all .2s", flexShrink: 0 }}>{done && <span style={{ color: "#fff", fontSize: 11, fontWeight: 700 }}>✓</span>}</div>
                 <div style={{ flex: 1 }}>
                   <span style={{ fontFamily: F.b, fontSize: 12, color: done ? "#767676" : "#1A1A1A", textDecoration: done ? "line-through" : "none" }}>{cp.name}</span>
-                  {(() => { const dd = resolveDueDate(dueDates, cp.id, mySection); return (dd?.date || dd?.label) ? <div style={{ fontFamily: F.b, fontSize: 11, color: done ? "#767676" : "#6B6B6B", marginTop: 1 }}>{dd.date ? new Date(dd.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dd.date && dd.label ? ' · ' : ''}{dd.label || ''}</div> : null; })()}
+                  {(dueDates[cp.id]?.date || dueDates[cp.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 11, color: done ? "#767676" : "#6B6B6B", marginTop: 1 }}>{dueDates[cp.id].date ? new Date(dueDates[cp.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[cp.id].date && dueDates[cp.id].label ? ' · ' : ''}{dueDates[cp.id].label || ''}</div>}
                 </div>
                 <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />
               </div>;
@@ -846,7 +801,7 @@ export default function App() {
             <span style={{ fontSize: 11, color: "#767676", transform: expTracks ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
           </button>
           {expTracks && <div style={{ background: "#fff", border: "1px solid #E8E6E1", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 16px", marginBottom: 12 }}>
-            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12 }}>Every item in a track must be checked off to earn that grade.</div>
+            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12 }}>Completion items count when you check them off. Mastery items count when confirmed by Dr. Beggs and checked off by you.</div>
             {["A", "B", "C", "D"].map(g => { const t = c.tracks[g]; const m = TM[g]; const isOn = grade === g;
               return <div key={g} style={{ marginBottom: 8, padding: "8px 12px", borderRadius: 8, border: isOn ? `2px solid ${m.c}` : "1px solid #F0EEEA", position: "relative" }}>
                 {isOn && <span style={{ position: "absolute", top: 6, right: 10, fontFamily: F.b, fontSize: 11, fontWeight: 700, color: "#fff", background: m.c, padding: "2px 6px", borderRadius: 6 }}>YOUR TRACK</span>}
@@ -855,8 +810,10 @@ export default function App() {
                   <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#333" }}>{g} Track</span>
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-                  {t.req.map(id => { const a = c.assignments.find(x => x.id === id); const ch = !!myChecks[id]; const r = rel.includes(id);
-                    return <span key={id} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: !r ? "#F5F4F0" : ch ? "#D4EDDA" : "#fff", border: `1px solid ${!r ? "#E8E6E1" : ch ? "#B7DFBF" : "#E8E6E1"}`, color: !r ? "#767676" : ch ? "#2D6A4F" : "#555" }}>{ch ? "✓ " : ""}{a?.name || id}</span>;
+                  {t.req.map(id => { const a = c.assignments.find(x => x.id === id); const r = rel.includes(id);
+                    const isCompletion = a?.eval === "completion";
+                    const confirmed = isCompletion ? !!myChecks[id] : (myInstrS[id] === "mastery" && !!myChecks[id]);
+                    return <span key={id} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: !r ? "#F5F4F0" : confirmed ? "#D4EDDA" : "#fff", border: `1px solid ${!r ? "#E8E6E1" : confirmed ? "#B7DFBF" : "#E8E6E1"}`, color: !r ? "#767676" : confirmed ? "#2D6A4F" : "#555" }}>{confirmed ? "✓ " : ""}{a?.name || id}</span>;
                   })}
                 </div>
               </div>;
@@ -943,7 +900,7 @@ export default function App() {
     const header = ["Last", "First", "Email", ...(hasSections ? ["Section"] : []), ...allA.map(x => x.name + " (Instr)"), ...allA.map(x => x.name + " (Student)"), ...cpI.map(x => x.name + " (Prep)"), "Tokens Used", "Tokens Avail", "Instr Track", "Student Track"].join(",");
     const rows = filteredStudents.map(st => {
       const si = iS[st.id] || {}; const sc = sC[st.id] || {}; const cp2 = cP[st.id] || {}; const tk = (toks[st.id] || []).length;
-      const ig = calcGrade(si, rel, ck); const sg = calcGrade(sc, rel, ck); const tok = tokBal(tk, 0);
+      const ig = calcGrade(si, rel, ck); const sg = calcStudentGrade(sc, si, rel, ck); const tok = tokBal(tk, 0);
       return [st.last, st.first, st.email, ...(hasSections ? [st.section || ''] : []), ...allA.map(x => si[x.id] === "mastery" ? "M" : si[x.id] === "revision" ? "R" : ""), ...allA.map(x => sc[x.id] ? "Y" : ""), ...cpI.map(x => cp2[x.id] ? "Y" : ""), tok.used, tok.avail, ig === "early" ? "" : ig, sg === "early" ? "" : sg].map(v => `"${v}"`).join(",");
     });
     const csvContent = header + "\n" + rows.join("\n");
@@ -1051,7 +1008,7 @@ export default function App() {
           <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ fontFamily: F.d, fontSize: 17, fontWeight: 600 }}>{currentPrep.name}</span>
             <Pill t={`${doneCount} of ${students.length}`} bg={doneCount === students.length ? "#D4EDDA" : "#F5F4F0"} c={doneCount === students.length ? "#2D6A4F" : "#767676"} />
-            {(() => { const dd = resolveDueDate(dueDates, prepItem, sectionFilter === 'all' ? null : sectionFilter); return (dd?.date || dd?.label) ? <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>Due: {dd.date ? new Date(dd.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dd.date && dd.label ? ' · ' : ''}{dd.label || ''}</span> : null; })()}
+            {(dueDates[prepItem]?.date || dueDates[prepItem]?.label) && <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>Due: {dueDates[prepItem].date ? new Date(dueDates[prepItem].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[prepItem].date && dueDates[prepItem].label ? ' · ' : ''}{dueDates[prepItem].label || ''}</span>}
           </div>
           <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
             <button onClick={() => markAllPrep(true)} style={{ padding: "6px 14px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>Mark All Complete</button>
@@ -1104,7 +1061,7 @@ export default function App() {
 
       <main id="main-content" style={{ maxWidth: 1100, margin: "0 auto", padding: "18px 20px" }}>
         <nav role="tablist" aria-label="Dashboard sections" style={{ display: "flex", gap: 0, marginBottom: 18, borderBottom: "2px solid #F0EEEA" }}>
-          {[{ k: "overview", l: "Overview" }, { k: "manage", l: "Manage" }, { k: "queue", l: "Tokens" }, { k: "tracks", l: "Tracks" }, { k: "admin", l: "Settings" }].map(t => <button role="tab" aria-selected={tab === t.k} key={t.k} onClick={() => setTab(t.k)} style={{ padding: "8px 14px", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: tab === t.k ? c.color : "#767676", background: "none", borderBottom: tab === t.k ? `2px solid ${c.color}` : "2px solid transparent", marginBottom: -2, position: "relative" }}>{t.l}{t.k === "queue" && pending.length > 0 && <span aria-label={`${pending.length} pending`} style={{ position: "absolute", top: 4, right: 2, minWidth: 16, height: 16, borderRadius: 8, background: "#CF202E", color: "#fff", fontFamily: F.b, fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{pending.length}</span>}</button>)}
+          {[{ k: "overview", l: "Overview" }, { k: "manage", l: "Manage" }, { k: "queue", l: "Tokens" }, { k: "tracks", l: "Tracks" }].map(t => <button role="tab" aria-selected={tab === t.k} key={t.k} onClick={() => setTab(t.k)} style={{ padding: "8px 14px", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: tab === t.k ? c.color : "#767676", background: "none", borderBottom: tab === t.k ? `2px solid ${c.color}` : "2px solid transparent", marginBottom: -2, position: "relative" }}>{t.l}{t.k === "queue" && pending.length > 0 && <span aria-label={`${pending.length} pending`} style={{ position: "absolute", top: 4, right: 2, minWidth: 16, height: 16, borderRadius: 8, background: "#CF202E", color: "#fff", fontFamily: F.b, fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{pending.length}</span>}</button>)}
         </nav>
 
         {/* OVERVIEW */}
@@ -1116,10 +1073,9 @@ export default function App() {
             const formatFeedDate = (d) => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
             const feedItems = [];
             // Assignment + class prep due dates (from real date column)
-            const instrSec = sectionFilter === 'all' ? null : sectionFilter;
             const allItemIds = [...c.assignments.map(a => a.id), ...(c.classPrep || []).map(cp => cp.id)];
             allItemIds.forEach(id => {
-              const dd = resolveDueDate(dueDates, id, instrSec);
+              const dd = dueDates[id];
               if (dd?.date) {
                 const dDate = new Date(dd.date + 'T00:00:00');
                 if (dDate >= today && dDate <= sevenOut) {
@@ -1385,7 +1341,7 @@ export default function App() {
               <div style={{ width: 50, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", textAlign: "right" }}>Self</div>
             </div>
             {(() => { const gq = gridSearch.toLowerCase(); const gridFiltered = gq ? sorted.filter(s => `${s.first} ${s.last}`.toLowerCase().includes(gq) || `${s.last}, ${s.first}`.toLowerCase().includes(gq)) : sorted; return gridFiltered.map((s, si) => {
-              const ig = calcGrade(iS[s.id] || {}, relAssignments, ck); const sg = calcGrade(sC[s.id] || {}, relAssignments, ck);
+              const ig = calcGrade(iS[s.id] || {}, relAssignments, ck); const sg = calcStudentGrade(sC[s.id] || {}, iS[s.id] || {}, relAssignments, ck);
               const m = TM[ig] || TM.F; const mm = ig !== sg && ig !== "early" && sg !== "early";
               return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < sorted.length - 1 ? "1px solid #F5F3EF" : "none", background: mm ? "#FFF8F0" : "transparent" }}>
                 <div style={{ width: 22, height: 22, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 11, fontWeight: 700, color: m.c, flexShrink: 0 }}>{ig === "early" ? "—" : ig}</div>
@@ -1399,7 +1355,7 @@ export default function App() {
               </div>;
             }); })()}
           </div>
-          <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 8 }}>"Self" = student self-reported track. ⚠ = mismatch.{gridSearch && ` Showing ${gridSearch} filter.`}</div>
+          <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 8 }}>"Self" = what the student sees as their track. ⚠ = mismatch with your records.{gridSearch && ` Showing ${gridSearch} filter.`}</div>
           </>}
 
           <div style={{ marginTop: 20 }}>
@@ -1476,30 +1432,30 @@ export default function App() {
 
         {/* MANAGE */}
         {tab === "manage" && <div>
-          {hasSections && sectionFilter !== 'all' && <div style={{ padding: "8px 12px", background: "#FFFCF5", border: "1px solid #FFECB5", borderRadius: 8, fontFamily: F.b, fontSize: 11, color: "#856404", marginBottom: 14 }}>Setting due dates for <strong>{courseSections?.[sectionFilter]?.name || sectionFilter}</strong> section. Switch to "All sections" to set course-wide dates.</div>}
           <Lbl>Assignments — toggle to release, set due dates for any assignment</Lbl>
           {c.groups.map((grp, gi) => <div key={gi} style={{ marginBottom: 14 }}>
             {grp.name && <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: c.color, marginBottom: 4 }}>{grp.name}</div>}
             <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-              {grp.ids.map((id, i) => { const a = c.assignments.find(x => x.id === id); if (!a) return null; const isR = rel.includes(id); const manageSec = sectionFilter === 'all' ? null : sectionFilter; const ddObj = resolveDueDate(dueDates, id, manageSec); const ddLabel = ddObj?.label; const ddDate = ddObj?.date; const isEditingDue = editDue === id;
+              {grp.ids.map((id, i) => { const a = c.assignments.find(x => x.id === id); if (!a) return null; const isR = rel.includes(id); const ddObj = dueDates[id]; const ddLabel = ddObj?.label; const ddDate = ddObj?.date; const isEditingDue = editDue === id;
                 return <div key={id} style={{ borderBottom: i < grp.ids.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px" }}
                     onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                     <button role="switch" aria-checked={isR} aria-label={a?.name || id} onClick={() => handleToggleRel(id)} style={{ width: 34, height: 18, borderRadius: 9, background: isR ? c.color : "#E0DDD8", border: "none", padding: 0, position: "relative", transition: "background .3s", flexShrink: 0, cursor: "pointer" }}><div style={{ width: 12, height: 12, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: isR ? 19 : 3, transition: "left .3s", boxShadow: "0 1px 2px rgba(0,0,0,.15)" }} /></button>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{a.name}</div>
-                      {(ddLabel || ddDate) && !isEditingDue && <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 1 }}>{ddDate ? new Date(ddDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{ddLabel && ddDate ? ' · ' : ''}{ddLabel || ''}{manageSec && dueDates[id]?.[manageSec] ? '' : (manageSec && ddObj ? ' (course-wide)' : '')}</div>}
+                      {(ddLabel || ddDate) && !isEditingDue && <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 1 }}>{ddDate ? new Date(ddDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{ddLabel && ddDate ? ' · ' : ''}{ddLabel || ''}</div>}
                     </div>
-                    <button onClick={(e) => { e.stopPropagation(); if (isEditingDue) { setEditDue(null); } else { setEditDue(id); setEditDueVal(ddLabel || ''); setEditDueDate(ddDate || ''); setEditDueSection(manageSec); } }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: (ddLabel || ddDate) ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{ddDate ? "✎ Due" : ddLabel ? "✎ Note" : "+ Due date"}</button>
+                    <button onClick={(e) => { e.stopPropagation(); setEditDue(isEditingDue ? null : id); setEditDueVal(ddLabel || ''); setEditDueDate(ddDate || ''); }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: (ddLabel || ddDate) ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{ddDate ? "✎ Due" : ddLabel ? "✎ Note" : "+ Due date"}</button>
                     {a.eval === "mastery" ? <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" /> : <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
                   </div>
-                  {isEditingDue && <div style={{ padding: "4px 16px 10px 60px", display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                  {isEditingDue && <div style={{ padding: "4px 16px 10px 60px", display: "flex", gap: 6, flexWrap: "wrap" }}>
                     <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label="Due date" style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
                     <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class, By end of day" aria-label="Due date note"
                       style={{ flex: 2, minWidth: 140, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }}
-                      onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, id, editDueVal, editDueDate, editDueSection); setEditDue(null); refresh(); } }} />
-                    <button onClick={async () => { await upsertDueDate(ck, id, editDueVal, editDueDate, editDueSection); setEditDue(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
-                    <button onClick={async () => { await upsertDueDate(ck, id, '', '', editDueSection); setEditDue(null); refresh(); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
+                      onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, id, editDueVal, editDueDate); setEditDue(null); refresh(); } }} />
+                    <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label="Due date" style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
+                    <button onClick={async () => { await upsertDueDate(ck, id, editDueVal, editDueDate); setEditDue(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
+                    <button onClick={async () => { await upsertDueDate(ck, id, '', ''); setEditDue(null); refresh(); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
                   </div>}
                 </div>;
               })}
@@ -1509,23 +1465,24 @@ export default function App() {
           {(c.classPrep && c.classPrep.length > 0) && <>
           <Lbl s={{ marginTop: 20 }}>Class Preparation — toggle to release, set due dates</Lbl>
           <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-            {c.classPrep.map((cp, i) => { const isR = rel.includes(cp.id); const manageSec = sectionFilter === 'all' ? null : sectionFilter; const ddObj = resolveDueDate(dueDates, cp.id, manageSec); const ddLabel = ddObj?.label; const ddDate = ddObj?.date; const isEditingDue = editDue === cp.id;
+            {c.classPrep.map((cp, i) => { const isR = rel.includes(cp.id); const ddObj = dueDates[cp.id]; const ddLabel = ddObj?.label; const ddDate = ddObj?.date; const isEditingDue = editDue === cp.id;
               return <div key={cp.id} style={{ borderBottom: i < c.classPrep.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px" }}
                   onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                   <button role="switch" aria-checked={isR} aria-label={cp.name} onClick={() => handleToggleRel(cp.id)} style={{ width: 34, height: 18, borderRadius: 9, background: isR ? c.color : "#E0DDD8", position: "relative", transition: "background .3s", flexShrink: 0, cursor: "pointer", border: "none", padding: 0 }}><div style={{ width: 12, height: 12, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: isR ? 19 : 3, transition: "left .3s", boxShadow: "0 1px 2px rgba(0,0,0,.15)" }} /></button>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{cp.name}</div>
-                    {(ddLabel || ddDate) && !isEditingDue && <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 1 }}>{ddDate ? new Date(ddDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{ddLabel && ddDate ? ' · ' : ''}{ddLabel || ''}{manageSec && dueDates[cp.id]?.[manageSec] ? '' : (manageSec && ddObj ? ' (course-wide)' : '')}</div>}
+                    {(ddLabel || ddDate) && !isEditingDue && <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 1 }}>{ddDate ? new Date(ddDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{ddLabel && ddDate ? ' · ' : ''}{ddLabel || ''}</div>}
                   </div>
-                  <button onClick={(e) => { e.stopPropagation(); if (isEditingDue) { setEditDue(null); } else { setEditDue(cp.id); setEditDueVal(ddLabel || ''); setEditDueDate(ddDate || ''); setEditDueSection(manageSec); } }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: (ddLabel || ddDate) ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{ddDate ? "✎ Due" : ddLabel ? "✎ Note" : "+ Due date"}</button>
+                  <button onClick={(e) => { e.stopPropagation(); setEditDue(isEditingDue ? null : cp.id); setEditDueVal(ddLabel || ''); setEditDueDate(ddDate || ''); }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: (ddLabel || ddDate) ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{ddDate ? "✎ Due" : ddLabel ? "✎ Note" : "+ Due date"}</button>
                   <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />
                 </div>
-                {isEditingDue && <div style={{ padding: "4px 16px 10px 60px", display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                {isEditingDue && <div style={{ padding: "4px 16px 10px 60px", display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label="Due date" autoFocus style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
-                  <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class, By end of day" aria-label="Due date note" style={{ flex: 2, minWidth: 140, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, cp.id, editDueVal, editDueDate, editDueSection); setEditDue(null); refresh(); } }} />
-                  <button onClick={async () => { await upsertDueDate(ck, cp.id, editDueVal, editDueDate, editDueSection); setEditDue(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
-                  <button onClick={async () => { await upsertDueDate(ck, cp.id, '', '', editDueSection); setEditDue(null); refresh(); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
+                  <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class, By end of day" aria-label="Due date note" style={{ flex: 2, minWidth: 140, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, cp.id, editDueVal, editDueDate); setEditDue(null); refresh(); } }} />
+                  <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label="Due date" style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
+                  <button onClick={async () => { await upsertDueDate(ck, cp.id, editDueVal, editDueDate); setEditDue(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
+                  <button onClick={async () => { await upsertDueDate(ck, cp.id, '', ''); setEditDue(null); refresh(); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
                 </div>}
               </div>;
             })}
@@ -1594,146 +1551,6 @@ export default function App() {
                 </div>;
               })}
             </div>}
-          </div>
-        </div>}
-
-        {/* SETTINGS / ADMIN */}
-        {tab === "admin" && <div>
-
-          {/* Teaching Dates Management */}
-          {c.assignments.some(a => a.eval === "mastery") && <>
-          <Lbl>Teaching Dates</Lbl>
-          <div style={{ fontFamily: F.b, fontSize: 11, color: "#777", lineHeight: 1.5, marginBottom: 10, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
-            Add or remove available teaching dates for lesson assignments. Students pick from these dates when scheduling.
-          </div>
-          <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden", marginBottom: 18 }}>
-            {c.assignments.filter(a => a.eval === "mastery").map((a, ai) => {
-              const masteryList = c.assignments.filter(x => x.eval === "mastery");
-              const aDates = teachDates.filter(td => td.assignment_id === a.id);
-              return <div key={a.id} style={{ borderBottom: ai < masteryList.length - 1 ? "1px solid #F0EEEA" : "none" }}>
-                <div style={{ padding: "10px 16px", display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, flex: 1 }}>{a.name}</span>
-                  <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{aDates.length} date{aDates.length !== 1 ? 's' : ''}</span>
-                </div>
-                {aDates.length > 0 && <div style={{ padding: "0 16px 8px", display: "flex", flexWrap: "wrap", gap: 4 }}>
-                  {aDates.sort((x,y) => x.teach_date.localeCompare(y.teach_date)).map(td => <span key={td.id} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px", background: td.closed ? "#F5F4F0" : "#D4EDDA", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: td.closed ? "#999" : "#2D6A4F" }}>
-                    {new Date(td.teach_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                    {td.closed && <span style={{ fontSize: 10, color: "#999" }}>(closed)</span>}
-                    <button aria-label={`Toggle closed for ${a.name} on ${td.teach_date}`} onClick={async () => { await toggleTeachingDateClosed(td.id, !td.closed); refresh(); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 10, color: "#767676", padding: "0 2px" }} title={td.closed ? "Reopen date" : "Close date"}>{td.closed ? '↺' : '✕'}</button>
-                    <button aria-label={`Remove ${a.name} date ${td.teach_date}`} onClick={async () => { if (confirm('Remove this teaching date? Students who selected it will lose their selection.')) { await removeTeachingDate(td.id); refresh(); } }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 10, color: "#C0392B", padding: "0 2px" }} title="Delete date">🗑</button>
-                  </span>)}
-                </div>}
-                <div style={{ padding: "4px 16px 10px", display: "flex", gap: 6, alignItems: "center" }}>
-                  <input type="date" value={addTeachDateAid === a.id ? addTeachDateVal : ''} onChange={e => { setAddTeachDateAid(a.id); setAddTeachDateVal(e.target.value); }} aria-label={`Add teaching date for ${a.name}`} style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
-                  <button disabled={addTeachDateAid !== a.id || !addTeachDateVal} onClick={async () => { await addTeachingDate(ck, a.id, addTeachDateVal); setAddTeachDateAid(''); setAddTeachDateVal(''); refresh(); }} style={{ padding: "5px 10px", background: (addTeachDateAid === a.id && addTeachDateVal) ? c.color : "#E0DDD8", color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: (addTeachDateAid === a.id && addTeachDateVal) ? "pointer" : "default", opacity: (addTeachDateAid === a.id && addTeachDateVal) ? 1 : 0.5 }}>Add Date</button>
-                </div>
-              </div>;
-            })}
-          </div>
-          </>}
-
-          {/* Course Configuration */}
-          <Lbl s={{ marginTop: 8 }}>Course Configuration</Lbl>
-          <div style={{ fontFamily: F.b, fontSize: 11, color: "#777", lineHeight: 1.5, marginBottom: 10, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
-            Edit course settings. Changes save immediately and take effect for all users.
-          </div>
-          <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden", marginBottom: 18 }}>
-            {[
-              { key: 'title', label: 'Title', val: c.title },
-              { key: 'short', label: 'Short Name', val: c.short },
-            ].map(field => <div key={field.key} style={{ padding: "10px 16px", borderBottom: "1px solid #F5F3EF", display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", width: 100, flexShrink: 0 }}>{field.label}</span>
-              {adminEdit === field.key ? <div style={{ flex: 1, display: "flex", gap: 6 }}>
-                <input value={adminVal} onChange={e => setAdminVal(e.target.value)} aria-label={field.label} style={{ flex: 1, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 12, outline: "none" }} />
-                <button onClick={async () => { const updated = { ...c, [field.key]: adminVal }; await saveCourseConfig(ck, updated); await loadAllCourseConfig(); setAdminEdit(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
-                <button onClick={() => setAdminEdit(null)} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Cancel</button>
-              </div> : <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontFamily: F.b, fontSize: 12 }}>{field.val}</span>
-                <button onClick={() => { setAdminEdit(field.key); setAdminVal(field.val); }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#767676", cursor: "pointer", background: "#fff" }}>Edit</button>
-              </div>}
-            </div>)}
-            {/* Token Cutoff */}
-            <div style={{ padding: "10px 16px", borderBottom: "1px solid #F5F3EF", display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", width: 100, flexShrink: 0 }}>Token Cutoff</span>
-              {adminEdit === 'cutoff' ? <div style={{ flex: 1, display: "flex", gap: 6 }}>
-                <input type="date" value={adminVal} onChange={e => setAdminVal(e.target.value)} aria-label="Token cutoff date" style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 12, outline: "none" }} />
-                <button onClick={async () => { const d = new Date(adminVal + 'T23:59:59'); const label = d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }); const updated = { ...c, tokenCutoff: label, tokenCutoffDate: d }; await saveCourseConfig(ck, updated); await loadAllCourseConfig(); setAdminEdit(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
-                <button onClick={() => setAdminEdit(null)} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Cancel</button>
-              </div> : <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontFamily: F.b, fontSize: 12 }}>{c.tokenCutoff || 'Not set'}</span>
-                <button onClick={() => { setAdminEdit('cutoff'); setAdminVal(c.tokenCutoffDate ? c.tokenCutoffDate.toISOString().slice(0,10) : ''); }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#767676", cursor: "pointer", background: "#fff" }}>Edit</button>
-              </div>}
-            </div>
-            {/* Color */}
-            <div style={{ padding: "10px 16px", display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", width: 100, flexShrink: 0 }}>Color</span>
-              <div style={{ width: 20, height: 20, borderRadius: 4, background: c.color, border: "1px solid #E0DDD8" }} />
-              <span style={{ fontFamily: F.b, fontSize: 12 }}>{c.color}</span>
-            </div>
-          </div>
-
-          {/* Assignments Editor */}
-          <Lbl s={{ marginTop: 8 }}>Assignments</Lbl>
-          <div style={{ fontFamily: F.b, fontSize: 11, color: "#777", lineHeight: 1.5, marginBottom: 10, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
-            Add, rename, or remove assignments. Removing an assignment hides it — existing student data is preserved.
-          </div>
-          <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden", marginBottom: 10 }}>
-            {c.assignments.map((a, i) => <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", borderBottom: i < c.assignments.length - 1 ? "1px solid #F5F3EF" : "none" }}>
-              {adminEdit === `asgn-${a.id}` ? <>
-                <input value={adminVal} onChange={e => setAdminVal(e.target.value)} aria-label="Assignment name" style={{ flex: 1, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 12, outline: "none" }} />
-                <select defaultValue={a.eval} aria-label="Evaluation type" onChange={async (e) => { const updated = { ...c, assignments: c.assignments.map(x => x.id === a.id ? { ...x, name: adminVal, eval: e.target.value } : x) }; await saveCourseConfig(ck, updated); await loadAllCourseConfig(); setAdminEdit(null); refresh(); }} style={{ padding: "5px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11 }}>
-                  <option value="mastery">Mastery</option><option value="completion">Completion</option>
-                </select>
-                <button onClick={async () => { const updated = { ...c, assignments: c.assignments.map(x => x.id === a.id ? { ...x, name: adminVal } : x) }; await saveCourseConfig(ck, updated); await loadAllCourseConfig(); setAdminEdit(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
-                <button onClick={() => setAdminEdit(null)} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Cancel</button>
-              </> : <>
-                <span style={{ flex: 1, fontFamily: F.b, fontSize: 12 }}>{a.name}</span>
-                {a.eval === "mastery" ? <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" /> : <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
-                <button onClick={() => { setAdminEdit(`asgn-${a.id}`); setAdminVal(a.name); }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#767676", cursor: "pointer", background: "#fff" }}>Edit</button>
-                <button onClick={async () => { if (confirm(`Remove "${a.name}"? Student data is preserved but the assignment will be hidden.`)) { const updated = { ...c, assignments: c.assignments.filter(x => x.id !== a.id), groups: c.groups.map(g => ({ ...g, ids: g.ids.filter(gid => gid !== a.id) })) }; await saveCourseConfig(ck, updated); await loadAllCourseConfig(); refresh(); } }} style={{ padding: "2px 6px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#C0392B", cursor: "pointer", background: "#fff" }}>Remove</button>
-              </>}
-            </div>)}
-          </div>
-          {adminEdit === 'add-asgn' ? <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
-            <input placeholder="ID (e.g. vtm4)" value={addTeachDateAid === 'new-asgn-id' ? addTeachDateVal : ''} onChange={e => { setAddTeachDateAid('new-asgn-id'); setAddTeachDateVal(e.target.value); }} aria-label="New assignment ID" style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none", width: 140 }} />
-            <input placeholder="Assignment name" value={adminVal} onChange={e => setAdminVal(e.target.value)} aria-label="New assignment name" style={{ flex: 1, minWidth: 180, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 12, outline: "none" }} />
-            <select id="admin-new-asgn-eval" aria-label="Evaluation type" style={{ padding: "5px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11 }}>
-              <option value="mastery">Mastery</option><option value="completion">Completion</option>
-            </select>
-            <button onClick={async () => { const newId = (addTeachDateAid === 'new-asgn-id' ? addTeachDateVal : '').trim().toLowerCase().replace(/\s+/g,'-'); const newName = adminVal.trim(); if (!newId || !newName) return; const evalType = document.getElementById('admin-new-asgn-eval').value; const newA = { id: newId, name: newName, eval: evalType }; const updated = { ...c, assignments: [...c.assignments, newA], groups: c.groups.length > 0 ? c.groups.map((g, gi) => gi === c.groups.length - 1 ? { ...g, ids: [...g.ids, newId] } : g) : [{ name: null, ids: [newId] }] }; await saveCourseConfig(ck, updated); await loadAllCourseConfig(); setAdminEdit(null); setAdminVal(''); setAddTeachDateAid(''); setAddTeachDateVal(''); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Add</button>
-            <button onClick={() => { setAdminEdit(null); setAdminVal(''); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Cancel</button>
-          </div> : <button onClick={() => { setAdminEdit('add-asgn'); setAdminVal(''); }} style={{ padding: "6px 14px", background: "#F5F4F0", border: "1px solid #E8E6E1", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", cursor: "pointer", marginBottom: 18 }}>+ Add Assignment</button>}
-
-          {/* Class Prep Editor */}
-          <Lbl s={{ marginTop: 8 }}>Class Preparation Items</Lbl>
-          {(c.classPrep && c.classPrep.length > 0) && <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden", marginBottom: 10 }}>
-            {c.classPrep.map((cp, i) => <div key={cp.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", borderBottom: i < c.classPrep.length - 1 ? "1px solid #F5F3EF" : "none" }}>
-              {adminEdit === `prep-${cp.id}` ? <>
-                <input value={adminVal} onChange={e => setAdminVal(e.target.value)} aria-label="Prep item name" style={{ flex: 1, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 12, outline: "none" }} />
-                <button onClick={async () => { const updated = { ...c, classPrep: c.classPrep.map(x => x.id === cp.id ? { ...x, name: adminVal } : x) }; await saveCourseConfig(ck, updated); await loadAllCourseConfig(); setAdminEdit(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
-                <button onClick={() => setAdminEdit(null)} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Cancel</button>
-              </> : <>
-                <span style={{ flex: 1, fontFamily: F.b, fontSize: 12 }}>{cp.name}</span>
-                <button onClick={() => { setAdminEdit(`prep-${cp.id}`); setAdminVal(cp.name); }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#767676", cursor: "pointer", background: "#fff" }}>Edit</button>
-                <button onClick={async () => { if (confirm(`Remove "${cp.name}"?`)) { const updated = { ...c, classPrep: c.classPrep.filter(x => x.id !== cp.id) }; await saveCourseConfig(ck, updated); await loadAllCourseConfig(); refresh(); } }} style={{ padding: "2px 6px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#C0392B", cursor: "pointer", background: "#fff" }}>Remove</button>
-              </>}
-            </div>)}
-          </div>}
-          {adminEdit === 'add-prep' ? <div style={{ display: "flex", gap: 6, marginBottom: 18 }}>
-            <input placeholder="ID (e.g. cp-newitem)" value={addTeachDateAid === 'new-prep-id' ? addTeachDateVal : ''} onChange={e => { setAddTeachDateAid('new-prep-id'); setAddTeachDateVal(e.target.value); }} aria-label="New prep item ID" style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none", width: 140 }} />
-            <input placeholder="Prep item name" value={adminVal} onChange={e => setAdminVal(e.target.value)} aria-label="New prep item name" style={{ flex: 1, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 12, outline: "none" }} />
-            <button onClick={async () => { const newId = (addTeachDateAid === 'new-prep-id' ? addTeachDateVal : '').trim().toLowerCase().replace(/\s+/g,'-'); const newName = adminVal.trim(); if (!newId || !newName) return; const updated = { ...c, classPrep: [...(c.classPrep || []), { id: newId, name: newName }] }; await saveCourseConfig(ck, updated); await loadAllCourseConfig(); setAdminEdit(null); setAdminVal(''); setAddTeachDateAid(''); setAddTeachDateVal(''); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Add</button>
-            <button onClick={() => { setAdminEdit(null); setAdminVal(''); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Cancel</button>
-          </div> : <button onClick={() => { setAdminEdit('add-prep'); setAdminVal(''); }} style={{ padding: "6px 14px", background: "#F5F4F0", border: "1px solid #E8E6E1", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", cursor: "pointer", marginBottom: 18 }}>+ Add Class Prep Item</button>}
-
-          {/* Semester Archive */}
-          <Lbl s={{ marginTop: 20 }}>Semester Actions</Lbl>
-          <div style={{ fontFamily: F.b, fontSize: 11, color: "#777", lineHeight: 1.5, marginBottom: 10, padding: "8px 12px", background: "#FFF5F5", borderRadius: 8, border: "1px solid #F5B7B7" }}>
-            These actions affect all students in this course. Export your CSV first. Archived students lose access but their data is preserved in the database.
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button onClick={async () => { if (confirm(`Archive all current ${ck} enrollments? Students will lose access. This cannot be undone from the UI.`)) { if (confirm('Are you sure? Export CSV first if you haven\'t already.')) { await archiveCourseEnrollments(ck); refresh(); alert('Enrollments archived. Students will see the login screen.'); } } }} style={{ padding: "8px 16px", background: "#CF202E", color: "#fff", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Archive Semester</button>
-            <button onClick={async () => { if (confirm(`Clear all due dates for ${ck}? You can re-enter them in the Manage tab.`)) { await clearDueDates(ck); refresh(); } }} style={{ padding: "8px 16px", background: "#F5F4F0", color: "#555", border: "1px solid #E8E6E1", borderRadius: 6, fontFamily: F.b, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Clear All Due Dates</button>
           </div>
         </div>}
       </main>
