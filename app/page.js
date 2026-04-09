@@ -817,8 +817,19 @@ export default function App() {
                     return <span key={id} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: !r ? "#F5F4F0" : confirmed ? "#D4EDDA" : "#fff", border: `1px solid ${!r ? "#E8E6E1" : confirmed ? "#B7DFBF" : "#E8E6E1"}`, color: !r ? "#767676" : confirmed ? "#2D6A4F" : "#555" }}>{confirmed ? "✓ " : ""}{a?.name || id}</span>;
                   })}
                   {(t.pick || []).map((p, pi) => {
-                    const completed = p.from.filter(id => rel.includes(id) && (myInstrS[id] === "mastery" && !!myChecks[id]));
-                    return <span key={`pick-${pi}`} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: completed.length >= p.need ? "#D4EDDA" : "#fff", border: `1px solid ${completed.length >= p.need ? "#B7DFBF" : "#E8E6E1"}`, color: completed.length >= p.need ? "#2D6A4F" : "#555", fontStyle: "italic" }}>{completed.length >= p.need ? "✓ " : ""}{completed.length}/{p.need} VTMs</span>;
+                    const completed = p.from.filter(id => rel.includes(id) && (c.assignments.find(x => x.id === id)?.eval === "completion" ? !!myChecks[id] : (myInstrS[id] === "mastery" && !!myChecks[id])));
+                    const label = p.from.map(id => c.assignments.find(x => x.id === id)?.name).filter(Boolean).join(", ");
+                    return <span key={`pick-${pi}`} aria-label={`${completed.length} of ${p.need} completed from: ${label}`} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: completed.length >= p.need ? "#D4EDDA" : "#fff", border: `1px solid ${completed.length >= p.need ? "#B7DFBF" : "#E8E6E1"}`, color: completed.length >= p.need ? "#2D6A4F" : "#555", fontStyle: "italic" }}>{completed.length >= p.need ? "✓ " : ""}{completed.length}/{p.need} from pool</span>;
+                  })}
+                  {(t.pickGroup || []).map((pg, pgi) => {
+                    let groupsDone = 0;
+                    pg.from.forEach(group => {
+                      const avail = group.filter(id => rel.includes(id));
+                      const allDone = avail.length > 0 && avail.every(id => c.assignments.find(x => x.id === id)?.eval === "completion" ? !!myChecks[id] : (myInstrS[id] === "mastery" && !!myChecks[id]));
+                      if (allDone) groupsDone++;
+                    });
+                    const label = pg.from.map(grp => grp.map(id => c.assignments.find(x => x.id === id)?.name).join(" + ")).join(" or ");
+                    return <span key={`pg-${pgi}`} aria-label={`${groupsDone} of ${pg.need} placement pairs completed from: ${label}`} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: groupsDone >= pg.need ? "#D4EDDA" : "#fff", border: `1px solid ${groupsDone >= pg.need ? "#B7DFBF" : "#E8E6E1"}`, color: groupsDone >= pg.need ? "#2D6A4F" : "#555", fontStyle: "italic" }}>{groupsDone >= pg.need ? "✓ " : ""}{groupsDone}/{pg.need} placement pair{pg.need !== 1 ? "s" : ""}</span>;
                   })}
                 </div>
               </div>;
@@ -980,8 +991,17 @@ export default function App() {
                     return <span key={id} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: !r ? "#F5F4F0" : confirmed ? "#D4EDDA" : "#fff", border: `1px solid ${!r ? "#E8E6E1" : confirmed ? "#B7DFBF" : "#E8E6E1"}`, color: !r ? "#767676" : confirmed ? "#2D6A4F" : "#555" }}>{confirmed ? "✓ " : ""}{a?.name || id}</span>;
                   })}
                   {(t.pick || []).map((p, pi) => {
-                    const completed = p.from.filter(id => rel.includes(id) && (vsInstrS[id] === "mastery" && !!vsChecks[id]));
-                    return <span key={`pick-${pi}`} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: completed.length >= p.need ? "#D4EDDA" : "#fff", border: `1px solid ${completed.length >= p.need ? "#B7DFBF" : "#E8E6E1"}`, color: completed.length >= p.need ? "#2D6A4F" : "#555", fontStyle: "italic" }}>{completed.length >= p.need ? "✓ " : ""}{completed.length}/{p.need} VTMs</span>;
+                    const completed = p.from.filter(id => rel.includes(id) && (c.assignments.find(x => x.id === id)?.eval === "completion" ? !!vsChecks[id] : (vsInstrS[id] === "mastery" && !!vsChecks[id])));
+                    return <span key={`pick-${pi}`} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: completed.length >= p.need ? "#D4EDDA" : "#fff", border: `1px solid ${completed.length >= p.need ? "#B7DFBF" : "#E8E6E1"}`, color: completed.length >= p.need ? "#2D6A4F" : "#555", fontStyle: "italic" }}>{completed.length >= p.need ? "✓ " : ""}{completed.length}/{p.need} from pool</span>;
+                  })}
+                  {(t.pickGroup || []).map((pg, pgi) => {
+                    let groupsDone = 0;
+                    pg.from.forEach(group => {
+                      const avail = group.filter(id => rel.includes(id));
+                      const allDone = avail.length > 0 && avail.every(id => c.assignments.find(x => x.id === id)?.eval === "completion" ? !!vsChecks[id] : (vsInstrS[id] === "mastery" && !!vsChecks[id]));
+                      if (allDone) groupsDone++;
+                    });
+                    return <span key={`pg-${pgi}`} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: groupsDone >= pg.need ? "#D4EDDA" : "#fff", border: `1px solid ${groupsDone >= pg.need ? "#B7DFBF" : "#E8E6E1"}`, color: groupsDone >= pg.need ? "#2D6A4F" : "#555", fontStyle: "italic" }}>{groupsDone >= pg.need ? "✓ " : ""}{groupsDone}/{pg.need} placement pair{pg.need !== 1 ? "s" : ""}</span>;
                   })}
                 </div>
               </div>;
@@ -1686,7 +1706,7 @@ export default function App() {
             return <div key={g} style={{ marginBottom: 12, background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
               <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid #F0EEEA" }}>
                 <div style={{ width: 28, height: 28, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 14, fontWeight: 700, color: m.c }}>{g}</div>
-                <div style={{ flex: 1 }}><div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600 }}>{g} Track — {on.length}</div><div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{[...t.req.map(id => c.assignments.find(a => a.id === id)?.name), ...(t.pick || []).map(p => `${p.need} of: ${p.from.map(id => c.assignments.find(a => a.id === id)?.name).join(", ")}`)].filter(Boolean).join(", ")}</div></div>
+                <div style={{ flex: 1 }}><div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600 }}>{g} Track — {on.length}</div><div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{[...t.req.map(id => c.assignments.find(a => a.id === id)?.name), ...(t.pick || []).map(p => `${p.need} of: ${p.from.map(id => c.assignments.find(a => a.id === id)?.name).join(", ")}`), ...(t.pickGroup || []).map(pg => `${pg.need} of: ${pg.from.map(grp => grp.map(id => c.assignments.find(a => a.id === id)?.name).join(" + ")).join(" or ")}`)].filter(Boolean).join(", ")}</div></div>
               </div>
               <div style={{ padding: "6px 16px 10px" }}>{on.length === 0 ? <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>None</div> :
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>{on.map(s => <span key={s.id} style={{ padding: "2px 8px", background: m.bg, borderRadius: 4, fontFamily: F.b, fontSize: 11, fontWeight: 500, color: m.c }}>{s.name}</span>)}</div>}</div>
