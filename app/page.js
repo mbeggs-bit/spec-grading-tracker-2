@@ -275,6 +275,7 @@ export default function App() {
   const [expTokens, setExpTokens] = useState(false);
   const [expPrep, setExpPrep] = useState(false);
   const [expTeach, setExpTeach] = useState(true);
+  const [viewAsStudent, setViewAsStudent] = useState(null); // null = instructor view, student obj = preview
 
   // Check auth on mount
   useEffect(() => {
@@ -844,6 +845,145 @@ export default function App() {
     );
   }
 
+  // ---- VIEW AS STUDENT (instructor preview) ----
+  if (viewAsStudent) {
+    const vs = viewAsStudent;
+    const vsChecks = sC[vs.id] || {};
+    const vsInstrS = iS[vs.id] || {};
+    const vsPrep = cP[vs.id] || {};
+    const vsToks = toks[vs.id] || [];
+    const vsGrade = calcStudentGrade(vsChecks, vsInstrS, relAssignments, ck);
+    const { target: vsTarget, blockers: vsBlockers } = getStudentBlockers(vsChecks, vsInstrS, relAssignments, ck);
+    const vsTok = tokBal(vsToks.length, 0);
+
+    return (
+      <div>
+        <a href="#main-content" className="skip-link">Skip to main content</a>
+        <header style={{ borderBottom: "1px solid #E8E6E1", background: "#FFFCF5", position: "sticky", top: 0, zIndex: 10 }}>
+          <div style={{ maxWidth: 780, margin: "0 auto", padding: "10px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button onClick={() => setViewAsStudent(null)} aria-label="Back to instructor view" style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>← Back to Instructor View</button>
+              <div style={{ width: 1, height: 14, background: "#E0DDD8" }} aria-hidden="true" />
+              <span style={{ fontFamily: F.d, fontSize: 14, fontWeight: 600 }}>{c.short}</span>
+            </div>
+            <div style={{ padding: "3px 10px", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404" }}>
+              Viewing as: {vs.name}
+            </div>
+          </div>
+        </header>
+
+        <main id="main-content" style={{ maxWidth: 780, margin: "0 auto", padding: "22px 20px" }}>
+          {/* Dashboard */}
+          <div style={{ background: "#fff", border: `2px solid ${(TM[vsGrade] || TM.F).c}`, borderRadius: 14, padding: "22px", marginBottom: 18 }}>
+            <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
+              <GradeRing grade={vsGrade} size={54} />
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "#6B6B6B", marginBottom: 2 }}>
+                  {vsGrade === "early" ? "Status" : vsGrade === "F" ? "Current Track" : "On Track For"}
+                </div>
+                <div style={{ fontFamily: F.d, fontSize: 22, fontWeight: 700, color: (TM[vsGrade] || TM.F).c }}>
+                  {vsGrade === "early" ? "Getting Started" : vsGrade === "F" ? "Check off assignments to build your track" : `${vsGrade} Track`}
+                </div>
+                <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{(() => {
+                  let confirmed = 0;
+                  relAssignments.forEach(id => {
+                    const a = c.assignments.find(x => x.id === id);
+                    if (!a) return;
+                    if (a.eval === "completion" && vsChecks[id]) confirmed++;
+                    else if (vsInstrS[id] === "mastery" && vsChecks[id]) confirmed++;
+                  });
+                  return `${confirmed} of ${relAssignments.length} confirmed`;
+                })()}</div>
+              </div>
+              <div style={{ textAlign: "center", padding: "6px 14px", background: "#F9F8F5", borderRadius: 8 }}>
+                <div style={{ display: "flex", gap: 3, justifyContent: "center", marginBottom: 3 }} aria-hidden="true">
+                  {Array.from({ length: vsTok.total }).map((_, i) => <div key={i} style={{ width: 14, height: 14, borderRadius: "50%", background: i < vsTok.avail ? "#CF202E" : "#E0DDD8", fontSize: 9, color: i < vsTok.avail ? "#fff" : "#767676", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>✦</div>)}
+                </div>
+                <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{vsTok.avail} token{vsTok.avail !== 1 ? "s" : ""}</div>
+              </div>
+            </div>
+            {vsTarget && vsBlockers.length > 0 && <div style={{ marginTop: 14, padding: "10px 14px", background: "#FFFCF5", borderRadius: 8, borderLeft: `3px solid ${(TM[vsTarget] || TM.F).c}` }}>
+              <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: (TM[vsTarget] || TM.F).c, marginBottom: 3 }}>To reach {vsTarget} track:</div>
+              <div style={{ fontFamily: F.b, fontSize: 12, color: "#666", lineHeight: 1.6 }}>
+                {vsBlockers.map((id, i) => { const a = c.assignments.find(x => x.id === id); return <span key={id}>{i > 0 ? " · " : ""}<strong>{a?.name || id}</strong>{a?.eval === "mastery" ? <span style={{ fontSize: 11, color: "#C0392B", marginLeft: 2 }}>(mastery)</span> : <span style={{ fontSize: 11, color: "#1565C0", marginLeft: 2 }}>(completion)</span>}</span>; })}
+              </div>
+            </div>}
+            {vsGrade === "early" && <div style={{ marginTop: 12, padding: "10px 14px", background: "#F3F4F6", borderRadius: 8, fontFamily: F.b, fontSize: 12, color: "#6B7280" }}>Check off your first assignment to see your grade track!</div>}
+            {vsGrade === "A" && <div style={{ marginTop: 12, padding: "10px 14px", background: "#D4EDDA", borderRadius: 8, fontFamily: F.b, fontSize: 12, color: "#2D6A4F" }}>You're on the highest track — keep it up!</div>}
+          </div>
+
+          {/* Checklist preview */}
+          <Lbl>My Progress (Preview)</Lbl>
+          <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", marginBottom: 14, lineHeight: 1.6, padding: "10px 14px", background: "#F9F8F5", borderRadius: 8 }}>
+            <strong style={{ color: "#555" }}>Completion items:</strong> Check off once you've submitted — your grade updates right away.<br />
+            <strong style={{ color: "#555" }}>Mastery items:</strong> Your grade updates once Dr. Beggs confirms mastery <em>and</em> you check it off.
+          </div>
+
+          {c.groups.map((grp, gi) => {
+            const grpA = grp.ids.map(id => c.assignments.find(a => a.id === id)).filter(Boolean);
+            return <div key={gi} style={{ marginBottom: 14 }}>
+              {grp.name && <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: c.color, marginBottom: 5, padding: "0 4px" }}>{grp.name}</div>}
+              <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+                {grpA.map((a, i) => {
+                  const isRel = relAssignments.includes(a.id); const isChecked = !!vsChecks[a.id];
+                  const instrSt = vsInstrS[a.id];
+                  const isMastery = a.eval === "mastery";
+                  const masteryLocked = isMastery && !instrSt;
+                  const hasFeedback = isMastery && !!instrSt;
+                  if (!isRel) return <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", borderBottom: i < grpA.length - 1 ? "1px solid #F5F3EF" : "none", opacity: .5 }}>
+                    <div style={{ width: 22, height: 22, borderRadius: 6, border: "2px dashed #E0DDD8", flexShrink: 0 }} />
+                    <div style={{ flex: 1 }}><span style={{ fontFamily: F.b, fontSize: 13, color: "#767676" }}>{a.name}</span></div>
+                    <span style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>Coming soon</span>
+                  </div>;
+                  return <div key={a.id} style={{ borderBottom: i < grpA.length - 1 ? "1px solid #F5F3EF" : "none" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", opacity: masteryLocked ? .7 : 1 }}>
+                      <div style={{ width: 22, height: 22, borderRadius: 6, border: isChecked ? "none" : masteryLocked ? "2px solid #E8E6E1" : "2px solid #D0CEC9", background: isChecked ? "#CF202E" : masteryLocked ? "#F5F4F0" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        {isChecked && <span style={{ color: "#fff", fontSize: 13, fontWeight: 700 }}>✓</span>}
+                        {masteryLocked && !isChecked && <span style={{ color: "#D0CEC9", fontSize: 11 }}>—</span>}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, color: isChecked ? "#767676" : masteryLocked ? "#999" : "#1A1A1A", textDecoration: isChecked ? "line-through" : "none", textDecorationColor: "#DDD" }}>{a.name}</span>
+                      </div>
+                      {a.eval === "mastery" && <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />}
+                      {a.eval === "completion" && <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
+                    </div>
+                    {hasFeedback && !isChecked && <div style={{ padding: "0 16px 10px 48px" }}>
+                      <div style={{ fontFamily: F.b, fontSize: 11, color: "#555", background: "#FFFCF5", border: "1px solid #FFECB5", borderRadius: 6, padding: "6px 10px", lineHeight: 1.4 }}>
+                        <span aria-hidden="true">📝 </span>Dr. Beggs has left feedback — review your feedback before checking off.
+                      </div>
+                    </div>}
+                  </div>;
+                })}
+              </div>
+            </div>;
+          })}
+
+          {/* Grade Tracks */}
+          <Lbl>Grade Track Requirements</Lbl>
+          <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", padding: "14px 16px", marginBottom: 12 }}>
+            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12 }}>Completion items count when you check them off. Mastery items count when confirmed by Dr. Beggs and checked off by you.</div>
+            {["A", "B", "C", "D"].map(g => { const t = c.tracks[g]; const m = TM[g]; const isOn = vsGrade === g;
+              return <div key={g} style={{ marginBottom: 8, padding: "8px 12px", borderRadius: 8, border: isOn ? `2px solid ${m.c}` : "1px solid #F0EEEA", position: "relative" }}>
+                {isOn && <span style={{ position: "absolute", top: 6, right: 10, fontFamily: F.b, fontSize: 11, fontWeight: 700, color: "#fff", background: m.c, padding: "2px 6px", borderRadius: 6 }}>THEIR TRACK</span>}
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                  <div style={{ width: 20, height: 20, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 11, fontWeight: 700, color: m.c }}>{g}</div>
+                  <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#333" }}>{g} Track</span>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+                  {t.req.map(id => { const a = c.assignments.find(x => x.id === id); const r = rel.includes(id);
+                    const isCompletion = a?.eval === "completion";
+                    const confirmed = isCompletion ? !!vsChecks[id] : (vsInstrS[id] === "mastery" && !!vsChecks[id]);
+                    return <span key={id} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: !r ? "#F5F4F0" : confirmed ? "#D4EDDA" : "#fff", border: `1px solid ${!r ? "#E8E6E1" : confirmed ? "#B7DFBF" : "#E8E6E1"}`, color: !r ? "#767676" : confirmed ? "#2D6A4F" : "#555" }}>{confirmed ? "✓ " : ""}{a?.name || id}</span>;
+                  })}
+                </div>
+              </div>;
+            })}
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   // ---- INSTRUCTOR VIEW ----
   const pending = fq.filter(f => !f.resolved);
 
@@ -1051,8 +1191,12 @@ export default function App() {
             </select>}
             <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{filteredStudents.length} student{filteredStudents.length !== 1 ? 's' : ''}{sectionFilter !== 'all' ? ` (${sectionFilter})` : ''}</span>
           </div>
-          <div style={{ display: "flex", gap: 6 }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             {pending.length > 0 && tab !== "queue" && <button onClick={() => setTab("queue")} aria-label={`${pending.length} pending token submissions`} style={{ padding: "3px 10px", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>{pending.length} token{pending.length !== 1 ? "s" : ""}</button>}
+            <select aria-label="View as student" value="" onChange={e => { const s = filteredStudents.find(x => x.id === e.target.value); if (s) setViewAsStudent(s); }} style={{ padding: "5px 8px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 11, background: "#fff", color: "#6B6B6B", cursor: "pointer" }}>
+              <option value="">View as Student</option>
+              {[...filteredStudents].sort((a, b) => (a.last || "").localeCompare(b.last || "")).map(s => <option key={s.id} value={s.id}>{s.last}, {s.first}</option>)}
+            </select>
             <button onClick={() => { setBatch(true); setBatchAsgn(relAssignments[0] || ""); }} aria-label="Grade by assignment" style={{ padding: "5px 12px", background: c.color, color: "#fff", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Grade by Assignment</button>
             {(c.classPrep && c.classPrep.length > 0) && <button onClick={() => { setPrepView(true); setPrepItem((c.classPrep || [])[0]?.id || ""); }} aria-label="Track class prep" style={{ padding: "5px 12px", background: "#fff", color: c.color, border: `1px solid ${c.color}`, borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Track Class Prep</button>}
           </div>
