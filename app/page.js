@@ -482,8 +482,8 @@ export default function App() {
     const myChecks = sC[myId] || {};
     const myPrep = cP[myId] || {};
     const myToks = toks[myId] || [];
-    const grade = calcStudentGrade(myChecks, myInstrS, relAssignments, ck);
-    const { target, blockers, msg: bMsg } = getStudentBlockers(myChecks, myInstrS, relAssignments, ck);
+    const grade = calcStudentGrade(myChecks, myInstrS, relAssignments, ck, dueDates);
+    const { target, blockers, msg: bMsg } = getStudentBlockers(myChecks, myInstrS, relAssignments, ck, dueDates);
     const tok = tokBal(myToks.length, 0);
     const cutoff = pastCutoff(ck);
 
@@ -548,14 +548,21 @@ export default function App() {
                   {grade === "early" ? "Getting Started" : grade === "F" ? "Check off assignments to build your track" : `${grade} Track`}
                 </div>
                 <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{(() => {
-                  let confirmed = 0;
+                  let confirmed = 0; let relevant = 0;
+                  const now = new Date();
                   relAssignments.forEach(id => {
                     const a = c.assignments.find(x => x.id === id);
                     if (!a) return;
-                    if (a.eval === "completion" && myChecks[id]) confirmed++;
-                    else if (myInstrS[id] === "mastery" && myChecks[id]) confirmed++;
+                    if (a.eval === "completion") {
+                      const hasDd = !!(dueDates[id]?.date);
+                      const ddPassed = hasDd && new Date(dueDates[id].date + 'T23:59:59') < now;
+                      if (ddPassed || myChecks[id]) { relevant++; if (myChecks[id]) confirmed++; }
+                    } else {
+                      const ist = myInstrS[id];
+                      if (ist === "mastery" || ist === "revision") { relevant++; if (ist === "mastery" && myChecks[id]) confirmed++; }
+                    }
                   });
-                  return `${confirmed} of ${relAssignments.length} confirmed`;
+                  return `${confirmed} of ${relevant} confirmed`;
                 })()}</div>
               </div>
               <div style={{ textAlign: "center", padding: "6px 14px", background: "#F9F8F5", borderRadius: 8 }}>
@@ -860,8 +867,8 @@ export default function App() {
     const vsInstrS = iS[vs.id] || {};
     const vsPrep = cP[vs.id] || {};
     const vsToks = toks[vs.id] || [];
-    const vsGrade = calcStudentGrade(vsChecks, vsInstrS, relAssignments, ck);
-    const { target: vsTarget, blockers: vsBlockers } = getStudentBlockers(vsChecks, vsInstrS, relAssignments, ck);
+    const vsGrade = calcStudentGrade(vsChecks, vsInstrS, relAssignments, ck, dueDates);
+    const { target: vsTarget, blockers: vsBlockers } = getStudentBlockers(vsChecks, vsInstrS, relAssignments, ck, dueDates);
     const vsTok = tokBal(vsToks.length, 0);
 
     return (
@@ -893,14 +900,21 @@ export default function App() {
                   {vsGrade === "early" ? "Getting Started" : vsGrade === "F" ? "Check off assignments to build your track" : `${vsGrade} Track`}
                 </div>
                 <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{(() => {
-                  let confirmed = 0;
+                  let confirmed = 0; let relevant = 0;
+                  const now = new Date();
                   relAssignments.forEach(id => {
                     const a = c.assignments.find(x => x.id === id);
                     if (!a) return;
-                    if (a.eval === "completion" && vsChecks[id]) confirmed++;
-                    else if (vsInstrS[id] === "mastery" && vsChecks[id]) confirmed++;
+                    if (a.eval === "completion") {
+                      const hasDd = !!(dueDates[id]?.date);
+                      const ddPassed = hasDd && new Date(dueDates[id].date + 'T23:59:59') < now;
+                      if (ddPassed || vsChecks[id]) { relevant++; if (vsChecks[id]) confirmed++; }
+                    } else {
+                      const ist = vsInstrS[id];
+                      if (ist === "mastery" || ist === "revision") { relevant++; if (ist === "mastery" && vsChecks[id]) confirmed++; }
+                    }
                   });
-                  return `${confirmed} of ${relAssignments.length} confirmed`;
+                  return `${confirmed} of ${relevant} confirmed`;
                 })()}</div>
               </div>
               <div style={{ textAlign: "center", padding: "6px 14px", background: "#F9F8F5", borderRadius: 8 }}>
@@ -1056,7 +1070,7 @@ export default function App() {
     const header = ["Last", "First", "Email", ...(hasSections ? ["Section"] : []), ...allA.map(x => x.name + " (Instr)"), ...allA.map(x => x.name + " (Student)"), ...cpI.map(x => x.name + " (Prep)"), "Tokens Used", "Tokens Avail", "Instr Track", "Student Track"].join(",");
     const rows = filteredStudents.map(st => {
       const si = iS[st.id] || {}; const sc = sC[st.id] || {}; const cp2 = cP[st.id] || {}; const tk = (toks[st.id] || []).length;
-      const ig = calcGrade(si, rel, ck); const sg = calcStudentGrade(sc, si, rel, ck); const tok = tokBal(tk, 0);
+      const ig = calcGrade(si, rel, ck); const sg = calcStudentGrade(sc, si, rel, ck, dueDates); const tok = tokBal(tk, 0);
       return [st.last, st.first, st.email, ...(hasSections ? [st.section || ''] : []), ...allA.map(x => si[x.id] === "mastery" ? "M" : si[x.id] === "revision" ? "R" : ""), ...allA.map(x => sc[x.id] ? "Y" : ""), ...cpI.map(x => cp2[x.id] ? "Y" : ""), tok.used, tok.avail, ig === "early" ? "" : ig, sg === "early" ? "" : sg].map(v => `"${v}"`).join(",");
     });
     const csvContent = header + "\n" + rows.join("\n");
@@ -1501,7 +1515,7 @@ export default function App() {
               <div style={{ width: 50, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", textAlign: "right" }}>Self</div>
             </div>
             {(() => { const gq = gridSearch.toLowerCase(); const gridFiltered = gq ? sorted.filter(s => `${s.first} ${s.last}`.toLowerCase().includes(gq) || `${s.last}, ${s.first}`.toLowerCase().includes(gq)) : sorted; return gridFiltered.map((s, si) => {
-              const ig = calcGrade(iS[s.id] || {}, relAssignments, ck); const sg = calcStudentGrade(sC[s.id] || {}, iS[s.id] || {}, relAssignments, ck);
+              const ig = calcGrade(iS[s.id] || {}, relAssignments, ck); const sg = calcStudentGrade(sC[s.id] || {}, iS[s.id] || {}, relAssignments, ck, dueDates);
               const m = TM[ig] || TM.F; const mm = ig !== sg && ig !== "early" && sg !== "early";
               return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < sorted.length - 1 ? "1px solid #F5F3EF" : "none", background: mm ? "#FFF8F0" : "transparent" }}>
                 <div style={{ width: 22, height: 22, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 11, fontWeight: 700, color: m.c, flexShrink: 0 }}>{ig === "early" ? "—" : ig}</div>
