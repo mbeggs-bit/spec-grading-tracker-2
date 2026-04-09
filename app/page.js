@@ -289,7 +289,8 @@ export default function App() {
       if (profile) {
         const courses = await loadEnrollments(profile.id);
         setUser({ profile, courses });
-        if (courses.length === 1) setCk(courses[0]);
+        const activeCourses = courses.filter(k => !COURSES[k]?.archived);
+        if (activeCourses.length === 1) setCk(activeCourses[0]);
       }
     }
     setLoading(false);
@@ -453,7 +454,7 @@ export default function App() {
         </header>
         <main id="main-content" style={{ maxWidth: 600, margin: "0 auto", padding: "40px 20px" }}>
           <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>Select Course</h1>
-          {user.courses.map(k => {
+          {user.courses.filter(k => !COURSES[k]?.archived).map(k => {
             const co = COURSES[k]; if (!co) return null;
             return <button key={k} onClick={() => setCk(k)} aria-label={`${co.title} - ${co.assignments.length} assignments`} style={{ display: "block", width: "100%", padding: "16px 20px", marginBottom: 8, background: "#fff", border: "2px solid #E8E6E1", borderRadius: 10, cursor: "pointer", textAlign: "left", position: "relative", overflow: "hidden" }}
               onMouseEnter={e => e.currentTarget.style.borderColor = co.color} onMouseLeave={e => e.currentTarget.style.borderColor = "#E8E6E1"}>
@@ -472,8 +473,8 @@ export default function App() {
   const c = COURSES[ck];
   const isInstr = user.profile.role === 'instructor';
   const assignmentIds = new Set(c.assignments.map(a => a.id));
-  const relAssignments = rel.filter(id => assignmentIds.has(id));
-  const relPrep = rel.filter(id => (c.classPrep || []).some(cp => cp.id === id));
+  const relAssignments = c.assignments.map(a => a.id);
+  const relPrep = (c.classPrep || []).map(cp => cp.id);
 
   // ---- STUDENT VIEW ----
   if (!isInstr) {
@@ -651,21 +652,13 @@ export default function App() {
               {grp.name && <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: c.color, marginBottom: 5, padding: "0 4px" }}>{grp.name}{grp.tokenGroup ? <span style={{ fontWeight: 400, color: "#6B6B6B", fontSize: 11, marginLeft: 6 }}>(1 token covers entire project)</span> : ""}</div>}
               <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
                 {grpA.map((a, i) => {
-                  const isRel = relAssignments.includes(a.id); const isChecked = !!myChecks[a.id];
+                  const isChecked = !!myChecks[a.id];
                   const instrSt = myInstrS[a.id]; // "mastery", "revision", or undefined
                   const isMastery = a.eval === "mastery";
                   // Mastery items: checkbox locked until instructor has marked M or R
                   const masteryLocked = isMastery && !instrSt;
                   // Has instructor left feedback (M or R)?
                   const hasFeedback = isMastery && !!instrSt;
-                  if (!isRel) return <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", borderBottom: i < grpA.length - 1 ? "1px solid #F5F3EF" : "none", opacity: .5 }}>
-                    <div style={{ width: 22, height: 22, borderRadius: 6, border: "2px dashed #E0DDD8", flexShrink: 0 }} />
-                    <div style={{ flex: 1 }}>
-                      <span style={{ fontFamily: F.b, fontSize: 13, color: "#767676" }}>{a.name}</span>
-                      {(dueDates[a.id]?.date || dueDates[a.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{dueDates[a.id].date ? new Date(dueDates[a.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[a.id].date && dueDates[a.id].label ? ' · ' : ''}{dueDates[a.id].label || ''}</div>}
-                    </div>
-                    <span style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>Coming soon</span>
-                  </div>;
                   return <div key={a.id} style={{ borderBottom: i < grpA.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                     <div role="checkbox" aria-checked={isChecked} aria-disabled={masteryLocked} aria-label={`${a.name} - ${a.eval}${masteryLocked ? ' - awaiting instructor feedback' : ''}${hasFeedback && !isChecked ? ' - feedback available, review before checking off' : ''}`} tabIndex={0} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", cursor: masteryLocked ? "default" : "pointer", opacity: masteryLocked ? .7 : 1 }}
                       onClick={() => { if (!masteryLocked) handleCheck(a.id); }}
@@ -940,16 +933,11 @@ export default function App() {
               {grp.name && <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: c.color, marginBottom: 5, padding: "0 4px" }}>{grp.name}</div>}
               <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
                 {grpA.map((a, i) => {
-                  const isRel = relAssignments.includes(a.id); const isChecked = !!vsChecks[a.id];
+                  const isChecked = !!vsChecks[a.id];
                   const instrSt = vsInstrS[a.id];
                   const isMastery = a.eval === "mastery";
                   const masteryLocked = isMastery && !instrSt;
                   const hasFeedback = isMastery && !!instrSt;
-                  if (!isRel) return <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", borderBottom: i < grpA.length - 1 ? "1px solid #F5F3EF" : "none", opacity: .5 }}>
-                    <div style={{ width: 22, height: 22, borderRadius: 6, border: "2px dashed #E0DDD8", flexShrink: 0 }} />
-                    <div style={{ flex: 1 }}><span style={{ fontFamily: F.b, fontSize: 13, color: "#767676" }}>{a.name}</span></div>
-                    <span style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>Coming soon</span>
-                  </div>;
                   return <div key={a.id} style={{ borderBottom: i < grpA.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", opacity: masteryLocked ? .7 : 1 }}>
                       <div style={{ width: 22, height: 22, borderRadius: 6, border: isChecked ? "none" : masteryLocked ? "2px solid #E8E6E1" : "2px solid #D0CEC9", background: isChecked ? "#CF202E" : masteryLocked ? "#F5F4F0" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -1212,7 +1200,7 @@ export default function App() {
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button onClick={handleLogout} aria-label="Sign out" style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>← Sign out</button>
             <div style={{ width: 1, height: 14, background: "#E0DDD8" }} aria-hidden="true" />
-            <select aria-label="Select course" value={ck} onChange={e => { setCk(e.target.value); setSectionFilter('all'); }} style={{ fontFamily: F.d, fontSize: 14, fontWeight: 600, border: "none", background: "none", cursor: "pointer", outline: "none" }}>{user.courses.map(k => <option key={k} value={k}>{COURSES[k]?.short || k}</option>)}</select>
+            <select aria-label="Select course" value={ck} onChange={e => { setCk(e.target.value); setSectionFilter('all'); }} style={{ fontFamily: F.d, fontSize: 14, fontWeight: 600, border: "none", background: "none", cursor: "pointer", outline: "none" }}>{user.courses.filter(k => !COURSES[k]?.archived).map(k => <option key={k} value={k}>{COURSES[k]?.short || k}</option>)}</select>
             {hasSections && <select aria-label="Filter by section" value={sectionFilter} onChange={e => setSectionFilter(e.target.value)} style={{ fontFamily: F.b, fontSize: 11, border: "1px solid #E0DDD8", borderRadius: 5, padding: "3px 8px", background: "#fff", cursor: "pointer", color: sectionFilter === 'all' ? "#6B6B6B" : c.color, fontWeight: sectionFilter === 'all' ? 400 : 600 }}>
               <option value="all">All sections</option>
               {sectionKeys.map(s => <option key={s} value={s}>{courseSections?.[s]?.name || s}</option>)}
@@ -1233,7 +1221,7 @@ export default function App() {
 
       <main id="main-content" style={{ maxWidth: 1100, margin: "0 auto", padding: "18px 20px" }}>
         <nav role="tablist" aria-label="Dashboard sections" style={{ display: "flex", gap: 0, marginBottom: 18, borderBottom: "2px solid #F0EEEA" }}>
-          {[{ k: "overview", l: "Overview" }, { k: "manage", l: "Manage" }, { k: "queue", l: "Tokens" }, { k: "tracks", l: "Tracks" }].map(t => <button role="tab" aria-selected={tab === t.k} key={t.k} onClick={() => setTab(t.k)} style={{ padding: "8px 14px", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: tab === t.k ? c.color : "#767676", background: "none", borderBottom: tab === t.k ? `2px solid ${c.color}` : "2px solid transparent", marginBottom: -2, position: "relative" }}>{t.l}{t.k === "queue" && pending.length > 0 && <span aria-label={`${pending.length} pending`} style={{ position: "absolute", top: 4, right: 2, minWidth: 16, height: 16, borderRadius: 8, background: "#CF202E", color: "#fff", fontFamily: F.b, fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{pending.length}</span>}</button>)}
+          {[{ k: "overview", l: "Overview" }, { k: "settings", l: "Settings" }, { k: "queue", l: "Tokens" }, { k: "tracks", l: "Tracks" }].map(t => <button role="tab" aria-selected={tab === t.k} key={t.k} onClick={() => setTab(t.k)} style={{ padding: "8px 14px", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: tab === t.k ? c.color : "#767676", background: "none", borderBottom: tab === t.k ? `2px solid ${c.color}` : "2px solid transparent", marginBottom: -2, position: "relative" }}>{t.l}{t.k === "queue" && pending.length > 0 && <span aria-label={`${pending.length} pending`} style={{ position: "absolute", top: 4, right: 2, minWidth: 16, height: 16, borderRadius: 8, background: "#CF202E", color: "#fff", fontFamily: F.b, fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{pending.length}</span>}</button>)}
         </nav>
 
         {/* OVERVIEW */}
@@ -1602,30 +1590,28 @@ export default function App() {
 
         </div>}
 
-        {/* MANAGE */}
-        {tab === "manage" && <div>
-          <Lbl>Assignments — toggle to release, set due dates for any assignment</Lbl>
+        {/* SETTINGS */}
+        {tab === "settings" && <div>
+          <Lbl>Due Dates</Lbl>
           {c.groups.map((grp, gi) => <div key={gi} style={{ marginBottom: 14 }}>
             {grp.name && <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: c.color, marginBottom: 4 }}>{grp.name}</div>}
             <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-              {grp.ids.map((id, i) => { const a = c.assignments.find(x => x.id === id); if (!a) return null; const isR = rel.includes(id); const ddObj = dueDates[id]; const ddLabel = ddObj?.label; const ddDate = ddObj?.date; const isEditingDue = editDue === id;
+              {grp.ids.map((id, i) => { const a = c.assignments.find(x => x.id === id); if (!a) return null; const ddObj = dueDates[id]; const ddLabel = ddObj?.label; const ddDate = ddObj?.date; const isEditingDue = editDue === id;
                 return <div key={id} style={{ borderBottom: i < grp.ids.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px" }}
                     onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                    <button role="switch" aria-checked={isR} aria-label={a?.name || id} onClick={() => handleToggleRel(id)} style={{ width: 34, height: 18, borderRadius: 9, background: isR ? c.color : "#E0DDD8", border: "none", padding: 0, position: "relative", transition: "background .3s", flexShrink: 0, cursor: "pointer" }}><div style={{ width: 12, height: 12, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: isR ? 19 : 3, transition: "left .3s", boxShadow: "0 1px 2px rgba(0,0,0,.15)" }} /></button>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{a.name}</div>
                       {(ddLabel || ddDate) && !isEditingDue && <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 1 }}>{ddDate ? new Date(ddDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{ddLabel && ddDate ? ' · ' : ''}{ddLabel || ''}</div>}
                     </div>
-                    <button onClick={(e) => { e.stopPropagation(); setEditDue(isEditingDue ? null : id); setEditDueVal(ddLabel || ''); setEditDueDate(ddDate || ''); }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: (ddLabel || ddDate) ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{ddDate ? "✎ Due" : ddLabel ? "✎ Note" : "+ Due date"}</button>
+                    <button aria-label={`${(ddLabel || ddDate) ? 'Edit' : 'Add'} due date for ${a.name}`} onClick={(e) => { e.stopPropagation(); setEditDue(isEditingDue ? null : id); setEditDueVal(ddLabel || ''); setEditDueDate(ddDate || ''); }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: (ddLabel || ddDate) ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{ddDate ? "✎ Due" : ddLabel ? "✎ Note" : "+ Due date"}</button>
                     {a.eval === "mastery" ? <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" /> : <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
                   </div>
-                  {isEditingDue && <div style={{ padding: "4px 16px 10px 60px", display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label="Due date" style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
-                    <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class, By end of day" aria-label="Due date note"
+                  {isEditingDue && <div style={{ padding: "4px 16px 10px 16px", display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label={`Due date for ${a.name}`} style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
+                    <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class, By end of day" aria-label={`Due date note for ${a.name}`}
                       style={{ flex: 2, minWidth: 140, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }}
                       onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, id, editDueVal, editDueDate); setEditDue(null); refresh(); } }} />
-                    <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label="Due date" style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
                     <button onClick={async () => { await upsertDueDate(ck, id, editDueVal, editDueDate); setEditDue(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
                     <button onClick={async () => { await upsertDueDate(ck, id, '', ''); setEditDue(null); refresh(); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
                   </div>}
@@ -1635,24 +1621,22 @@ export default function App() {
           </div>)}
 
           {(c.classPrep && c.classPrep.length > 0) && <>
-          <Lbl s={{ marginTop: 20 }}>Class Preparation — toggle to release, set due dates</Lbl>
+          <Lbl s={{ marginTop: 20 }}>Class Preparation Due Dates</Lbl>
           <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-            {c.classPrep.map((cp, i) => { const isR = rel.includes(cp.id); const ddObj = dueDates[cp.id]; const ddLabel = ddObj?.label; const ddDate = ddObj?.date; const isEditingDue = editDue === cp.id;
+            {c.classPrep.map((cp, i) => { const ddObj = dueDates[cp.id]; const ddLabel = ddObj?.label; const ddDate = ddObj?.date; const isEditingDue = editDue === cp.id;
               return <div key={cp.id} style={{ borderBottom: i < c.classPrep.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px" }}
                   onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                  <button role="switch" aria-checked={isR} aria-label={cp.name} onClick={() => handleToggleRel(cp.id)} style={{ width: 34, height: 18, borderRadius: 9, background: isR ? c.color : "#E0DDD8", position: "relative", transition: "background .3s", flexShrink: 0, cursor: "pointer", border: "none", padding: 0 }}><div style={{ width: 12, height: 12, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: isR ? 19 : 3, transition: "left .3s", boxShadow: "0 1px 2px rgba(0,0,0,.15)" }} /></button>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{cp.name}</div>
                     {(ddLabel || ddDate) && !isEditingDue && <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 1 }}>{ddDate ? new Date(ddDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{ddLabel && ddDate ? ' · ' : ''}{ddLabel || ''}</div>}
                   </div>
-                  <button onClick={(e) => { e.stopPropagation(); setEditDue(isEditingDue ? null : cp.id); setEditDueVal(ddLabel || ''); setEditDueDate(ddDate || ''); }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: (ddLabel || ddDate) ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{ddDate ? "✎ Due" : ddLabel ? "✎ Note" : "+ Due date"}</button>
+                  <button aria-label={`${(ddLabel || ddDate) ? 'Edit' : 'Add'} due date for ${cp.name}`} onClick={(e) => { e.stopPropagation(); setEditDue(isEditingDue ? null : cp.id); setEditDueVal(ddLabel || ''); setEditDueDate(ddDate || ''); }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: (ddLabel || ddDate) ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{ddDate ? "✎ Due" : ddLabel ? "✎ Note" : "+ Due date"}</button>
                   <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />
                 </div>
-                {isEditingDue && <div style={{ padding: "4px 16px 10px 60px", display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label="Due date" autoFocus style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
-                  <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class, By end of day" aria-label="Due date note" style={{ flex: 2, minWidth: 140, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, cp.id, editDueVal, editDueDate); setEditDue(null); refresh(); } }} />
-                  <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label="Due date" style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
+                {isEditingDue && <div style={{ padding: "4px 16px 10px 16px", display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label={`Due date for ${cp.name}`} style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
+                  <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class, By end of day" aria-label={`Due date note for ${cp.name}`} style={{ flex: 2, minWidth: 140, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, cp.id, editDueVal, editDueDate); setEditDue(null); refresh(); } }} />
                   <button onClick={async () => { await upsertDueDate(ck, cp.id, editDueVal, editDueDate); setEditDue(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
                   <button onClick={async () => { await upsertDueDate(ck, cp.id, '', ''); setEditDue(null); refresh(); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
                 </div>}
