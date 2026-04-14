@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { COURSES, TM, CAL_LINK, BRAND, calcGrade, calcStudentGrade, getBlockers, getStudentBlockers, tokBal, pastCutoff, getTokenCutoff, getTokenTarget, getCourseSections } from '../lib/courses';
+import { COURSES, TM, CAL_LINK, BRAND, calcGrade, getBlockers, tokBal, pastCutoff, getTokenCutoff, getTokenTarget, getCourseSections } from '../lib/courses';
 
 const F = { d: "'Source Serif 4',Georgia,serif", b: "'DM Sans',sans-serif" };
 
@@ -49,13 +49,6 @@ async function loadInstrStatuses(courseKey) {
   const { data } = await supabase.from('instructor_statuses').select('*').eq('course_key', courseKey);
   const map = {};
   (data || []).forEach(r => { if (!map[r.profile_id]) map[r.profile_id] = {}; map[r.profile_id][r.assignment_id] = r.status; });
-  return map;
-}
-
-async function loadMyInstrStatuses(courseKey, profileId) {
-  const { data } = await supabase.from('instructor_statuses').select('assignment_id, status').eq('course_key', courseKey).eq('profile_id', profileId);
-  const map = {};
-  (data || []).forEach(r => { map[r.assignment_id] = r.status; });
   return map;
 }
 
@@ -232,9 +225,9 @@ export default function App() {
 
   // Course data
   // Course data — single object to prevent multiple re-renders
-  const [courseData, setCourseData] = useState({ rel: [], dueDates: {}, students: [], iS: {}, iN: {}, sC: {}, cP: {}, toks: {}, fq: [], teachDates: [], teachSel: [], myInstrS: {} });
+  const [courseData, setCourseData] = useState({ rel: [], dueDates: {}, students: [], iS: {}, iN: {}, sC: {}, cP: {}, toks: {}, fq: [], teachDates: [], teachSel: [] });
   const [dataLoading, setDataLoading] = useState(false);
-  const { rel, dueDates, students, iS, iN, sC, cP, toks, fq, teachDates, teachSel, myInstrS } = courseData;
+  const { rel, dueDates, students, iS, iN, sC, cP, toks, fq, teachDates, teachSel } = courseData;
 
   // UI state
   const [tab, setTab] = useState('overview');
@@ -275,7 +268,6 @@ export default function App() {
   const [expTokens, setExpTokens] = useState(false);
   const [expPrep, setExpPrep] = useState(false);
   const [expTeach, setExpTeach] = useState(true);
-  const [viewAsStudent, setViewAsStudent] = useState(null); // null = instructor view, student obj = preview
 
   // Check auth on mount
   useEffect(() => {
@@ -289,8 +281,7 @@ export default function App() {
       if (profile) {
         const courses = await loadEnrollments(profile.id);
         setUser({ profile, courses });
-        const activeCourses = courses.filter(k => !COURSES[k]?.archived);
-        if (activeCourses.length === 1) setCk(activeCourses[0]);
+        if (courses.length === 1) setCk(courses[0]);
       }
     }
     setLoading(false);
@@ -303,22 +294,20 @@ export default function App() {
 
   async function loadCourseData(isInitial = true) {
     if (isInitial) setDataLoading(true);
-    const isStudent = user.profile.role === 'student';
-    const [r, dd, s, is, inn, sc, cp, t, f, td, ts, mis] = await Promise.all([
+    const [r, dd, s, is, inn, sc, cp, t, f, td, ts] = await Promise.all([
       loadReleasedAssignments(ck),
       loadDueDates(ck),
-      !isStudent ? loadStudentsForCourse(ck) : Promise.resolve([]),
-      !isStudent ? loadInstrStatuses(ck) : Promise.resolve({}),
-      !isStudent ? loadInstrNotes(ck) : Promise.resolve({}),
-      loadStudentChecks(ck, isStudent ? user.profile.id : null),
-      loadClassPrep(ck, isStudent ? user.profile.id : null),
-      loadTokens(ck, isStudent ? user.profile.id : null),
-      !isStudent ? loadFeedbackQueue(ck) : Promise.resolve([]),
+      user.profile.role === 'instructor' ? loadStudentsForCourse(ck) : Promise.resolve([]),
+      user.profile.role === 'instructor' ? loadInstrStatuses(ck) : Promise.resolve({}),
+      user.profile.role === 'instructor' ? loadInstrNotes(ck) : Promise.resolve({}),
+      loadStudentChecks(ck, user.profile.role === 'student' ? user.profile.id : null),
+      loadClassPrep(ck, user.profile.role === 'student' ? user.profile.id : null),
+      loadTokens(ck, user.profile.role === 'student' ? user.profile.id : null),
+      user.profile.role === 'instructor' ? loadFeedbackQueue(ck) : Promise.resolve([]),
       loadTeachingDates(ck),
-      loadTeachingSelections(ck, isStudent ? user.profile.id : null),
-      isStudent ? loadMyInstrStatuses(ck, user.profile.id) : Promise.resolve({}),
+      loadTeachingSelections(ck, user.profile.role === 'student' ? user.profile.id : null),
     ]);
-    setCourseData({ rel: r, dueDates: dd, students: s, iS: is, iN: inn, sC: sc, cP: cp, toks: t, fq: f, teachDates: td, teachSel: ts, myInstrS: mis });
+    setCourseData({ rel: r, dueDates: dd, students: s, iS: is, iN: inn, sC: sc, cP: cp, toks: t, fq: f, teachDates: td, teachSel: ts });
     if (isInitial) setDataLoading(false);
   }
 
@@ -454,7 +443,7 @@ export default function App() {
         </header>
         <main id="main-content" style={{ maxWidth: 600, margin: "0 auto", padding: "40px 20px" }}>
           <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>Select Course</h1>
-          {user.courses.filter(k => !COURSES[k]?.archived).map(k => {
+          {user.courses.map(k => {
             const co = COURSES[k]; if (!co) return null;
             return <button key={k} onClick={() => setCk(k)} aria-label={`${co.title} - ${co.assignments.length} assignments`} style={{ display: "block", width: "100%", padding: "16px 20px", marginBottom: 8, background: "#fff", border: "2px solid #E8E6E1", borderRadius: 10, cursor: "pointer", textAlign: "left", position: "relative", overflow: "hidden" }}
               onMouseEnter={e => e.currentTarget.style.borderColor = co.color} onMouseLeave={e => e.currentTarget.style.borderColor = "#E8E6E1"}>
@@ -473,8 +462,8 @@ export default function App() {
   const c = COURSES[ck];
   const isInstr = user.profile.role === 'instructor';
   const assignmentIds = new Set(c.assignments.map(a => a.id));
-  const relAssignments = c.assignments.map(a => a.id);
-  const relPrep = (c.classPrep || []).map(cp => cp.id);
+  const relAssignments = rel.filter(id => assignmentIds.has(id));
+  const relPrep = rel.filter(id => (c.classPrep || []).some(cp => cp.id === id));
 
   // ---- STUDENT VIEW ----
   if (!isInstr) {
@@ -482,11 +471,9 @@ export default function App() {
     const myChecks = sC[myId] || {};
     const myPrep = cP[myId] || {};
     const myToks = toks[myId] || [];
-    const grade = calcStudentGrade(myChecks, myInstrS, relAssignments, ck, dueDates);
-    const { target, blockers, msg: bMsg } = getStudentBlockers(myChecks, myInstrS, relAssignments, ck, dueDates);
-    const freeUsed = myToks.filter(t => t.token_type !== 'extra').length;
-    const extraUsed = myToks.filter(t => t.token_type === 'extra').length;
-    const tok = tokBal(freeUsed, extraUsed);
+    const grade = calcGrade(myChecks, relAssignments, ck);
+    const { target, blockers, msg: bMsg } = getBlockers(myChecks, relAssignments, ck);
+    const tok = tokBal(myToks.length, 0);
     const cutoff = pastCutoff(ck);
 
     const handleCheck = async (aid) => {
@@ -499,13 +486,10 @@ export default function App() {
     };
     const handleToken = async () => {
       if (!modal || tfSubmitting) return;
-      const isExtra = tok.freeExhausted;
-      if (isExtra && !tfExtra.trim()) return;
       setTfSubmitting(true);
       try {
-        const tokenType = isExtra ? 'extra' : tfType;
-        const note = isExtra ? `Extra token activity: ${tfExtra.trim()}${tfNote ? ' — ' + tfNote : ''}` : tfNote;
-        await submitToken(myId, ck, modal.id, tokenType, note, tfLink);
+        const note = tfType === 'extra' ? `Extra token: ${tfExtra}${tfNote ? ' — ' + tfNote : ''}` : tfNote;
+        await submitToken(myId, ck, modal.id, tfType === 'extra' ? 'revision' : tfType, note, tfLink);
         setModal(null); setTfNote(''); setTfType('revision'); setTfLink(''); setTfExtra('');
         refresh();
       } finally {
@@ -520,7 +504,7 @@ export default function App() {
       if (!grp) return true;
       return grp.ids.find(id => relAssignments.includes(id) && !myChecks[id]) === a.id;
     };
-    const showTokenBtn = (a) => !cutoff && !myChecks[a.id] && relAssignments.includes(a.id) && !(a.tokenGroup && hasGroupToken(a.tokenGroup));
+    const showTokenBtn = (a) => !cutoff && tok.avail > 0 && !myChecks[a.id] && relAssignments.includes(a.id) && !(a.tokenGroup && hasGroupToken(a.tokenGroup));
 
     return (
       <div>
@@ -552,23 +536,7 @@ export default function App() {
                 <div style={{ fontFamily: F.d, fontSize: 22, fontWeight: 700, color: (TM[grade] || TM.F).c }}>
                   {grade === "early" ? "Getting Started" : grade === "F" ? "Check off assignments to build your track" : `${grade} Track`}
                 </div>
-                <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{(() => {
-                  let confirmed = 0; let relevant = 0;
-                  const now = new Date();
-                  relAssignments.forEach(id => {
-                    const a = c.assignments.find(x => x.id === id);
-                    if (!a) return;
-                    if (a.eval === "completion") {
-                      const hasDd = !!(dueDates[id]?.date);
-                      const ddPassed = hasDd && new Date(dueDates[id].date + 'T23:59:59') < now;
-                      if (ddPassed || myChecks[id]) { relevant++; if (myChecks[id]) confirmed++; }
-                    } else {
-                      const ist = myInstrS[id];
-                      if (ist === "mastery" || ist === "revision") { relevant++; if (ist === "mastery" && myChecks[id]) confirmed++; }
-                    }
-                  });
-                  return `${confirmed} of ${relevant} confirmed`;
-                })()}</div>
+                <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{relAssignments.filter(id => myChecks[id]).length} of {relAssignments.length} checked off</div>
               </div>
               <div style={{ textAlign: "center", padding: "6px 14px", background: "#F9F8F5", borderRadius: 8 }}>
                 <div style={{ display: "flex", gap: 3, justifyContent: "center", marginBottom: 3 }} aria-hidden="true">
@@ -654,8 +622,8 @@ export default function App() {
           {/* Checklist */}
           <Lbl>My Progress</Lbl>
           <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", marginBottom: 14, lineHeight: 1.6, padding: "10px 14px", background: "#F9F8F5", borderRadius: 8 }}>
-            <strong style={{ color: "#555" }}>Completion items:</strong> Check off once you've submitted — your grade updates right away.<br />
-            <strong style={{ color: "#555" }}>Mastery items:</strong> Your grade updates once Dr. Beggs confirms mastery <em>and</em> you check it off.
+            <strong style={{ color: "#555" }}>Completion items:</strong> Check off once you've submitted your work.<br />
+            <strong style={{ color: "#555" }}>Mastery items:</strong> Wait for Dr. Beggs's feedback — only check off if you've met the specs.
           </div>
 
           {c.groups.map((grp, gi) => {
@@ -664,35 +632,30 @@ export default function App() {
               {grp.name && <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: c.color, marginBottom: 5, padding: "0 4px" }}>{grp.name}{grp.tokenGroup ? <span style={{ fontWeight: 400, color: "#6B6B6B", fontSize: 11, marginLeft: 6 }}>(1 token covers entire project)</span> : ""}</div>}
               <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
                 {grpA.map((a, i) => {
-                  const isChecked = !!myChecks[a.id];
-                  const instrSt = myInstrS[a.id]; // "mastery", "revision", or undefined
-                  const isMastery = a.eval === "mastery";
-                  // Mastery items: checkbox locked until instructor has marked M or R
-                  const masteryLocked = isMastery && !instrSt;
-                  // Has instructor left feedback (M or R)?
-                  const hasFeedback = isMastery && !!instrSt;
+                  const isRel = relAssignments.includes(a.id); const isChecked = !!myChecks[a.id];
+                  if (!isRel) return <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", borderBottom: i < grpA.length - 1 ? "1px solid #F5F3EF" : "none", opacity: .5 }}>
+                    <div style={{ width: 22, height: 22, borderRadius: 6, border: "2px dashed #E0DDD8", flexShrink: 0 }} />
+                    <div style={{ flex: 1 }}>
+                      <span style={{ fontFamily: F.b, fontSize: 13, color: "#767676" }}>{a.name}</span>
+                      {(dueDates[a.id]?.date || dueDates[a.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{dueDates[a.id].date ? new Date(dueDates[a.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[a.id].date && dueDates[a.id].label ? ' · ' : ''}{dueDates[a.id].label || ''}</div>}
+                    </div>
+                    <span style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>Coming soon</span>
+                  </div>;
                   return <div key={a.id} style={{ borderBottom: i < grpA.length - 1 ? "1px solid #F5F3EF" : "none" }}>
-                    <div role="checkbox" aria-checked={isChecked} aria-disabled={masteryLocked} aria-label={`${a.name} - ${a.eval}${masteryLocked ? ' - awaiting instructor feedback' : ''}${hasFeedback && !isChecked ? ' - feedback available, review before checking off' : ''}`} tabIndex={0} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", cursor: masteryLocked ? "default" : "pointer", opacity: masteryLocked ? .7 : 1 }}
-                      onClick={() => { if (!masteryLocked) handleCheck(a.id); }}
-                      onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && !masteryLocked) { e.preventDefault(); handleCheck(a.id); } }}
-                      onMouseEnter={e => { if (!masteryLocked) e.currentTarget.style.background = "#FAFAF7"; }} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                      <div style={{ width: 22, height: 22, borderRadius: 6, border: isChecked ? "none" : masteryLocked ? "2px solid #E8E6E1" : "2px solid #D0CEC9", background: isChecked ? "#CF202E" : masteryLocked ? "#F5F4F0" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", transition: "all .2s", flexShrink: 0 }}>
+                    <div role="checkbox" aria-checked={isChecked} aria-label={`${a.name} - ${a.eval}`} tabIndex={0} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", cursor: "pointer" }}
+                      onClick={() => handleCheck(a.id)}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCheck(a.id); } }}
+                      onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                      <div style={{ width: 22, height: 22, borderRadius: 6, border: isChecked ? "none" : "2px solid #D0CEC9", background: isChecked ? "#CF202E" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", transition: "all .2s", flexShrink: 0 }}>
                         {isChecked && <span style={{ color: "#fff", fontSize: 13, fontWeight: 700 }}>✓</span>}
-                        {masteryLocked && !isChecked && <span style={{ color: "#D0CEC9", fontSize: 11 }} aria-hidden="true">—</span>}
                       </div>
                       <div style={{ flex: 1 }}>
-                        <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, color: isChecked ? "#767676" : masteryLocked ? "#999" : "#1A1A1A", textDecoration: isChecked ? "line-through" : "none", textDecorationColor: "#DDD" }}>{a.name}</span>
+                        <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, color: isChecked ? "#767676" : "#1A1A1A", textDecoration: isChecked ? "line-through" : "none", textDecorationColor: "#DDD" }}>{a.name}</span>
                         {(dueDates[a.id]?.date || dueDates[a.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 11, color: isChecked ? "#767676" : "#6B6B6B", marginTop: 1 }}>{dueDates[a.id].date ? new Date(dueDates[a.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[a.id].date && dueDates[a.id].label ? ' · ' : ''}{dueDates[a.id].label || ''}</div>}
                       </div>
                       {a.eval === "mastery" && <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />}
                       {a.eval === "completion" && <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
                     </div>
-                    {/* Feedback message for mastery items — shows when instructor has acted and student hasn't checked off */}
-                    {hasFeedback && !isChecked && <div style={{ padding: "0 16px 10px 48px" }}>
-                      <div style={{ fontFamily: F.b, fontSize: 11, color: "#555", background: "#FFFCF5", border: "1px solid #FFECB5", borderRadius: 6, padding: "6px 10px", lineHeight: 1.4 }}>
-                        <span aria-hidden="true">📝 </span>Dr. Beggs has left feedback — review your feedback before checking off.
-                      </div>
-                    </div>}
                     {showTokenBtn(a) && isFirstInGroup(a) && <div style={{ padding: "0 16px 10px 48px" }}>
                       <button onClick={(e) => { e.stopPropagation(); const tt = getTokenTarget(a.id, ck); setModal(tt); setTfType("revision"); setTfNote(""); setTfLink(""); setTfExtra(""); }}
                         style={{ padding: "4px 12px", background: "#FFFCF5", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>
@@ -711,20 +674,17 @@ export default function App() {
               <h2 style={{ fontFamily: F.d, fontSize: 18, fontWeight: 600, marginBottom: 4 }}>Submit a Token</h2>
               <div style={{ fontFamily: F.b, fontSize: 13, color: "#555", marginBottom: 14 }}>{modal.name}</div>
               <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 6 }}>What is this token for?</div>
-              <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
-                {[{ v: "revision", l: "I revised this" }, { v: "late", l: "I'm submitting late" }].map(o => <button key={o.v} onClick={() => setTfType(o.v)} style={{ padding: "7px 14px", borderRadius: 6, fontFamily: F.b, fontSize: 11, cursor: "pointer", background: tfType === o.v ? c.color : "#fff", color: tfType === o.v ? "#fff" : "#555", border: tfType === o.v ? `1px solid ${c.color}` : "1px solid #E0DDD8", flex: 1, textAlign: "center" }}>{o.l}</button>)}
+              <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+                {[{ v: "revision", l: "I revised this" }, { v: "late", l: "I'm submitting late" }, { v: "extra", l: "Using an extra token" }].map(o => <button key={o.v} onClick={() => setTfType(o.v)} style={{ padding: "7px 14px", borderRadius: 6, fontFamily: F.b, fontSize: 11, cursor: "pointer", background: tfType === o.v ? c.color : "#fff", color: tfType === o.v ? "#fff" : "#555", border: tfType === o.v ? `1px solid ${c.color}` : "1px solid #E0DDD8", flex: 1, textAlign: "center", minWidth: o.v === "extra" ? "100%" : "auto" }}>{o.l}</button>)}
               </div>
-              {tok.freeExhausted && <div style={{ background: "#FFFCF5", border: "1px solid #FFECB5", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
-                <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", marginBottom: 6 }}>You've used your 3 free tokens. To submit another, indicate which Brightspace activity you completed.</div>
-                <input value={tfExtra} onChange={e => setTfExtra(e.target.value)} placeholder="Which extra token activity did you complete?" aria-label="Extra token activity completed on Brightspace" aria-required="true" style={{ width: "100%", padding: "8px 12px", border: tfExtra.trim() ? "1px solid #E0DDD8" : "1px solid #FFECB5", borderRadius: 6, fontFamily: F.b, fontSize: 12, boxSizing: "border-box", background: "#fff" }} />
-              </div>}
+              {tfType === "extra" && <input value={tfExtra} onChange={e => setTfExtra(e.target.value)} placeholder="List the extra token assignment you completed" aria-label="Extra token activity" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 8, boxSizing: "border-box" }} />}
               <input value={tfLink} onChange={e => setTfLink(e.target.value)} placeholder="Paste a link to your work (Google Doc, Slides, Canva, etc.)" aria-label="Link to your work" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 8, boxSizing: "border-box" }} />
               <input value={tfNote} onChange={e => setTfNote(e.target.value)} placeholder="Note for Dr. Beggs (optional)" aria-label="Note for Dr. Beggs" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 14, boxSizing: "border-box" }} />
               <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={handleToken} disabled={tfSubmitting || (tok.freeExhausted && !tfExtra.trim())} style={{ padding: "8px 18px", background: (tfSubmitting || (tok.freeExhausted && !tfExtra.trim())) ? "#E0DDD8" : c.color, color: "#fff", border: "none", borderRadius: 6, cursor: (tfSubmitting || (tok.freeExhausted && !tfExtra.trim())) ? "not-allowed" : "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600 }}>{tfSubmitting ? "Submitting..." : "Submit Token"}</button>
+                <button onClick={handleToken} disabled={tfSubmitting} style={{ padding: "8px 18px", background: tfSubmitting ? "#E0DDD8" : c.color, color: "#fff", border: "none", borderRadius: 6, cursor: tfSubmitting ? "not-allowed" : "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600 }}>{tfSubmitting ? "Submitting..." : "Submit Token"}</button>
                 <button onClick={() => setModal(null)} style={{ padding: "8px 14px", background: "#F0EEEA", color: "#6B6B6B", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 12 }}>Cancel</button>
               </div>
-              <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 8 }}>{tok.freeExhausted ? "Requires completion of an extra token activity on Brightspace." : `Uses 1 of your ${tok.avail} free token${tok.avail !== 1 ? "s" : ""}.`}</div>
+              <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 8 }}>{tfType === "extra" ? "Uses 1 extra token. Requires prior approval from Dr. Beggs." : `Uses 1 of your ${tok.avail} token${tok.avail !== 1 ? "s" : ""}.`}</div>
             </div>
           </div>}
 
@@ -810,7 +770,7 @@ export default function App() {
             <span style={{ fontSize: 11, color: "#767676", transform: expTracks ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
           </button>
           {expTracks && <div style={{ background: "#fff", border: "1px solid #E8E6E1", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 16px", marginBottom: 12 }}>
-            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12 }}>Completion items count when you check them off. Mastery items count when confirmed by Dr. Beggs and checked off by you.</div>
+            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12 }}>Every item in a track must be checked off to earn that grade.</div>
             {["A", "B", "C", "D"].map(g => { const t = c.tracks[g]; const m = TM[g]; const isOn = grade === g;
               return <div key={g} style={{ marginBottom: 8, padding: "8px 12px", borderRadius: 8, border: isOn ? `2px solid ${m.c}` : "1px solid #F0EEEA", position: "relative" }}>
                 {isOn && <span style={{ position: "absolute", top: 6, right: 10, fontFamily: F.b, fontSize: 11, fontWeight: 700, color: "#fff", background: m.c, padding: "2px 6px", borderRadius: 6 }}>YOUR TRACK</span>}
@@ -819,25 +779,8 @@ export default function App() {
                   <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#333" }}>{g} Track</span>
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-                  {t.req.map(id => { const a = c.assignments.find(x => x.id === id); const r = rel.includes(id);
-                    const isCompletion = a?.eval === "completion";
-                    const confirmed = isCompletion ? !!myChecks[id] : (myInstrS[id] === "mastery" && !!myChecks[id]);
-                    return <span key={id} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: !r ? "#F5F4F0" : confirmed ? "#D4EDDA" : "#fff", border: `1px solid ${!r ? "#E8E6E1" : confirmed ? "#B7DFBF" : "#E8E6E1"}`, color: !r ? "#767676" : confirmed ? "#2D6A4F" : "#555" }}>{confirmed ? "✓ " : ""}{a?.name || id}</span>;
-                  })}
-                  {(t.pick || []).map((p, pi) => {
-                    const completed = p.from.filter(id => rel.includes(id) && (c.assignments.find(x => x.id === id)?.eval === "completion" ? !!myChecks[id] : (myInstrS[id] === "mastery" && !!myChecks[id])));
-                    const met = completed.length >= p.need;
-                    return <span key={`pick-${pi}`} aria-label={`${p.need} ${p.label || 'items'} required — ${met ? 'met' : 'not yet met'}`} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: met ? "#D4EDDA" : "#fff", border: `1px solid ${met ? "#B7DFBF" : "#E8E6E1"}`, color: met ? "#2D6A4F" : "#555", fontStyle: "italic" }}>{met ? "✓ " : ""}{p.need} {p.label || "items"}</span>;
-                  })}
-                  {(t.pickGroup || []).map((pg, pgi) => {
-                    let groupsDone = 0;
-                    pg.from.forEach(group => {
-                      const avail = group.filter(id => rel.includes(id));
-                      const allDone = avail.length > 0 && avail.every(id => c.assignments.find(x => x.id === id)?.eval === "completion" ? !!myChecks[id] : (myInstrS[id] === "mastery" && !!myChecks[id]));
-                      if (allDone) groupsDone++;
-                    });
-                    const label = pg.from.map(grp => grp.map(id => c.assignments.find(x => x.id === id)?.name).join(" + ")).join(" or ");
-                    return <span key={`pg-${pgi}`} aria-label={`${groupsDone} of ${pg.need} placement pairs completed from: ${label}`} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: groupsDone >= pg.need ? "#D4EDDA" : "#fff", border: `1px solid ${groupsDone >= pg.need ? "#B7DFBF" : "#E8E6E1"}`, color: groupsDone >= pg.need ? "#2D6A4F" : "#555", fontStyle: "italic" }}>{groupsDone >= pg.need ? "✓ " : ""}{groupsDone}/{pg.need} placement pair{pg.need !== 1 ? "s" : ""}</span>;
+                  {t.req.map(id => { const a = c.assignments.find(x => x.id === id); const ch = !!myChecks[id]; const r = rel.includes(id);
+                    return <span key={id} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: !r ? "#F5F4F0" : ch ? "#D4EDDA" : "#fff", border: `1px solid ${!r ? "#E8E6E1" : ch ? "#B7DFBF" : "#E8E6E1"}`, color: !r ? "#767676" : ch ? "#2D6A4F" : "#555" }}>{ch ? "✓ " : ""}{a?.name || id}</span>;
                   })}
                 </div>
               </div>;
@@ -846,179 +789,23 @@ export default function App() {
 
           {/* Tokens */}
           <button aria-expanded={expTokens} onClick={() => setExpTokens(!expTokens)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "12px 16px", background: "#fff", border: "1px solid #E8E6E1", borderRadius: expTokens ? "10px 10px 0 0" : 10, cursor: "pointer", marginBottom: 12 }}>
-            <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555" }}>Tokens ({tok.freeExhausted ? "earn more via Brightspace" : `${tok.avail} available`})</span>
+            <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555" }}>Tokens ({tok.avail} available)</span>
             <span style={{ fontSize: 11, color: "#767676", transform: expTokens ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
           </button>
           {expTokens && <div style={{ background: "#fff", border: "1px solid #E8E6E1", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 16px", marginBottom: 12 }}>
             <div style={{ display: "flex", gap: 5, marginBottom: 8 }}>
               {Array.from({ length: tok.total }).map((_, i) => <div key={i} style={{ width: 22, height: 22, borderRadius: "50%", background: i < tok.avail ? "#CF202E" : "#E0DDD8", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: i < tok.avail ? "#fff" : "#767676", fontWeight: 700 }}>{i < tok.avail ? "✦" : "✕"}</div>)}
             </div>
-            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 6 }}>{tok.freeExhausted ? `${tok.used} used · earn more via Brightspace activities` : `3 per course · ${tok.used} used · ${tok.avail} available`}</div>
+            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 6 }}>3 per course · {tok.used} used · {tok.avail} available</div>
             <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", lineHeight: 1.5 }}>
               Use tokens to <strong style={{ color: "#555" }}>revise</strong> or <strong style={{ color: "#555" }}>submit late work</strong>.
-              {tok.freeExhausted && !cutoff && <><br /><span style={{ color: "#856404" }}>Out of free tokens? Complete an extra token activity on Brightspace to earn more.</span></>}
               {cutoff ? <><br /><strong style={{ color: "#C0392B" }}>Token period has ended ({getTokenCutoff(ck)}).</strong></> : <><br /><span style={{ color: "#6B6B6B" }}>Cutoff: {getTokenCutoff(ck)}</span></>}
             </div>
             {myToks.length > 0 && <div style={{ marginTop: 10 }}>
               <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "#767676", marginBottom: 4 }}>History</div>
-              {myToks.map((t, i) => { const a = c.assignments.find(x => x.id === t.assignment_id) || (c.tokenGroups || {})[t.assignment_id]; return <div key={t.id} style={{ display: "flex", gap: 6, padding: "4px 0", borderBottom: i < myToks.length - 1 ? "1px solid #F5F3EF" : "none", fontFamily: F.b, fontSize: 11, color: "#777" }}><span style={{ color: "#767676" }}>✦</span>{t.token_type === "extra" ? "Extra" : t.token_type === "revision" ? "Revision" : "Late"}: {a?.name || t.assignment_id}<span style={{ marginLeft: "auto", fontSize: 11, color: "#767676" }}>{new Date(t.submitted_at).toLocaleDateString()}</span></div>; })}
+              {myToks.map((t, i) => { const a = c.assignments.find(x => x.id === t.assignment_id) || (c.tokenGroups || {})[t.assignment_id]; return <div key={t.id} style={{ display: "flex", gap: 6, padding: "4px 0", borderBottom: i < myToks.length - 1 ? "1px solid #F5F3EF" : "none", fontFamily: F.b, fontSize: 11, color: "#777" }}><span style={{ color: "#767676" }}>✦</span>{t.token_type === "revision" ? "Revision" : "Late"}: {a?.name || t.assignment_id}<span style={{ marginLeft: "auto", fontSize: 11, color: "#767676" }}>{new Date(t.submitted_at).toLocaleDateString()}</span></div>; })}
             </div>}
           </div>}
-        </main>
-      </div>
-    );
-  }
-
-  // ---- VIEW AS STUDENT (instructor preview) ----
-  if (viewAsStudent) {
-    const vs = viewAsStudent;
-    const vsChecks = sC[vs.id] || {};
-    const vsInstrS = iS[vs.id] || {};
-    const vsPrep = cP[vs.id] || {};
-    const vsToks = toks[vs.id] || [];
-    const vsGrade = calcStudentGrade(vsChecks, vsInstrS, relAssignments, ck, dueDates);
-    const { target: vsTarget, blockers: vsBlockers } = getStudentBlockers(vsChecks, vsInstrS, relAssignments, ck, dueDates);
-    const vsTok = tokBal(vsToks.filter(t => t.token_type !== 'extra').length, vsToks.filter(t => t.token_type === 'extra').length);
-
-    return (
-      <div>
-        <a href="#main-content" className="skip-link">Skip to main content</a>
-        <header style={{ borderBottom: "1px solid #E8E6E1", background: "#FFFCF5", position: "sticky", top: 0, zIndex: 10 }}>
-          <div style={{ maxWidth: 780, margin: "0 auto", padding: "10px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <button onClick={() => setViewAsStudent(null)} aria-label="Back to instructor view" style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>← Back to Instructor View</button>
-              <div style={{ width: 1, height: 14, background: "#E0DDD8" }} aria-hidden="true" />
-              <span style={{ fontFamily: F.d, fontSize: 14, fontWeight: 600 }}>{c.short}</span>
-            </div>
-            <div style={{ padding: "3px 10px", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404" }}>
-              Viewing as: {vs.name}
-            </div>
-          </div>
-        </header>
-
-        <main id="main-content" style={{ maxWidth: 780, margin: "0 auto", padding: "22px 20px" }}>
-          {/* Dashboard */}
-          <div style={{ background: "#fff", border: `2px solid ${(TM[vsGrade] || TM.F).c}`, borderRadius: 14, padding: "22px", marginBottom: 18 }}>
-            <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
-              <GradeRing grade={vsGrade} size={54} />
-              <div style={{ flex: 1, minWidth: 180 }}>
-                <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "#6B6B6B", marginBottom: 2 }}>
-                  {vsGrade === "early" ? "Status" : vsGrade === "F" ? "Current Track" : "On Track For"}
-                </div>
-                <div style={{ fontFamily: F.d, fontSize: 22, fontWeight: 700, color: (TM[vsGrade] || TM.F).c }}>
-                  {vsGrade === "early" ? "Getting Started" : vsGrade === "F" ? "Check off assignments to build your track" : `${vsGrade} Track`}
-                </div>
-                <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{(() => {
-                  let confirmed = 0; let relevant = 0;
-                  const now = new Date();
-                  relAssignments.forEach(id => {
-                    const a = c.assignments.find(x => x.id === id);
-                    if (!a) return;
-                    if (a.eval === "completion") {
-                      const hasDd = !!(dueDates[id]?.date);
-                      const ddPassed = hasDd && new Date(dueDates[id].date + 'T23:59:59') < now;
-                      if (ddPassed || vsChecks[id]) { relevant++; if (vsChecks[id]) confirmed++; }
-                    } else {
-                      const ist = vsInstrS[id];
-                      if (ist === "mastery" || ist === "revision") { relevant++; if (ist === "mastery" && vsChecks[id]) confirmed++; }
-                    }
-                  });
-                  return `${confirmed} of ${relevant} confirmed`;
-                })()}</div>
-              </div>
-              <div style={{ textAlign: "center", padding: "6px 14px", background: "#F9F8F5", borderRadius: 8 }}>
-                <div style={{ display: "flex", gap: 3, justifyContent: "center", marginBottom: 3 }} aria-hidden="true">
-                  {Array.from({ length: vsTok.total }).map((_, i) => <div key={i} style={{ width: 14, height: 14, borderRadius: "50%", background: i < vsTok.avail ? "#CF202E" : "#E0DDD8", fontSize: 9, color: i < vsTok.avail ? "#fff" : "#767676", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>✦</div>)}
-                </div>
-                <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{vsTok.avail} token{vsTok.avail !== 1 ? "s" : ""}</div>
-              </div>
-            </div>
-            {vsTarget && vsBlockers.length > 0 && <div style={{ marginTop: 14, padding: "10px 14px", background: "#FFFCF5", borderRadius: 8, borderLeft: `3px solid ${(TM[vsTarget] || TM.F).c}` }}>
-              <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: (TM[vsTarget] || TM.F).c, marginBottom: 3 }}>To reach {vsTarget} track:</div>
-              <div style={{ fontFamily: F.b, fontSize: 12, color: "#666", lineHeight: 1.6 }}>
-                {vsBlockers.map((id, i) => { const a = c.assignments.find(x => x.id === id); return <span key={id}>{i > 0 ? " · " : ""}<strong>{a?.name || id}</strong>{a?.eval === "mastery" ? <span style={{ fontSize: 11, color: "#C0392B", marginLeft: 2 }}>(mastery)</span> : <span style={{ fontSize: 11, color: "#1565C0", marginLeft: 2 }}>(completion)</span>}</span>; })}
-              </div>
-            </div>}
-            {vsGrade === "early" && <div style={{ marginTop: 12, padding: "10px 14px", background: "#F3F4F6", borderRadius: 8, fontFamily: F.b, fontSize: 12, color: "#6B7280" }}>Check off your first assignment to see your grade track!</div>}
-            {vsGrade === "A" && <div style={{ marginTop: 12, padding: "10px 14px", background: "#D4EDDA", borderRadius: 8, fontFamily: F.b, fontSize: 12, color: "#2D6A4F" }}>You're on the highest track — keep it up!</div>}
-          </div>
-
-          {/* Checklist preview */}
-          <Lbl>My Progress (Preview)</Lbl>
-          <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", marginBottom: 14, lineHeight: 1.6, padding: "10px 14px", background: "#F9F8F5", borderRadius: 8 }}>
-            <strong style={{ color: "#555" }}>Completion items:</strong> Check off once you've submitted — your grade updates right away.<br />
-            <strong style={{ color: "#555" }}>Mastery items:</strong> Your grade updates once Dr. Beggs confirms mastery <em>and</em> you check it off.
-          </div>
-
-          {c.groups.map((grp, gi) => {
-            const grpA = grp.ids.map(id => c.assignments.find(a => a.id === id)).filter(Boolean);
-            return <div key={gi} style={{ marginBottom: 14 }}>
-              {grp.name && <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: c.color, marginBottom: 5, padding: "0 4px" }}>{grp.name}</div>}
-              <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-                {grpA.map((a, i) => {
-                  const isChecked = !!vsChecks[a.id];
-                  const instrSt = vsInstrS[a.id];
-                  const isMastery = a.eval === "mastery";
-                  const masteryLocked = isMastery && !instrSt;
-                  const hasFeedback = isMastery && !!instrSt;
-                  return <div key={a.id} style={{ borderBottom: i < grpA.length - 1 ? "1px solid #F5F3EF" : "none" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", opacity: masteryLocked ? .7 : 1 }}>
-                      <div style={{ width: 22, height: 22, borderRadius: 6, border: isChecked ? "none" : masteryLocked ? "2px solid #E8E6E1" : "2px solid #D0CEC9", background: isChecked ? "#CF202E" : masteryLocked ? "#F5F4F0" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                        {isChecked && <span style={{ color: "#fff", fontSize: 13, fontWeight: 700 }}>✓</span>}
-                        {masteryLocked && !isChecked && <span style={{ color: "#D0CEC9", fontSize: 11 }}>—</span>}
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, color: isChecked ? "#767676" : masteryLocked ? "#999" : "#1A1A1A", textDecoration: isChecked ? "line-through" : "none", textDecorationColor: "#DDD" }}>{a.name}</span>
-                      </div>
-                      {a.eval === "mastery" && <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />}
-                      {a.eval === "completion" && <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
-                    </div>
-                    {hasFeedback && !isChecked && <div style={{ padding: "0 16px 10px 48px" }}>
-                      <div style={{ fontFamily: F.b, fontSize: 11, color: "#555", background: "#FFFCF5", border: "1px solid #FFECB5", borderRadius: 6, padding: "6px 10px", lineHeight: 1.4 }}>
-                        <span aria-hidden="true">📝 </span>Dr. Beggs has left feedback — review your feedback before checking off.
-                      </div>
-                    </div>}
-                  </div>;
-                })}
-              </div>
-            </div>;
-          })}
-
-          {/* Grade Tracks */}
-          <Lbl>Grade Track Requirements</Lbl>
-          <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", padding: "14px 16px", marginBottom: 12 }}>
-            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12 }}>Completion items count when you check them off. Mastery items count when confirmed by Dr. Beggs and checked off by you.</div>
-            {["A", "B", "C", "D"].map(g => { const t = c.tracks[g]; const m = TM[g]; const isOn = vsGrade === g;
-              return <div key={g} style={{ marginBottom: 8, padding: "8px 12px", borderRadius: 8, border: isOn ? `2px solid ${m.c}` : "1px solid #F0EEEA", position: "relative" }}>
-                {isOn && <span style={{ position: "absolute", top: 6, right: 10, fontFamily: F.b, fontSize: 11, fontWeight: 700, color: "#fff", background: m.c, padding: "2px 6px", borderRadius: 6 }}>THEIR TRACK</span>}
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                  <div style={{ width: 20, height: 20, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 11, fontWeight: 700, color: m.c }}>{g}</div>
-                  <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#333" }}>{g} Track</span>
-                </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-                  {t.req.map(id => { const a = c.assignments.find(x => x.id === id); const r = rel.includes(id);
-                    const isCompletion = a?.eval === "completion";
-                    const confirmed = isCompletion ? !!vsChecks[id] : (vsInstrS[id] === "mastery" && !!vsChecks[id]);
-                    return <span key={id} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: !r ? "#F5F4F0" : confirmed ? "#D4EDDA" : "#fff", border: `1px solid ${!r ? "#E8E6E1" : confirmed ? "#B7DFBF" : "#E8E6E1"}`, color: !r ? "#767676" : confirmed ? "#2D6A4F" : "#555" }}>{confirmed ? "✓ " : ""}{a?.name || id}</span>;
-                  })}
-                  {(t.pick || []).map((p, pi) => {
-                    const completed = p.from.filter(id => rel.includes(id) && (c.assignments.find(x => x.id === id)?.eval === "completion" ? !!vsChecks[id] : (vsInstrS[id] === "mastery" && !!vsChecks[id])));
-                    const met = completed.length >= p.need;
-                    return <span key={`pick-${pi}`} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: met ? "#D4EDDA" : "#fff", border: `1px solid ${met ? "#B7DFBF" : "#E8E6E1"}`, color: met ? "#2D6A4F" : "#555", fontStyle: "italic" }}>{met ? "✓ " : ""}{p.need} {p.label || "items"}</span>;
-                  })}
-                  {(t.pickGroup || []).map((pg, pgi) => {
-                    let groupsDone = 0;
-                    pg.from.forEach(group => {
-                      const avail = group.filter(id => rel.includes(id));
-                      const allDone = avail.length > 0 && avail.every(id => c.assignments.find(x => x.id === id)?.eval === "completion" ? !!vsChecks[id] : (vsInstrS[id] === "mastery" && !!vsChecks[id]));
-                      if (allDone) groupsDone++;
-                    });
-                    return <span key={`pg-${pgi}`} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: groupsDone >= pg.need ? "#D4EDDA" : "#fff", border: `1px solid ${groupsDone >= pg.need ? "#B7DFBF" : "#E8E6E1"}`, color: groupsDone >= pg.need ? "#2D6A4F" : "#555", fontStyle: "italic" }}>{groupsDone >= pg.need ? "✓ " : ""}{groupsDone}/{pg.need} placement pair{pg.need !== 1 ? "s" : ""}</span>;
-                  })}
-                </div>
-              </div>;
-            })}
-          </div>
         </main>
       </div>
     );
@@ -1064,11 +851,11 @@ export default function App() {
     if (sortBy === "first") return (a.first || "").localeCompare(b.first || "");
     if (sortBy === "last") return (a.last || "").localeCompare(b.last || "");
     const o = { A: 0, B: 1, C: 2, D: 3, F: 4, early: 5 };
-    return (o[calcStudentGrade(sC[a.id] || {}, iS[a.id] || {}, relAssignments, ck, dueDates)] || 5) - (o[calcStudentGrade(sC[b.id] || {}, iS[b.id] || {}, relAssignments, ck, dueDates)] || 5);
+    return (o[calcGrade(iS[a.id] || {}, relAssignments, ck)] || 5) - (o[calcGrade(iS[b.id] || {}, relAssignments, ck)] || 5);
   });
 
   const dist = { A: 0, B: 0, C: 0, D: 0, F: 0, early: 0 };
-  filteredStudents.forEach(s => { const g = calcStudentGrade(sC[s.id] || {}, iS[s.id] || {}, relAssignments, ck, dueDates); dist[g] = (dist[g] || 0) + 1; });
+  filteredStudents.forEach(s => { const g = calcGrade(iS[s.id] || {}, relAssignments, ck); dist[g] = (dist[g] || 0) + 1; });
 
   const insights = relAssignments.map(id => { const a = c.assignments.find(x => x.id === id); const rc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "revision").length; const mc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "mastery").length; return { ...a, rc, mc, ns: filteredStudents.length - rc - mc }; }).filter(a => a.rc > 0).sort((a, b) => b.rc - a.rc);
   const cpSum = (c.classPrep || []).map(cp => ({ ...cp, done: filteredStudents.filter(s => (cP[s.id] || {})[cp.id]).length }));
@@ -1077,14 +864,11 @@ export default function App() {
     const filteredStudents = sectionFilter === 'all' ? students : students.filter(s => s.section === sectionFilter);
     const allA = c.assignments.filter(x => relAssignments.includes(x.id)); const cpI = c.classPrep || [];
     const hasSections = students.some(s => s.section);
-    const header = ["Last", "First", "Email", ...(hasSections ? ["Section"] : []), ...allA.map(x => x.name + " (Instr)"), ...allA.map(x => x.name + " (Student)"), ...cpI.map(x => x.name + " (Prep)"), "Free Tokens Used", "Free Tokens Avail", "Extra Tokens Used", "Track"].join(",");
+    const header = ["Last", "First", "Email", ...(hasSections ? ["Section"] : []), ...allA.map(x => x.name + " (Instr)"), ...allA.map(x => x.name + " (Student)"), ...cpI.map(x => x.name + " (Prep)"), "Tokens Used", "Tokens Avail", "Instr Track", "Student Track"].join(",");
     const rows = filteredStudents.map(st => {
-      const si = iS[st.id] || {}; const sc = sC[st.id] || {}; const cp2 = cP[st.id] || {}; const sToks = toks[st.id] || [];
-      const grade = calcStudentGrade(sc, si, rel, ck, dueDates);
-      const freeUsed = sToks.filter(t => t.token_type !== 'extra').length;
-      const extraUsed = sToks.filter(t => t.token_type === 'extra').length;
-      const tok = tokBal(freeUsed, extraUsed);
-      return [st.last, st.first, st.email, ...(hasSections ? [st.section || ''] : []), ...allA.map(x => si[x.id] === "mastery" ? "M" : si[x.id] === "revision" ? "R" : ""), ...allA.map(x => sc[x.id] ? "Y" : ""), ...cpI.map(x => cp2[x.id] ? "Y" : ""), tok.used, tok.avail, tok.extra, grade === "early" ? "" : grade].map(v => `"${v}"`).join(",");
+      const si = iS[st.id] || {}; const sc = sC[st.id] || {}; const cp2 = cP[st.id] || {}; const tk = (toks[st.id] || []).length;
+      const ig = calcGrade(si, rel, ck); const sg = calcGrade(sc, rel, ck); const tok = tokBal(tk, 0);
+      return [st.last, st.first, st.email, ...(hasSections ? [st.section || ''] : []), ...allA.map(x => si[x.id] === "mastery" ? "M" : si[x.id] === "revision" ? "R" : ""), ...allA.map(x => sc[x.id] ? "Y" : ""), ...cpI.map(x => cp2[x.id] ? "Y" : ""), tok.used, tok.avail, ig === "early" ? "" : ig, sg === "early" ? "" : sg].map(v => `"${v}"`).join(",");
     });
     const csvContent = header + "\n" + rows.join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" }); const url = URL.createObjectURL(blob);
@@ -1133,13 +917,13 @@ export default function App() {
                 ? [{ v: "mastery", l: "✓ Complete", bg: "#D4EDDA", c: "#2D6A4F" }, { v: "", l: "—", bg: "#F5F4F0", c: "#767676" }]
                 : [{ v: "mastery", l: "Mastered", bg: "#D4EDDA", c: "#2D6A4F" }, { v: "revision", l: "Revise", bg: "#FFF3CD", c: "#856404" }, { v: "", l: "—", bg: "#F5F4F0", c: "#767676" }];
               return <div key={s.id} style={{ borderBottom: si < bSorted.length - 1 ? "1px solid #F5F3EF" : "none" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px", flexWrap: "wrap" }}>
                   <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, width: 120, flexShrink: 0 }}>{sortBy === "last" ? `${s.last}, ${s.first}` : `${s.first} ${s.last}`}</div>
-                  <div style={{ display: "flex", gap: 4 }}>
-                    {opts.map(o => <button key={o.v} aria-label={`${sortBy === "last" ? s.last + " " + s.first : s.first + " " + s.last}: ${o.l}`} onClick={() => handleInstrUpdate(s.id, batchAsgn, o.v || null)} style={{ padding: "5px 10px", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer", background: st === o.v ? o.bg : "#F8F7F4", color: st === o.v ? o.c : "#767676", border: st === o.v ? `2px solid ${o.c}` : "1px solid #E8E6E1" }}>{o.l}</button>)}
+                  <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                    {opts.map(o => <button key={o.v} aria-label={`${sortBy === "last" ? s.last + " " + s.first : s.first + " " + s.last}: ${o.l}`} onClick={() => handleInstrUpdate(s.id, batchAsgn, o.v || null)} style={{ padding: "5px 10px", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer", background: st === o.v ? o.bg : "#F8F7F4", color: st === o.v ? o.c : "#767676", border: st === o.v ? `2px solid ${o.c}` : "1px solid #E8E6E1", minHeight: 44, minWidth: 44, display: "flex", alignItems: "center", justifyContent: "center" }}>{o.l}</button>)}
                   </div>
-                  <button onClick={() => { setNoteFor(isEN ? null : s.id); setNoteVal(note || ""); }} style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: note ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{note ? "✎ Note" : "+ Note"}</button>
-                  <div style={{ width: 60, flexShrink: 0, textAlign: "right" }}>
+                  <button onClick={() => { setNoteFor(isEN ? null : s.id); setNoteVal(note || ""); }} style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: note ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0, minHeight: 44, minWidth: 44, display: "flex", alignItems: "center", justifyContent: "center" }}>{note ? "✎ Note" : "+ Note"}</button>
+                  <div style={{ flexShrink: 0, textAlign: "right" }}>
                     {studentChecked && <Pill t="Self ✓" bg="#E8F5E9" c="#2D6A4F" />}
                   </div>
                 </div>
@@ -1227,19 +1011,15 @@ export default function App() {
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button onClick={handleLogout} aria-label="Sign out" style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>← Sign out</button>
             <div style={{ width: 1, height: 14, background: "#E0DDD8" }} aria-hidden="true" />
-            <select aria-label="Select course" value={ck} onChange={e => { setCk(e.target.value); setSectionFilter('all'); }} style={{ fontFamily: F.d, fontSize: 14, fontWeight: 600, border: "none", background: "none", cursor: "pointer", outline: "none" }}>{user.courses.filter(k => !COURSES[k]?.archived).map(k => <option key={k} value={k}>{COURSES[k]?.short || k}</option>)}</select>
+            <select aria-label="Select course" value={ck} onChange={e => { setCk(e.target.value); setSectionFilter('all'); }} style={{ fontFamily: F.d, fontSize: 14, fontWeight: 600, border: "none", background: "none", cursor: "pointer", outline: "none" }}>{user.courses.map(k => <option key={k} value={k}>{COURSES[k]?.short || k}</option>)}</select>
             {hasSections && <select aria-label="Filter by section" value={sectionFilter} onChange={e => setSectionFilter(e.target.value)} style={{ fontFamily: F.b, fontSize: 11, border: "1px solid #E0DDD8", borderRadius: 5, padding: "3px 8px", background: "#fff", cursor: "pointer", color: sectionFilter === 'all' ? "#6B6B6B" : c.color, fontWeight: sectionFilter === 'all' ? 400 : 600 }}>
               <option value="all">All sections</option>
               {sectionKeys.map(s => <option key={s} value={s}>{courseSections?.[s]?.name || s}</option>)}
             </select>}
             <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{filteredStudents.length} student{filteredStudents.length !== 1 ? 's' : ''}{sectionFilter !== 'all' ? ` (${sectionFilter})` : ''}</span>
           </div>
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 6 }}>
             {pending.length > 0 && tab !== "queue" && <button onClick={() => setTab("queue")} aria-label={`${pending.length} pending token submissions`} style={{ padding: "3px 10px", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>{pending.length} token{pending.length !== 1 ? "s" : ""}</button>}
-            <select aria-label="View as student" value="" onChange={e => { const s = filteredStudents.find(x => x.id === e.target.value); if (s) setViewAsStudent(s); }} style={{ padding: "5px 8px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 11, background: "#fff", color: "#6B6B6B", cursor: "pointer" }}>
-              <option value="">View as Student</option>
-              {[...filteredStudents].sort((a, b) => (a.last || "").localeCompare(b.last || "")).map(s => <option key={s.id} value={s.id}>{s.last}, {s.first}</option>)}
-            </select>
             <button onClick={() => { setBatch(true); setBatchAsgn(relAssignments[0] || ""); }} aria-label="Grade by assignment" style={{ padding: "5px 12px", background: c.color, color: "#fff", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Grade by Assignment</button>
             {(c.classPrep && c.classPrep.length > 0) && <button onClick={() => { setPrepView(true); setPrepItem((c.classPrep || [])[0]?.id || ""); }} aria-label="Track class prep" style={{ padding: "5px 12px", background: "#fff", color: c.color, border: `1px solid ${c.color}`, borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Track Class Prep</button>}
           </div>
@@ -1248,7 +1028,7 @@ export default function App() {
 
       <main id="main-content" style={{ maxWidth: 1100, margin: "0 auto", padding: "18px 20px" }}>
         <nav role="tablist" aria-label="Dashboard sections" style={{ display: "flex", gap: 0, marginBottom: 18, borderBottom: "2px solid #F0EEEA" }}>
-          {[{ k: "overview", l: "Overview" }, { k: "settings", l: "Settings" }, { k: "queue", l: "Tokens" }, { k: "tracks", l: "Tracks" }].map(t => <button role="tab" aria-selected={tab === t.k} key={t.k} onClick={() => setTab(t.k)} style={{ padding: "8px 14px", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: tab === t.k ? c.color : "#767676", background: "none", borderBottom: tab === t.k ? `2px solid ${c.color}` : "2px solid transparent", marginBottom: -2, position: "relative" }}>{t.l}{t.k === "queue" && pending.length > 0 && <span aria-label={`${pending.length} pending`} style={{ position: "absolute", top: 4, right: 2, minWidth: 16, height: 16, borderRadius: 8, background: "#CF202E", color: "#fff", fontFamily: F.b, fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{pending.length}</span>}</button>)}
+          {[{ k: "overview", l: "Overview" }, { k: "manage", l: "Manage" }, { k: "queue", l: "Tokens" }, { k: "tracks", l: "Tracks" }].map(t => <button role="tab" aria-selected={tab === t.k} key={t.k} onClick={() => setTab(t.k)} style={{ padding: "8px 14px", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: tab === t.k ? c.color : "#767676", background: "none", borderBottom: tab === t.k ? `2px solid ${c.color}` : "2px solid transparent", marginBottom: -2, position: "relative" }}>{t.l}{t.k === "queue" && pending.length > 0 && <span aria-label={`${pending.length} pending`} style={{ position: "absolute", top: 4, right: 2, minWidth: 16, height: 16, borderRadius: 8, background: "#CF202E", color: "#fff", fontFamily: F.b, fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{pending.length}</span>}</button>)}
         </nav>
 
         {/* OVERVIEW */}
@@ -1515,34 +1295,35 @@ export default function App() {
             </div>}
           </div>
 
-          {expStudents && <><div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "8px 16px 6px", borderBottom: "2px solid #F0EEEA", background: "#FAFAF7" }}>
-              <div style={{ width: 24, flexShrink: 0 }} />
-              <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676" }}>Student</div>
+          {expStudents && <><div role="region" aria-label="Student grades grid" tabIndex={0} style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "8px 16px 6px", borderBottom: "2px solid #F0EEEA", background: "#FAFAF7", minWidth: "fit-content" }}>
+              <div style={{ width: 24, flexShrink: 0, position: "sticky", left: 16, zIndex: 1, background: "#FAFAF7" }} />
+              <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", position: "sticky", left: 40, zIndex: 1, background: "#FAFAF7" }}>Student</div>
               <div style={{ flex: 1, display: "flex", gap: 3 }}>{relAssignments.map(id => { const x = c.assignments.find(a => a.id === id);
                 const words = (x?.name || "").split(' ');
                 const abbr = words.length >= 3 ? words.filter(w => w.length > 1).map(w => w[0]).join('').substring(0, 5) : (x?.name || "").substring(0, 6);
                 return <div key={id} style={{ flex: 1, minWidth: 28, maxWidth: 40, display: "flex", alignItems: "flex-end", justifyContent: "center" }} title={x?.name} aria-label={x?.name}>
                   <div style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", fontFamily: F.b, fontSize: 10, fontWeight: 600, color: "#555", textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", maxHeight: 72, lineHeight: 1.2, paddingBottom: 2 }}>{x?.name || ""}</div>
                 </div>; })}</div>
+              <div style={{ width: 50, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", textAlign: "right" }}>Self</div>
             </div>
             {(() => { const gq = gridSearch.toLowerCase(); const gridFiltered = gq ? sorted.filter(s => `${s.first} ${s.last}`.toLowerCase().includes(gq) || `${s.last}, ${s.first}`.toLowerCase().includes(gq)) : sorted; return gridFiltered.map((s, si) => {
-              const ig = calcStudentGrade(sC[s.id] || {}, iS[s.id] || {}, relAssignments, ck, dueDates);
-              const instrOnly = calcStudentGrade(iS[s.id] || {}, iS[s.id] || {}, relAssignments, ck, dueDates);
-              const m = TM[ig] || TM.F; const mm = ig !== instrOnly && ig !== "early" && instrOnly !== "early";
-              return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < sorted.length - 1 ? "1px solid #F5F3EF" : "none", background: mm ? "#FFF8F0" : "transparent" }}>
-                <div style={{ width: 22, height: 22, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 11, fontWeight: 700, color: m.c, flexShrink: 0 }}>{ig === "early" ? "—" : ig}</div>
-                <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sortBy === "last" ? `${s.last}, ${s.first}` : s.name}</div>
+              const ig = calcGrade(iS[s.id] || {}, relAssignments, ck); const sg = calcGrade(sC[s.id] || {}, relAssignments, ck);
+              const m = TM[ig] || TM.F; const mm = ig !== sg && ig !== "early" && sg !== "early";
+              const rowBg = mm ? "#FFF8F0" : "transparent";
+              return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < sorted.length - 1 ? "1px solid #F5F3EF" : "none", background: rowBg, minWidth: "fit-content" }}>
+                <div style={{ width: 22, height: 22, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 11, fontWeight: 700, color: m.c, flexShrink: 0, position: "sticky", left: 16, zIndex: 1 }}>{ig === "early" ? "—" : ig}</div>
+                <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", position: "sticky", left: 40, zIndex: 1, background: rowBg }}>{sortBy === "last" ? `${s.last}, ${s.first}` : s.name}</div>
                 <div style={{ flex: 1, display: "flex", gap: 3 }}>
                   {relAssignments.map(id => { const st = (iS[s.id] || {})[id] || "";
                     return <div key={id} title={c.assignments.find(a => a.id === id)?.name} style={{ flex: 1, minWidth: 28, maxWidth: 40, height: 22, borderRadius: 4, background: st === "mastery" ? "#D4EDDA" : st === "revision" ? "#FFF3CD" : "#F5F4F0", border: !st ? "1.5px dashed #E8E6E1" : "1.5px solid transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: st === "mastery" ? "#2D6A4F" : st === "revision" ? "#856404" : "transparent" }}>{st === "mastery" ? "M" : st === "revision" ? "R" : ""}</div>;
                   })}
                 </div>
-                {mm && <div style={{ width: 20, flexShrink: 0, textAlign: "right", fontFamily: F.b, fontSize: 11, color: "#E65100" }} title="Student has checked off items you haven't confirmed">⚠</div>}
+                <div style={{ width: 50, flexShrink: 0, textAlign: "right", fontFamily: F.b, fontSize: 11, color: mm ? "#E65100" : "#767676" }}>{sg === "early" ? "—" : sg}{mm ? " ⚠" : ""}</div>
               </div>;
             }); })()}
           </div>
-          <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 8 }}>⚠ = student checked off items you haven't confirmed.{gridSearch && ` Showing ${gridSearch} filter.`}</div>
+          <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 8 }}>"Self" = student self-reported track. ⚠ = mismatch.{gridSearch && ` Showing ${gridSearch} filter.`}</div>
           </>}
 
           <div style={{ marginTop: 20 }}>
@@ -1556,23 +1337,21 @@ export default function App() {
                 if (matches.length === 0) return <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", padding: "4px 0" }}>No students found.</div>;
                 return matches.map((s, si) => {
                   const sToks = toks[s.id] || [];
-                  const sFreeUsed = sToks.filter(t => t.token_type !== 'extra').length;
-                  const sExtraUsed = sToks.filter(t => t.token_type === 'extra').length;
-                  const tok = tokBal(sFreeUsed, sExtraUsed);
+                  const tok = tokBal(sToks.length, 0);
                   const expanded = tokExpand === s.id;
                   return <div key={s.id} style={{ borderBottom: si < matches.length - 1 ? "1px solid #F5F3EF" : "none" }}>
-                    <div role="button" tabIndex={0} aria-expanded={expanded} aria-label={`${s.last}, ${s.first} - ${tok.avail} free tokens left${tok.extra > 0 ? `, ${tok.extra} extra used` : ''}`} onClick={() => setTokExpand(expanded ? null : s.id)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setTokExpand(expanded ? null : s.id); } }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", cursor: "pointer" }}>
+                    <div role="button" tabIndex={0} aria-expanded={expanded} aria-label={`${s.last}, ${s.first} - ${tok.avail} tokens left`} onClick={() => setTokExpand(expanded ? null : s.id)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setTokExpand(expanded ? null : s.id); } }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", cursor: "pointer" }}>
                       <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500, flex: 1 }}>{s.last}, {s.first}</div>
                       <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
                         {Array.from({ length: tok.total }).map((_, i) => <div key={i} style={{ width: 12, height: 12, borderRadius: "50%", background: i < tok.avail ? "#CF202E" : "#E0DDD8" }} />)}
                       </div>
-                      <div style={{ fontFamily: F.b, fontSize: 11, color: tok.freeExhausted ? "#C0392B" : "#6B6B6B", width: 90, textAlign: "right", flexShrink: 0 }}>{tok.freeExhausted ? `0 free` : `${tok.avail} left`}{tok.extra > 0 ? ` · ${tok.extra} extra` : ""}</div>
+                      <div style={{ fontFamily: F.b, fontSize: 11, color: tok.avail === 0 ? "#C0392B" : "#6B6B6B", width: 70, textAlign: "right", flexShrink: 0 }}>{tok.avail} left</div>
                       {sToks.length > 0 && <span style={{ fontSize: 11, color: "#767676", transform: expanded ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>}
                     </div>
                     {expanded && sToks.length > 0 && <div style={{ padding: "2px 0 8px", borderTop: "1px solid #F5F3EF" }}>
                       {sToks.map((t, ti) => { const a = c.assignments.find(x => x.id === t.assignment_id) || (c.tokenGroups || {})[t.assignment_id]; return <div key={ti} style={{ display: "flex", gap: 8, padding: "4px 0", fontFamily: F.b, fontSize: 11, color: "#666" }}>
                         <span style={{ color: "#767676" }}>✦</span>
-                        <span style={{ flex: 1 }}>{t.token_type === "extra" ? "Extra" : t.token_type === "revision" ? "Revision" : "Late"}: {a?.name || t.assignment_id}{t.note ? ` — "${t.note}"` : ""}</span>
+                        <span style={{ flex: 1 }}>{t.token_type === "revision" ? "Revision" : "Late"}: {a?.name || t.assignment_id}{t.note ? ` — "${t.note}"` : ""}</span>
                         <span style={{ color: "#767676", fontSize: 10 }}>{new Date(t.submitted_at).toLocaleDateString()}</span>
                       </div>; })}
                     </div>}
@@ -1590,9 +1369,9 @@ export default function App() {
                 <input value={cpGridSearch} onChange={e => setCpGridSearch(e.target.value)} placeholder="Filter..." aria-label="Filter class prep students" style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#666", background: "#fff", width: 80, outline: "none" }} />
               </div>}
             </div>
-            {expClassPrep && <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-              <div style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "8px 16px 6px", borderBottom: "2px solid #F0EEEA", background: "#FAFAF7" }}>
-                <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676" }}>Student</div>
+            {expClassPrep && <div role="region" aria-label="Class preparation grid" tabIndex={0} style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "8px 16px 6px", borderBottom: "2px solid #F0EEEA", background: "#FAFAF7", minWidth: "fit-content" }}>
+                <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", position: "sticky", left: 16, zIndex: 1, background: "#FAFAF7" }}>Student</div>
                 <div style={{ flex: 1, display: "flex", gap: 3 }}>{(c.classPrep || []).map(cp => {
                   return <div key={cp.id} style={{ flex: 1, minWidth: 28, maxWidth: 40, display: "flex", alignItems: "flex-end", justifyContent: "center" }} title={cp.name} aria-label={cp.name}>
                     <div style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", fontFamily: F.b, fontSize: 10, fontWeight: 600, color: "#555", textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", maxHeight: 72, lineHeight: 1.2, paddingBottom: 2 }}>{cp.name}</div>
@@ -1604,8 +1383,8 @@ export default function App() {
                 const sCp = cP[s.id] || {};
                 const doneCount = (c.classPrep || []).filter(cp => !!sCp[cp.id]).length;
                 const allDone = doneCount === (c.classPrep || []).length;
-                return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < cpFiltered.length - 1 ? "1px solid #F5F3EF" : "none" }}>
-                  <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.last}, {s.first}</div>
+                return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < cpFiltered.length - 1 ? "1px solid #F5F3EF" : "none", minWidth: "fit-content" }}>
+                  <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", position: "sticky", left: 16, zIndex: 1, background: "#fff" }}>{s.last}, {s.first}</div>
                   <div style={{ flex: 1, display: "flex", gap: 3 }}>
                     {(c.classPrep || []).map(cp => { const done = !!sCp[cp.id];
                       return <div key={cp.id} title={`${cp.name}: ${done ? 'Complete' : 'Not complete'}`} style={{ flex: 1, minWidth: 28, maxWidth: 40, height: 22, borderRadius: 4, background: done ? "#D4EDDA" : "#F5F4F0", border: done ? "1.5px solid #B7DFBF" : "1.5px dashed #E8E6E1", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: done ? "#2D6A4F" : "transparent" }}>{done ? "✓" : ""}</div>;
@@ -1619,28 +1398,30 @@ export default function App() {
 
         </div>}
 
-        {/* SETTINGS */}
-        {tab === "settings" && <div>
-          <Lbl>Due Dates</Lbl>
+        {/* MANAGE */}
+        {tab === "manage" && <div>
+          <Lbl>Assignments — toggle to release, set due dates for any assignment</Lbl>
           {c.groups.map((grp, gi) => <div key={gi} style={{ marginBottom: 14 }}>
             {grp.name && <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: c.color, marginBottom: 4 }}>{grp.name}</div>}
             <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-              {grp.ids.map((id, i) => { const a = c.assignments.find(x => x.id === id); if (!a) return null; const ddObj = dueDates[id]; const ddLabel = ddObj?.label; const ddDate = ddObj?.date; const isEditingDue = editDue === id;
+              {grp.ids.map((id, i) => { const a = c.assignments.find(x => x.id === id); if (!a) return null; const isR = rel.includes(id); const ddObj = dueDates[id]; const ddLabel = ddObj?.label; const ddDate = ddObj?.date; const isEditingDue = editDue === id;
                 return <div key={id} style={{ borderBottom: i < grp.ids.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px" }}
                     onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                    <button role="switch" aria-checked={isR} aria-label={a?.name || id} onClick={() => handleToggleRel(id)} style={{ width: 34, height: 18, borderRadius: 9, background: isR ? c.color : "#E0DDD8", border: "none", padding: 0, position: "relative", transition: "background .3s", flexShrink: 0, cursor: "pointer" }}><div style={{ width: 12, height: 12, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: isR ? 19 : 3, transition: "left .3s", boxShadow: "0 1px 2px rgba(0,0,0,.15)" }} /></button>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{a.name}</div>
                       {(ddLabel || ddDate) && !isEditingDue && <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 1 }}>{ddDate ? new Date(ddDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{ddLabel && ddDate ? ' · ' : ''}{ddLabel || ''}</div>}
                     </div>
-                    <button aria-label={`${(ddLabel || ddDate) ? 'Edit' : 'Add'} due date for ${a.name}`} onClick={(e) => { e.stopPropagation(); setEditDue(isEditingDue ? null : id); setEditDueVal(ddLabel || ''); setEditDueDate(ddDate || ''); }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: (ddLabel || ddDate) ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{ddDate ? "✎ Due" : ddLabel ? "✎ Note" : "+ Due date"}</button>
+                    <button onClick={(e) => { e.stopPropagation(); setEditDue(isEditingDue ? null : id); setEditDueVal(ddLabel || ''); setEditDueDate(ddDate || ''); }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: (ddLabel || ddDate) ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{ddDate ? "✎ Due" : ddLabel ? "✎ Note" : "+ Due date"}</button>
                     {a.eval === "mastery" ? <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" /> : <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
                   </div>
-                  {isEditingDue && <div style={{ padding: "4px 16px 10px 16px", display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label={`Due date for ${a.name}`} style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
-                    <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class, By end of day" aria-label={`Due date note for ${a.name}`}
+                  {isEditingDue && <div style={{ padding: "4px 16px 10px 60px", display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label="Due date" style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
+                    <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class, By end of day" aria-label="Due date note"
                       style={{ flex: 2, minWidth: 140, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }}
                       onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, id, editDueVal, editDueDate); setEditDue(null); refresh(); } }} />
+                    <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label="Due date" style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
                     <button onClick={async () => { await upsertDueDate(ck, id, editDueVal, editDueDate); setEditDue(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
                     <button onClick={async () => { await upsertDueDate(ck, id, '', ''); setEditDue(null); refresh(); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
                   </div>}
@@ -1650,22 +1431,24 @@ export default function App() {
           </div>)}
 
           {(c.classPrep && c.classPrep.length > 0) && <>
-          <Lbl s={{ marginTop: 20 }}>Class Preparation Due Dates</Lbl>
+          <Lbl s={{ marginTop: 20 }}>Class Preparation — toggle to release, set due dates</Lbl>
           <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-            {c.classPrep.map((cp, i) => { const ddObj = dueDates[cp.id]; const ddLabel = ddObj?.label; const ddDate = ddObj?.date; const isEditingDue = editDue === cp.id;
+            {c.classPrep.map((cp, i) => { const isR = rel.includes(cp.id); const ddObj = dueDates[cp.id]; const ddLabel = ddObj?.label; const ddDate = ddObj?.date; const isEditingDue = editDue === cp.id;
               return <div key={cp.id} style={{ borderBottom: i < c.classPrep.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px" }}
                   onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                  <button role="switch" aria-checked={isR} aria-label={cp.name} onClick={() => handleToggleRel(cp.id)} style={{ width: 34, height: 18, borderRadius: 9, background: isR ? c.color : "#E0DDD8", position: "relative", transition: "background .3s", flexShrink: 0, cursor: "pointer", border: "none", padding: 0 }}><div style={{ width: 12, height: 12, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: isR ? 19 : 3, transition: "left .3s", boxShadow: "0 1px 2px rgba(0,0,0,.15)" }} /></button>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{cp.name}</div>
                     {(ddLabel || ddDate) && !isEditingDue && <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 1 }}>{ddDate ? new Date(ddDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{ddLabel && ddDate ? ' · ' : ''}{ddLabel || ''}</div>}
                   </div>
-                  <button aria-label={`${(ddLabel || ddDate) ? 'Edit' : 'Add'} due date for ${cp.name}`} onClick={(e) => { e.stopPropagation(); setEditDue(isEditingDue ? null : cp.id); setEditDueVal(ddLabel || ''); setEditDueDate(ddDate || ''); }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: (ddLabel || ddDate) ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{ddDate ? "✎ Due" : ddLabel ? "✎ Note" : "+ Due date"}</button>
+                  <button onClick={(e) => { e.stopPropagation(); setEditDue(isEditingDue ? null : cp.id); setEditDueVal(ddLabel || ''); setEditDueDate(ddDate || ''); }} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: (ddLabel || ddDate) ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{ddDate ? "✎ Due" : ddLabel ? "✎ Note" : "+ Due date"}</button>
                   <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />
                 </div>
-                {isEditingDue && <div style={{ padding: "4px 16px 10px 16px", display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label={`Due date for ${cp.name}`} style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
-                  <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class, By end of day" aria-label={`Due date note for ${cp.name}`} style={{ flex: 2, minWidth: 140, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, cp.id, editDueVal, editDueDate); setEditDue(null); refresh(); } }} />
+                {isEditingDue && <div style={{ padding: "4px 16px 10px 60px", display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label="Due date" autoFocus style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
+                  <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class, By end of day" aria-label="Due date note" style={{ flex: 2, minWidth: 140, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, cp.id, editDueVal, editDueDate); setEditDue(null); refresh(); } }} />
+                  <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label="Due date" style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
                   <button onClick={async () => { await upsertDueDate(ck, cp.id, editDueVal, editDueDate); setEditDue(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
                   <button onClick={async () => { await upsertDueDate(ck, cp.id, '', ''); setEditDue(null); refresh(); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
                 </div>}
@@ -1715,11 +1498,11 @@ export default function App() {
         {/* TRACKS */}
         {tab === "tracks" && <div>
           <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 14 }}>Based on <strong>your</strong> records.{sectionFilter !== 'all' ? ` Showing ${courseSections?.[sectionFilter]?.name || sectionFilter} section.` : ''}</div>
-          {["A", "B", "C", "D"].map(g => { const t = c.tracks[g]; const m = TM[g]; const on = filteredStudents.filter(s => calcStudentGrade(sC[s.id] || {}, iS[s.id] || {}, relAssignments, ck, dueDates) === g);
+          {["A", "B", "C", "D"].map(g => { const t = c.tracks[g]; const m = TM[g]; const on = filteredStudents.filter(s => calcGrade(iS[s.id] || {}, relAssignments, ck) === g);
             return <div key={g} style={{ marginBottom: 12, background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
               <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid #F0EEEA" }}>
                 <div style={{ width: 28, height: 28, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 14, fontWeight: 700, color: m.c }}>{g}</div>
-                <div style={{ flex: 1 }}><div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600 }}>{g} Track — {on.length}</div><div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{[...t.req.map(id => c.assignments.find(a => a.id === id)?.name), ...(t.pick || []).map(p => `${p.need} ${p.label || 'of: ' + p.from.map(id => c.assignments.find(a => a.id === id)?.name).join(", ")}`), ...(t.pickGroup || []).map(pg => `${pg.need} of: ${pg.from.map(grp => grp.map(id => c.assignments.find(a => a.id === id)?.name).join(" + ")).join(" or ")}`)].filter(Boolean).join(", ")}</div></div>
+                <div style={{ flex: 1 }}><div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600 }}>{g} Track — {on.length}</div><div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{t.req.map(id => c.assignments.find(a => a.id === id)?.name).join(", ")}</div></div>
               </div>
               <div style={{ padding: "6px 16px 10px" }}>{on.length === 0 ? <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>None</div> :
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>{on.map(s => <span key={s.id} style={{ padding: "2px 8px", background: m.bg, borderRadius: 4, fontFamily: F.b, fontSize: 11, fontWeight: 500, color: m.c }}>{s.name}</span>)}</div>}</div>
@@ -1729,7 +1512,7 @@ export default function App() {
             <Lbl s={{ marginBottom: 8 }} onClick={() => setExpFinalGrades(!expFinalGrades)} expanded={expFinalGrades}>Final Grades Summary</Lbl>
             {expFinalGrades && <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
               {[...filteredStudents].sort((a, b) => (a.last || "").localeCompare(b.last || "")).map((s, i) => {
-                const g = calcStudentGrade(sC[s.id] || {}, iS[s.id] || {}, relAssignments, ck, dueDates); const m = TM[g] || TM.F;
+                const g = calcGrade(iS[s.id] || {}, relAssignments, ck); const m = TM[g] || TM.F;
                 return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", borderBottom: i < filteredStudents.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                   <div style={{ width: 26, height: 26, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 12, fontWeight: 700, color: m.c }}>{g === "early" ? "—" : g}</div>
                   <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500 }}>{s.last}, {s.first}</div>
