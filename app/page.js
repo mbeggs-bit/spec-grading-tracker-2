@@ -268,6 +268,14 @@ export default function App() {
   const [expTokens, setExpTokens] = useState(false);
   const [expPrep, setExpPrep] = useState(false);
   const [expTeach, setExpTeach] = useState(true);
+  const [toast, setToast] = useState(null);
+
+  // Auto-dismiss toast after 3.5 seconds
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3500);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   // Check auth on mount
   useEffect(() => {
@@ -815,12 +823,49 @@ export default function App() {
   const pending = fq.filter(f => !f.resolved);
 
   const handleInstrUpdate = async (pid, aid, val) => {
-    await upsertInstrStatus(pid, ck, aid, val);
-    refresh();
+    // Optimistic: update local state immediately
+    const prev = (iS[pid] || {})[aid] || null;
+    setCourseData(d => {
+      const newIS = { ...d.iS };
+      if (!newIS[pid]) newIS[pid] = {};
+      if (val) { newIS[pid] = { ...newIS[pid], [aid]: val }; }
+      else { const copy = { ...newIS[pid] }; delete copy[aid]; newIS[pid] = copy; }
+      return { ...d, iS: newIS };
+    });
+    try {
+      await upsertInstrStatus(pid, ck, aid, val);
+    } catch (e) {
+      // Rollback on failure
+      setCourseData(d => {
+        const newIS = { ...d.iS };
+        if (!newIS[pid]) newIS[pid] = {};
+        if (prev) { newIS[pid] = { ...newIS[pid], [aid]: prev }; }
+        else { const copy = { ...newIS[pid] }; delete copy[aid]; newIS[pid] = copy; }
+        return { ...d, iS: newIS };
+      });
+      setToast('Failed to save — try again');
+    }
   };
   const handleInstrNote = async (pid, aid, note) => {
-    await upsertInstrNote(pid, ck, aid, note);
-    refresh();
+    // Optimistic: update local state immediately
+    const prev = (iN[pid] || {})[aid] || null;
+    setCourseData(d => {
+      const newIN = { ...d.iN };
+      if (!newIN[pid]) newIN[pid] = {};
+      newIN[pid] = { ...newIN[pid], [aid]: note };
+      return { ...d, iN: newIN };
+    });
+    try {
+      await upsertInstrNote(pid, ck, aid, note);
+    } catch (e) {
+      setCourseData(d => {
+        const newIN = { ...d.iN };
+        if (!newIN[pid]) newIN[pid] = {};
+        newIN[pid] = { ...newIN[pid], [aid]: prev };
+        return { ...d, iN: newIN };
+      });
+      setToast('Failed to save note — try again');
+    }
   };
   const handleToggleRel = async (aid) => {
     await toggleReleased(ck, aid);
@@ -837,8 +882,23 @@ export default function App() {
     }
   };
   const markAllInstr = async (aid, val) => {
-    for (const s of students) { await upsertInstrStatus(s.id, ck, aid, val); }
-    refresh();
+    // Optimistic: update all students in local state immediately
+    setCourseData(d => {
+      const newIS = { ...d.iS };
+      for (const s of students) {
+        if (!newIS[s.id]) newIS[s.id] = {};
+        if (val) { newIS[s.id] = { ...newIS[s.id], [aid]: val }; }
+        else { const copy = { ...newIS[s.id] }; delete copy[aid]; newIS[s.id] = copy; }
+      }
+      return { ...d, iS: newIS };
+    });
+    try {
+      await Promise.all(students.map(s => upsertInstrStatus(s.id, ck, aid, val)));
+    } catch (e) {
+      // On failure, do a full refresh to get accurate state
+      setToast('Some updates may have failed — refreshing');
+      refresh();
+    }
   };
 
   // Section filtering — null-safe for Spring 2026 courses
@@ -884,10 +944,11 @@ export default function App() {
     return (
       <div>
         <a href="#main-content" className="skip-link">Skip to main content</a>
+        {toast && <div role="alert" aria-live="assertive" style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", background: "#C0392B", color: "#fff", fontFamily: F.b, fontSize: 13, fontWeight: 600, padding: "10px 20px", borderRadius: 8, zIndex: 100, boxShadow: "0 4px 12px rgba(0,0,0,.15)" }}>{toast}</div>}
         <main id="main-content" style={{ maxWidth: 900, margin: "0 auto", padding: "20px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button onClick={() => { setBatch(false); setBatchSearch(''); }} aria-label="Back to overview" style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>← Overview</button>
+            <button onClick={() => { setBatch(false); setBatchSearch(''); refresh(); }} aria-label="Back to overview" style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>← Overview</button>
             <h1 style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: "#555", margin: 0 }}>Grade by Assignment</h1>
           </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -1006,6 +1067,7 @@ export default function App() {
   return (
     <div>
       <a href="#main-content" className="skip-link">Skip to main content</a>
+      {toast && <div role="alert" aria-live="assertive" style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", background: "#C0392B", color: "#fff", fontFamily: F.b, fontSize: 13, fontWeight: 600, padding: "10px 20px", borderRadius: 8, zIndex: 100, boxShadow: "0 4px 12px rgba(0,0,0,.15)" }}>{toast}</div>}
       <header style={{ borderBottom: "1px solid #E8E6E1", background: "#fff", position: "sticky", top: 0, zIndex: 10 }}>
         <div style={{ maxWidth: 1100, margin: "0 auto", padding: "10px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
