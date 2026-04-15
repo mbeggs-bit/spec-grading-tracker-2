@@ -927,15 +927,11 @@ export default function App() {
       return { needed, needsRevision, notStarted, notReleased, tokensNeeded, freeTokensLeft, extraNeeded };
     };
 
-    const trackOrder = ["A", "B", "C", "D"];
-    const currentIdx = trackOrder.indexOf(ig);
-    const tracksToShow = [];
-    if (ig !== "A") {
-      // Show the next track up, and A if it's not the next one
-      const nextUp = currentIdx >= 0 ? trackOrder[currentIdx - 1] : (ig === "F" || ig === "early" ? "D" : null);
-      if (nextUp) tracksToShow.push(nextUp);
-      if (nextUp !== "A" && c.tracks["A"]) tracksToShow.push("A");
-    }
+    const tracksToShow = ["C", "B", "A"].filter(tg => {
+      // Only show tracks above the student's current grade
+      const tOrder = { A: 0, B: 1, C: 2, D: 3, F: 4, early: 5 };
+      return c.tracks[tg] && tOrder[tg] < tOrder[ig];
+    });
 
     if (tracksToShow.length > 0) {
       txt += `${"—".repeat(40)}\n`;
@@ -986,9 +982,7 @@ export default function App() {
         txt += `\n  ⚠ Token note: You would need ${rm.tokensNeeded} token${rm.tokensNeeded !== 1 ? "s" : ""} for revisions, `;
         txt += `but only ${tok.avail} free token${tok.avail !== 1 ? "s" : ""} remain${tok.avail === 1 ? "s" : ""}. `;
         txt += `${rm.extraNeeded} extra token activit${rm.extraNeeded !== 1 ? "ies" : "y"} would be needed.`;
-        if ((c.bonus || []).length > 0) {
-          txt += `\n  Extra token options: ${c.bonus.map(b => b.name).join(", ")}`;
-        }
+        txt += `\n  Extra token options on Brightspace.`;
         txt += `\n`;
       } else if (rm.tokensNeeded > 0) {
         txt += `\n  Token note: ${rm.tokensNeeded} of your ${tok.avail} free token${tok.avail !== 1 ? "s" : ""} would be used for revisions.\n`;
