@@ -1,5 +1,4 @@
 'use client';
-
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { COURSES, TM, CAL_LINK, BRAND, calcGrade, calcStudentGrade, getBlockers, getStudentBlockers, tokBal, pastCutoff, getTokenCutoff, getTokenTarget, getCourseSections } from '../lib/courses';
