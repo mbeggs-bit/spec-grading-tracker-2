@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { COURSES, TM, CAL_LINK, BRAND, calcGrade, getBlockers, tokBal, pastCutoff, getTokenCutoff, getTokenTarget, getCourseSections, trackAllIds, getTrackBlockers } from '../lib/courses';
+import { COURSES, TM, CAL_LINK, BRAND, calcGrade, getBlockers, tokBal, pastCutoff, getTokenCutoff, getTokenTarget, getCourseSections } from '../lib/courses';
 
 const F = { d: "'Source Serif 4',Georgia,serif", b: "'DM Sans',sans-serif" };
 
@@ -259,7 +259,6 @@ export default function App() {
   const [editDueDate, setEditDueDate] = useState('');
   const [expScheduled, setExpScheduled] = useState(false);
   const [expStudents, setExpStudents] = useState(true);
-  const [copiedSummary, setCopiedSummary] = useState(null);
   const [expStruggles, setExpStruggles] = useState(true);
   const [expTokLookup, setExpTokLookup] = useState(false);
   const [expClassPrep, setExpClassPrep] = useState(true);
@@ -473,8 +472,10 @@ export default function App() {
     const myPrep = cP[myId] || {};
     const myToks = toks[myId] || [];
     const grade = calcGrade(myChecks, relAssignments, ck);
-    const { target, blockers, pickBlockers, msg: bMsg } = getBlockers(myChecks, relAssignments, ck);
-    const tok = tokBal(myToks.length, 0);
+    const { target, blockers, msg: bMsg } = getBlockers(myChecks, relAssignments, ck);
+    const freeUsed = myToks.filter(t => t.token_type !== 'extra').length;
+    const extraUsed = myToks.filter(t => t.token_type === 'extra').length;
+    const tok = tokBal(freeUsed, extraUsed);
     const cutoff = pastCutoff(ck);
 
     const handleCheck = async (aid) => {
@@ -487,10 +488,13 @@ export default function App() {
     };
     const handleToken = async () => {
       if (!modal || tfSubmitting) return;
+      const isExtra = tok.freeExhausted;
+      if (isExtra && !tfExtra.trim()) return;
       setTfSubmitting(true);
       try {
-        const note = tfType === 'extra' ? `Extra token: ${tfExtra}${tfNote ? ' — ' + tfNote : ''}` : tfNote;
-        await submitToken(myId, ck, modal.id, tfType === 'extra' ? 'revision' : tfType, note, tfLink);
+        const tokenType = isExtra ? 'extra' : tfType;
+        const note = isExtra ? `Extra token activity: ${tfExtra.trim()}${tfNote ? ' — ' + tfNote : ''}` : tfNote;
+        await submitToken(myId, ck, modal.id, tokenType, note, tfLink);
         setModal(null); setTfNote(''); setTfType('revision'); setTfLink(''); setTfExtra('');
         refresh();
       } finally {
@@ -505,7 +509,7 @@ export default function App() {
       if (!grp) return true;
       return grp.ids.find(id => relAssignments.includes(id) && !myChecks[id]) === a.id;
     };
-    const showTokenBtn = (a) => !cutoff && tok.avail > 0 && !myChecks[a.id] && relAssignments.includes(a.id) && !(a.tokenGroup && hasGroupToken(a.tokenGroup));
+    const showTokenBtn = (a) => !cutoff && !myChecks[a.id] && relAssignments.includes(a.id) && !(a.tokenGroup && hasGroupToken(a.tokenGroup));
 
     return (
       <div>
@@ -546,12 +550,10 @@ export default function App() {
                 <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }} aria-label={`${tok.avail} tokens available, ${tok.used} used`}>{tok.avail} token{tok.avail !== 1 ? "s" : ""}</div>
               </div>
             </div>
-            {target && (blockers.length > 0 || (pickBlockers || []).length > 0) && <div style={{ marginTop: 14, padding: "10px 14px", background: "#FFFCF5", borderRadius: 8, borderLeft: `3px solid ${(TM[target] || TM.F).c}` }}>
+            {target && blockers.length > 0 && <div style={{ marginTop: 14, padding: "10px 14px", background: "#FFFCF5", borderRadius: 8, borderLeft: `3px solid ${(TM[target] || TM.F).c}` }}>
               <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: (TM[target] || TM.F).c, marginBottom: 3 }}>To reach {target} track:</div>
               <div style={{ fontFamily: F.b, fontSize: 12, color: "#666", lineHeight: 1.6 }}>
                 {blockers.map((id, i) => { const a = c.assignments.find(x => x.id === id); return <span key={id}>{i > 0 ? " · " : ""}<strong>{a?.name || id}</strong>{a?.eval === "mastery" ? <span style={{ fontSize: 11, color: "#C0392B", marginLeft: 2 }}>(mastery)</span> : <span style={{ fontSize: 11, color: "#1565C0", marginLeft: 2 }}>(completion)</span>}</span>; })}
-                {blockers.length > 0 && (pickBlockers || []).length > 0 ? " · " : ""}
-                {(pickBlockers || []).map((pb, pi) => <span key={pi}>{pi > 0 ? " · " : ""}<strong>{pb.still} more</strong> from {pb.from.map(id => c.assignments.find(x => x.id === id)?.name || id).join(", ")}</span>)}
               </div>
             </div>}
             {grade === "early" && <div style={{ marginTop: 12, padding: "10px 14px", background: "#F3F4F6", borderRadius: 8, fontFamily: F.b, fontSize: 12, color: "#6B7280" }}>Check off your first assignment to see your grade track!</div>}
@@ -677,17 +679,20 @@ export default function App() {
               <h2 style={{ fontFamily: F.d, fontSize: 18, fontWeight: 600, marginBottom: 4 }}>Submit a Token</h2>
               <div style={{ fontFamily: F.b, fontSize: 13, color: "#555", marginBottom: 14 }}>{modal.name}</div>
               <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 6 }}>What is this token for?</div>
-              <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-                {[{ v: "revision", l: "I revised this" }, { v: "late", l: "I'm submitting late" }, { v: "extra", l: "Using an extra token" }].map(o => <button key={o.v} onClick={() => setTfType(o.v)} style={{ padding: "7px 14px", borderRadius: 6, fontFamily: F.b, fontSize: 11, cursor: "pointer", background: tfType === o.v ? c.color : "#fff", color: tfType === o.v ? "#fff" : "#555", border: tfType === o.v ? `1px solid ${c.color}` : "1px solid #E0DDD8", flex: 1, textAlign: "center", minWidth: o.v === "extra" ? "100%" : "auto" }}>{o.l}</button>)}
+              <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+                {[{ v: "revision", l: "I revised this" }, { v: "late", l: "I'm submitting late" }].map(o => <button key={o.v} onClick={() => setTfType(o.v)} style={{ padding: "7px 14px", borderRadius: 6, fontFamily: F.b, fontSize: 11, cursor: "pointer", background: tfType === o.v ? c.color : "#fff", color: tfType === o.v ? "#fff" : "#555", border: tfType === o.v ? `1px solid ${c.color}` : "1px solid #E0DDD8", flex: 1, textAlign: "center" }}>{o.l}</button>)}
               </div>
-              {tfType === "extra" && <input value={tfExtra} onChange={e => setTfExtra(e.target.value)} placeholder="List the extra token assignment you completed" aria-label="Extra token activity" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 8, boxSizing: "border-box" }} />}
+              {tok.freeExhausted && <div style={{ background: "#FFFCF5", border: "1px solid #FFECB5", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
+                <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", marginBottom: 6 }}>You've used your 3 free tokens. To submit another, indicate which Brightspace activity you completed.</div>
+                <input value={tfExtra} onChange={e => setTfExtra(e.target.value)} placeholder="Which extra token activity did you complete?" aria-label="Extra token activity completed on Brightspace" aria-required="true" style={{ width: "100%", padding: "8px 12px", border: tfExtra.trim() ? "1px solid #E0DDD8" : "1px solid #FFECB5", borderRadius: 6, fontFamily: F.b, fontSize: 12, boxSizing: "border-box", background: "#fff" }} />
+              </div>}
               <input value={tfLink} onChange={e => setTfLink(e.target.value)} placeholder="Paste a link to your work (Google Doc, Slides, Canva, etc.)" aria-label="Link to your work" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 8, boxSizing: "border-box" }} />
               <input value={tfNote} onChange={e => setTfNote(e.target.value)} placeholder="Note for Dr. Beggs (optional)" aria-label="Note for Dr. Beggs" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 14, boxSizing: "border-box" }} />
               <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={handleToken} disabled={tfSubmitting} style={{ padding: "8px 18px", background: tfSubmitting ? "#E0DDD8" : c.color, color: "#fff", border: "none", borderRadius: 6, cursor: tfSubmitting ? "not-allowed" : "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600 }}>{tfSubmitting ? "Submitting..." : "Submit Token"}</button>
+                <button onClick={handleToken} disabled={tfSubmitting || (tok.freeExhausted && !tfExtra.trim())} style={{ padding: "8px 18px", background: (tfSubmitting || (tok.freeExhausted && !tfExtra.trim())) ? "#E0DDD8" : c.color, color: "#fff", border: "none", borderRadius: 6, cursor: (tfSubmitting || (tok.freeExhausted && !tfExtra.trim())) ? "not-allowed" : "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600 }}>{tfSubmitting ? "Submitting..." : "Submit Token"}</button>
                 <button onClick={() => setModal(null)} style={{ padding: "8px 14px", background: "#F0EEEA", color: "#6B6B6B", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 12 }}>Cancel</button>
               </div>
-              <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 8 }}>{tfType === "extra" ? "Uses 1 extra token. Requires prior approval from Dr. Beggs." : `Uses 1 of your ${tok.avail} token${tok.avail !== 1 ? "s" : ""}.`}</div>
+              <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 8 }}>{tok.freeExhausted ? "Requires completion of an extra token activity on Brightspace." : `Uses 1 of your ${tok.avail} free token${tok.avail !== 1 ? "s" : ""}.`}</div>
             </div>
           </div>}
 
@@ -775,7 +780,6 @@ export default function App() {
           {expTracks && <div style={{ background: "#fff", border: "1px solid #E8E6E1", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 16px", marginBottom: 12 }}>
             <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12 }}>Every item in a track must be checked off to earn that grade.</div>
             {["A", "B", "C", "D"].map(g => { const t = c.tracks[g]; const m = TM[g]; const isOn = grade === g;
-              const pickGroups = t.pick || [];
               return <div key={g} style={{ marginBottom: 8, padding: "8px 12px", borderRadius: 8, border: isOn ? `2px solid ${m.c}` : "1px solid #F0EEEA", position: "relative" }}>
                 {isOn && <span style={{ position: "absolute", top: 6, right: 10, fontFamily: F.b, fontSize: 11, fontWeight: 700, color: "#fff", background: m.c, padding: "2px 6px", borderRadius: 6 }}>YOUR TRACK</span>}
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
@@ -786,13 +790,6 @@ export default function App() {
                   {t.req.map(id => { const a = c.assignments.find(x => x.id === id); const ch = !!myChecks[id]; const r = rel.includes(id);
                     return <span key={id} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: !r ? "#F5F4F0" : ch ? "#D4EDDA" : "#fff", border: `1px solid ${!r ? "#E8E6E1" : ch ? "#B7DFBF" : "#E8E6E1"}`, color: !r ? "#767676" : ch ? "#2D6A4F" : "#555" }}>{ch ? "✓ " : ""}{a?.name || id}</span>;
                   })}
-                  {pickGroups.map((p, pi) => {
-                    const completed = p.from.filter(id => rel.includes(id) && myChecks[id]);
-                    const met = completed.length >= p.need;
-                    const names = p.from.map(id => c.assignments.find(x => x.id === id)?.name || id);
-                    const label = p.need >= p.from.length ? names.join(", ") : `Any ${p.need} of: ${names.join(", ")}`;
-                    return <span key={`pick-${pi}`} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: met ? "#D4EDDA" : "#FFF8E1", border: `1px solid ${met ? "#B7DFBF" : "#FFECB5"}`, color: met ? "#2D6A4F" : "#856404", fontStyle: "italic" }}>{met ? `✓ ${completed.length}/${p.need}` : `${completed.length}/${p.need}`} — {label}</span>;
-                  })}
                 </div>
               </div>;
             })}
@@ -800,21 +797,22 @@ export default function App() {
 
           {/* Tokens */}
           <button aria-expanded={expTokens} onClick={() => setExpTokens(!expTokens)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "12px 16px", background: "#fff", border: "1px solid #E8E6E1", borderRadius: expTokens ? "10px 10px 0 0" : 10, cursor: "pointer", marginBottom: 12 }}>
-            <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555" }}>Tokens ({tok.avail} available)</span>
+            <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555" }}>Tokens ({tok.freeExhausted ? "earn more via Brightspace" : `${tok.avail} available`})</span>
             <span style={{ fontSize: 11, color: "#767676", transform: expTokens ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
           </button>
           {expTokens && <div style={{ background: "#fff", border: "1px solid #E8E6E1", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 16px", marginBottom: 12 }}>
             <div style={{ display: "flex", gap: 5, marginBottom: 8 }}>
               {Array.from({ length: tok.total }).map((_, i) => <div key={i} style={{ width: 22, height: 22, borderRadius: "50%", background: i < tok.avail ? "#CF202E" : "#E0DDD8", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: i < tok.avail ? "#fff" : "#767676", fontWeight: 700 }}>{i < tok.avail ? "✦" : "✕"}</div>)}
             </div>
-            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 6 }}>3 per course · {tok.used} used · {tok.avail} available</div>
+            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 6 }}>{tok.freeExhausted ? `${tok.used} used · earn more via Brightspace activities` : `3 per course · ${tok.used} used · ${tok.avail} available`}</div>
             <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", lineHeight: 1.5 }}>
               Use tokens to <strong style={{ color: "#555" }}>revise</strong> or <strong style={{ color: "#555" }}>submit late work</strong>.
+              {tok.freeExhausted && !cutoff && <><br /><span style={{ color: "#856404" }}>Out of free tokens? Complete an extra token activity on Brightspace to earn more.</span></>}
               {cutoff ? <><br /><strong style={{ color: "#C0392B" }}>Token period has ended ({getTokenCutoff(ck)}).</strong></> : <><br /><span style={{ color: "#6B6B6B" }}>Cutoff: {getTokenCutoff(ck)}</span></>}
             </div>
             {myToks.length > 0 && <div style={{ marginTop: 10 }}>
               <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "#767676", marginBottom: 4 }}>History</div>
-              {myToks.map((t, i) => { const a = c.assignments.find(x => x.id === t.assignment_id) || (c.tokenGroups || {})[t.assignment_id]; return <div key={t.id} style={{ display: "flex", gap: 6, padding: "4px 0", borderBottom: i < myToks.length - 1 ? "1px solid #F5F3EF" : "none", fontFamily: F.b, fontSize: 11, color: "#777" }}><span style={{ color: "#767676" }}>✦</span>{t.token_type === "revision" ? "Revision" : "Late"}: {a?.name || t.assignment_id}<span style={{ marginLeft: "auto", fontSize: 11, color: "#767676" }}>{new Date(t.submitted_at).toLocaleDateString()}</span></div>; })}
+              {myToks.map((t, i) => { const a = c.assignments.find(x => x.id === t.assignment_id) || (c.tokenGroups || {})[t.assignment_id]; return <div key={t.id} style={{ display: "flex", gap: 6, padding: "4px 0", borderBottom: i < myToks.length - 1 ? "1px solid #F5F3EF" : "none", fontFamily: F.b, fontSize: 11, color: "#777" }}><span style={{ color: "#767676" }}>✦</span>{t.token_type === "extra" ? "Extra" : t.token_type === "revision" ? "Revision" : "Late"}: {a?.name || t.assignment_id}<span style={{ marginLeft: "auto", fontSize: 11, color: "#767676" }}>{new Date(t.submitted_at).toLocaleDateString()}</span></div>; })}
             </div>}
           </div>}
         </main>
@@ -871,198 +869,18 @@ export default function App() {
   const insights = relAssignments.map(id => { const a = c.assignments.find(x => x.id === id); const rc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "revision").length; const mc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "mastery").length; return { ...a, rc, mc, ns: filteredStudents.length - rc - mc }; }).filter(a => a.rc > 0).sort((a, b) => b.rc - a.rc);
   const cpSum = (c.classPrep || []).map(cp => ({ ...cp, done: filteredStudents.filter(s => (cP[s.id] || {})[cp.id]).length }));
 
-  const copyStudentSummary = async (s) => {
-    const si = iS[s.id] || {};
-    const ig = calcGrade(si, relAssignments, ck);
-    const relA = c.assignments.filter(a => relAssignments.includes(a.id));
-    const mastered = relA.filter(a => si[a.id] === "mastery");
-    const revision = relA.filter(a => si[a.id] === "revision");
-    const notYet = relA.filter(a => !si[a.id]);
-    const sToks = toks[s.id] || [];
-    const tok = tokBal(sToks.length, 0);
-    const sFq = fq.filter(f => f.profile_id === s.id);
-    const date = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-    const done = new Set(Object.keys(si).filter(k => si[k] === "mastery"));
-
-    let txt = `${c.title} — Progress Summary\n`;
-    txt += `${s.first} ${s.last}\n`;
-    txt += `As of ${date}\n`;
-    txt += `Current Grade Track: ${ig === "early" ? "Not yet determined" : ig}\n`;
-    txt += `\n`;
-
-    if (mastered.length > 0) {
-      txt += `MASTERED (${mastered.length}):\n`;
-      mastered.forEach(a => { txt += `  - ${a.name}\n`; });
-      txt += `\n`;
-    }
-
-    if (revision.length > 0) {
-      txt += `NEEDS REVISION (${revision.length}):\n`;
-      revision.forEach(a => { txt += `  - ${a.name}\n`; });
-      txt += `\n`;
-    }
-
-    if (notYet.length > 0) {
-      txt += `NOT YET EVALUATED (${notYet.length}):\n`;
-      notYet.forEach(a => { txt += `  - ${a.name}\n`; });
-      txt += `\n`;
-    }
-
-    if (sToks.length > 0) {
-      txt += `TOKEN USAGE (${tok.used} used, ${tok.avail} remaining):\n`;
-      sToks.forEach(t => {
-        const aName = c.assignments.find(x => x.id === t.assignment_id)?.name || (c.tokenGroups || {})[t.assignment_id]?.name || t.assignment_id;
-        const qItem = sFq.find(f => f.assignment_id === t.assignment_id && f.token_type === t.token_type && Math.abs(new Date(f.submitted_at) - new Date(t.submitted_at)) < 60000);
-        let outcome = "Pending review";
-        if (qItem?.resolved) outcome = qItem.resolution === "M" ? "Mastered" : "Needs more revision";
-        txt += `  - ${t.token_type === "revision" ? "Revision" : "Late"}: ${aName} — ${outcome}\n`;
-      });
-      txt += `\n`;
-    } else {
-      txt += `TOKENS: ${tok.avail} of ${tok.total} available (none used)\n\n`;
-    }
-
-    // --- Track roadmaps ---
-    const buildRoadmap = (trackGrade) => {
-      const t = c.tracks[trackGrade];
-      if (!t) return null;
-      // Fixed req items still needed
-      const neededReq = t.req.filter(id => !done.has(id));
-      // Pick items still needed
-      const pickNeeds = (t.pick || []).map(p => {
-        const completed = p.from.filter(id => done.has(id));
-        const still = Math.max(0, p.need - completed.length);
-        if (still === 0) return null;
-        const remaining = p.from.filter(id => !done.has(id));
-        return { from: p.from, need: p.need, have: completed.length, still, remaining };
-      }).filter(Boolean);
-      const allNeeded = [...neededReq];
-      pickNeeds.forEach(pn => { pn.remaining.forEach(id => { if (!allNeeded.includes(id)) allNeeded.push(id); }); });
-      if (allNeeded.length === 0 && pickNeeds.length === 0) return null;
-      // Categorize all needed items
-      const needsRevision = allNeeded.filter(id => si[id] === "revision");
-      const notStarted = allNeeded.filter(id => !si[id] && relAssignments.includes(id));
-      const notReleased = allNeeded.filter(id => !relAssignments.includes(id));
-      const tokensNeeded = needsRevision.length;
-      const extraNeeded = Math.max(0, tokensNeeded - tok.avail);
-      const totalRemaining = neededReq.filter(id => !done.has(id)).length + pickNeeds.reduce((s, pn) => s + pn.still, 0);
-      return { neededReq, pickNeeds, allNeeded, needsRevision, notStarted, notReleased, tokensNeeded, extraNeeded, totalRemaining };
-    };
-
-    const allCandidates = ["C", "B", "A"].filter(tg => {
-      const tOrder = { A: 0, B: 1, C: 2, D: 3, F: 4, early: 5 };
-      return c.tracks[tg] && tOrder[tg] < tOrder[ig];
-    });
-    // Deduplicate: skip lower track if its remaining items are identical to the next higher track
-    const tracksToShow = [];
-    for (let i = allCandidates.length - 1; i >= 0; i--) {
-      const tg = allCandidates[i];
-      const rm = buildRoadmap(tg);
-      const neededKey = rm ? JSON.stringify([...rm.allNeeded].sort()) + JSON.stringify(rm.pickNeeds.map(p => p.still).sort()) : "null";
-      const alreadyAdded = tracksToShow.find(ht => {
-        const hRm = buildRoadmap(ht);
-        if (!hRm) return false;
-        return JSON.stringify([...hRm.allNeeded].sort()) + JSON.stringify(hRm.pickNeeds.map(p => p.still).sort()) === neededKey;
-      });
-      if (!alreadyAdded) tracksToShow.push(tg);
-    }
-    tracksToShow.reverse();
-
-    if (tracksToShow.length > 0) {
-      txt += `${"—".repeat(40)}\n`;
-      txt += `WHAT IT WOULD TAKE TO MOVE UP\n\n`;
-    }
-
-    tracksToShow.forEach(tg => {
-      const rm = buildRoadmap(tg);
-      if (!rm) {
-        txt += `${tg} TRACK: All requirements met! (Remaining items not yet released.)\n\n`;
-        return;
-      }
-      txt += `${tg} TRACK (${rm.totalRemaining} item${rm.totalRemaining !== 1 ? "s" : ""} remaining):\n`;
-
-      if (rm.needsRevision.length > 0) {
-        txt += `  Revise (token required):\n`;
-        let tokenNum = 0;
-        rm.needsRevision.forEach(id => {
-          const a = c.assignments.find(x => x.id === id);
-          tokenNum++;
-          const isFree = tokenNum <= tok.avail;
-          txt += `    - ${a?.name || id}`;
-          txt += isFree ? ` [free token #${tok.used + tokenNum}]` : ` [requires extra token activity]`;
-          txt += `\n`;
-        });
-      }
-
-      if (rm.notStarted.length > 0) {
-        txt += `  Complete and submit:\n`;
-        rm.notStarted.forEach(id => {
-          const a = c.assignments.find(x => x.id === id);
-          txt += `    - ${a?.name || id}`;
-          if (a?.eval === "mastery") txt += ` (must reach mastery)`;
-          txt += `\n`;
-        });
-      }
-
-      // Show pick group context for items that are "any N from pool"
-      rm.pickNeeds.forEach(pn => {
-        const names = pn.from.map(id => c.assignments.find(x => x.id === id)?.name || id);
-        if (pn.still > 0 && pn.still < pn.from.length) {
-          txt += `  (${pn.still} more needed from: ${names.join(", ")})\n`;
-        }
-      });
-
-      if (rm.notReleased.length > 0) {
-        txt += `  Not yet assigned (${rm.notReleased.length}):\n`;
-        rm.notReleased.forEach(id => {
-          const a = c.assignments.find(x => x.id === id);
-          txt += `    - ${a?.name || id}\n`;
-        });
-      }
-
-      if (rm.extraNeeded > 0) {
-        txt += `\n  ⚠ Token note: You would need ${rm.tokensNeeded} token${rm.tokensNeeded !== 1 ? "s" : ""} for revisions, `;
-        txt += `but only ${tok.avail} free token${tok.avail !== 1 ? "s" : ""} remain${tok.avail === 1 ? "s" : ""}. `;
-        txt += `${rm.extraNeeded} extra token activit${rm.extraNeeded !== 1 ? "ies" : "y"} would be needed.`;
-        txt += `\n  Extra token options on Brightspace.`;
-        txt += `\n`;
-      } else if (rm.tokensNeeded > 0) {
-        txt += `\n  Token note: ${rm.tokensNeeded} of your ${tok.avail} free token${tok.avail !== 1 ? "s" : ""} would be used for revisions.\n`;
-      }
-      txt += `\n`;
-    });
-
-    const cutoff = pastCutoff(ck);
-    if (cutoff && tracksToShow.some(tg => { const rm = buildRoadmap(tg); return rm && rm.tokensNeeded > 0; })) {
-      txt += `Note: The token submission period has ended (${getTokenCutoff(ck)}).\n\n`;
-    }
-
-    txt += `—\nGenerated from Lumos (${c.title})`;
-
-    try {
-      await navigator.clipboard.writeText(txt);
-      setCopiedSummary(s.id);
-      setTimeout(() => setCopiedSummary(null), 2000);
-    } catch {
-      const ta = document.createElement('textarea');
-      ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0';
-      document.body.appendChild(ta); ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      setCopiedSummary(s.id);
-      setTimeout(() => setCopiedSummary(null), 2000);
-    }
-  };
-
   const exportCSV = () => {
     const filteredStudents = sectionFilter === 'all' ? students : students.filter(s => s.section === sectionFilter);
     const allA = c.assignments.filter(x => relAssignments.includes(x.id)); const cpI = c.classPrep || [];
     const hasSections = students.some(s => s.section);
-    const header = ["Last", "First", "Email", ...(hasSections ? ["Section"] : []), ...allA.map(x => x.name + " (Instr)"), ...allA.map(x => x.name + " (Student)"), ...cpI.map(x => x.name + " (Prep)"), "Tokens Used", "Tokens Avail", "Instr Track", "Student Track"].join(",");
+    const header = ["Last", "First", "Email", ...(hasSections ? ["Section"] : []), ...allA.map(x => x.name + " (Instr)"), ...allA.map(x => x.name + " (Student)"), ...cpI.map(x => x.name + " (Prep)"), "Free Tokens Used", "Free Tokens Avail", "Extra Tokens Used", "Instr Track", "Student Track"].join(",");
     const rows = filteredStudents.map(st => {
-      const si = iS[st.id] || {}; const sc = sC[st.id] || {}; const cp2 = cP[st.id] || {}; const tk = (toks[st.id] || []).length;
-      const ig = calcGrade(si, rel, ck); const sg = calcGrade(sc, rel, ck); const tok = tokBal(tk, 0);
-      return [st.last, st.first, st.email, ...(hasSections ? [st.section || ''] : []), ...allA.map(x => si[x.id] === "mastery" ? "M" : si[x.id] === "revision" ? "R" : ""), ...allA.map(x => sc[x.id] ? "Y" : ""), ...cpI.map(x => cp2[x.id] ? "Y" : ""), tok.used, tok.avail, ig === "early" ? "" : ig, sg === "early" ? "" : sg].map(v => `"${v}"`).join(",");
+      const si = iS[st.id] || {}; const sc = sC[st.id] || {}; const cp2 = cP[st.id] || {}; const sToks = toks[st.id] || [];
+      const ig = calcGrade(si, rel, ck); const sg = calcGrade(sc, rel, ck);
+      const freeUsed = sToks.filter(t => t.token_type !== 'extra').length;
+      const extraUsed = sToks.filter(t => t.token_type === 'extra').length;
+      const tok = tokBal(freeUsed, extraUsed);
+      return [st.last, st.first, st.email, ...(hasSections ? [st.section || ''] : []), ...allA.map(x => si[x.id] === "mastery" ? "M" : si[x.id] === "revision" ? "R" : ""), ...allA.map(x => sc[x.id] ? "Y" : ""), ...cpI.map(x => cp2[x.id] ? "Y" : ""), tok.used, tok.avail, tok.extra, ig === "early" ? "" : ig, sg === "early" ? "" : sg].map(v => `"${v}"`).join(",");
     });
     const csvContent = header + "\n" + rows.join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" }); const url = URL.createObjectURL(blob);
@@ -1506,11 +1324,7 @@ export default function App() {
               const m = TM[ig] || TM.F; const mm = ig !== sg && ig !== "early" && sg !== "early";
               return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < sorted.length - 1 ? "1px solid #F5F3EF" : "none", background: mm ? "#FFF8F0" : "transparent" }}>
                 <div style={{ width: 22, height: 22, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 11, fontWeight: 700, color: m.c, flexShrink: 0 }}>{ig === "early" ? "—" : ig}</div>
-                <div style={{ width: 140, flexShrink: 0, display: "flex", alignItems: "center", gap: 4 }}>
-                  <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{sortBy === "last" ? `${s.last}, ${s.first}` : s.name}</div>
-                  <button aria-label={`Copy progress summary for ${s.first} ${s.last}`} onClick={() => copyStudentSummary(s)} style={{ background: "none", border: "none", cursor: "pointer", padding: "1px 3px", fontSize: 12, lineHeight: 1, color: "#767676", borderRadius: 3, flexShrink: 0, opacity: copiedSummary === s.id ? 1 : 0.5, transition: "opacity .15s" }} onMouseEnter={e => { if (copiedSummary !== s.id) e.currentTarget.style.opacity = '0.85'; }} onMouseLeave={e => { if (copiedSummary !== s.id) e.currentTarget.style.opacity = '0.5'; }}>{copiedSummary === s.id ? "✓" : "📋"}</button>
-                  {copiedSummary === s.id && <span role="status" aria-live="polite" style={{ fontFamily: F.b, fontSize: 10, color: "#2D6A4F", fontWeight: 600, whiteSpace: "nowrap" }}>Copied</span>}
-                </div>
+                <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sortBy === "last" ? `${s.last}, ${s.first}` : s.name}</div>
                 <div style={{ flex: 1, display: "flex", gap: 3 }}>
                   {relAssignments.map(id => { const st = (iS[s.id] || {})[id] || "";
                     return <div key={id} title={c.assignments.find(a => a.id === id)?.name} style={{ flex: 1, minWidth: 28, maxWidth: 40, height: 22, borderRadius: 4, background: st === "mastery" ? "#D4EDDA" : st === "revision" ? "#FFF3CD" : "#F5F4F0", border: !st ? "1.5px dashed #E8E6E1" : "1.5px solid transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: st === "mastery" ? "#2D6A4F" : st === "revision" ? "#856404" : "transparent" }}>{st === "mastery" ? "M" : st === "revision" ? "R" : ""}</div>;
@@ -1534,21 +1348,23 @@ export default function App() {
                 if (matches.length === 0) return <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", padding: "4px 0" }}>No students found.</div>;
                 return matches.map((s, si) => {
                   const sToks = toks[s.id] || [];
-                  const tok = tokBal(sToks.length, 0);
+                  const sFreeUsed = sToks.filter(t => t.token_type !== 'extra').length;
+                  const sExtraUsed = sToks.filter(t => t.token_type === 'extra').length;
+                  const tok = tokBal(sFreeUsed, sExtraUsed);
                   const expanded = tokExpand === s.id;
                   return <div key={s.id} style={{ borderBottom: si < matches.length - 1 ? "1px solid #F5F3EF" : "none" }}>
-                    <div role="button" tabIndex={0} aria-expanded={expanded} aria-label={`${s.last}, ${s.first} - ${tok.avail} tokens left`} onClick={() => setTokExpand(expanded ? null : s.id)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setTokExpand(expanded ? null : s.id); } }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", cursor: "pointer" }}>
+                    <div role="button" tabIndex={0} aria-expanded={expanded} aria-label={`${s.last}, ${s.first} - ${tok.avail} free tokens left${tok.extra > 0 ? `, ${tok.extra} extra used` : ''}`} onClick={() => setTokExpand(expanded ? null : s.id)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setTokExpand(expanded ? null : s.id); } }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", cursor: "pointer" }}>
                       <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500, flex: 1 }}>{s.last}, {s.first}</div>
                       <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
                         {Array.from({ length: tok.total }).map((_, i) => <div key={i} style={{ width: 12, height: 12, borderRadius: "50%", background: i < tok.avail ? "#CF202E" : "#E0DDD8" }} />)}
                       </div>
-                      <div style={{ fontFamily: F.b, fontSize: 11, color: tok.avail === 0 ? "#C0392B" : "#6B6B6B", width: 70, textAlign: "right", flexShrink: 0 }}>{tok.avail} left</div>
+                      <div style={{ fontFamily: F.b, fontSize: 11, color: tok.freeExhausted ? "#C0392B" : "#6B6B6B", width: 90, textAlign: "right", flexShrink: 0 }}>{tok.freeExhausted ? `0 free` : `${tok.avail} left`}{tok.extra > 0 ? ` · ${tok.extra} extra` : ""}</div>
                       {sToks.length > 0 && <span style={{ fontSize: 11, color: "#767676", transform: expanded ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>}
                     </div>
                     {expanded && sToks.length > 0 && <div style={{ padding: "2px 0 8px", borderTop: "1px solid #F5F3EF" }}>
                       {sToks.map((t, ti) => { const a = c.assignments.find(x => x.id === t.assignment_id) || (c.tokenGroups || {})[t.assignment_id]; return <div key={ti} style={{ display: "flex", gap: 8, padding: "4px 0", fontFamily: F.b, fontSize: 11, color: "#666" }}>
                         <span style={{ color: "#767676" }}>✦</span>
-                        <span style={{ flex: 1 }}>{t.token_type === "revision" ? "Revision" : "Late"}: {a?.name || t.assignment_id}{t.note ? ` — "${t.note}"` : ""}</span>
+                        <span style={{ flex: 1 }}>{t.token_type === "extra" ? "Extra" : t.token_type === "revision" ? "Revision" : "Late"}: {a?.name || t.assignment_id}{t.note ? ` — "${t.note}"` : ""}</span>
                         <span style={{ color: "#767676", fontSize: 10 }}>{new Date(t.submitted_at).toLocaleDateString()}</span>
                       </div>; })}
                     </div>}
