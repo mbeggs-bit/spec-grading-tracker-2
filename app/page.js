@@ -1399,7 +1399,7 @@ export default function App() {
             </select>}
             <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{filteredStudents.length} student{filteredStudents.length !== 1 ? 's' : ''}{sectionFilter !== 'all' ? ` (${sectionFilter})` : ''}</span>
           </div>
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
             {pending.length > 0 && tab !== "queue" && <button onClick={() => setTab("queue")} aria-label={`${pending.length} pending token submissions`} style={{ padding: "3px 10px", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>{pending.length} token{pending.length !== 1 ? "s" : ""}</button>}
             <select aria-label="View as student" value="" onChange={e => { const s = filteredStudents.find(x => x.id === e.target.value); if (s) setViewAsStudent(s); }} style={{ padding: "5px 8px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 11, background: "#fff", color: "#6B6B6B", cursor: "pointer" }}>
               <option value="">View as Student</option>
@@ -1680,22 +1680,23 @@ export default function App() {
             </div>}
           </div>
 
-          {expStudents && <><div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "8px 16px 6px", borderBottom: "2px solid #F0EEEA", background: "#FAFAF7" }}>
-              <div style={{ width: 24, flexShrink: 0 }} />
-              <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676" }}>Student</div>
+          {expStudents && <><div role="region" aria-label="Student progress grid" tabIndex={0} style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+            <div style={{ minWidth: 480, display: "flex", alignItems: "flex-end", gap: 8, padding: "8px 16px 6px", borderBottom: "2px solid #F0EEEA", background: "#FAFAF7" }}>
+              <div style={{ width: 22, flexShrink: 0 }} />
+              <div style={{ width: 160, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676" }}>Student</div>
               <div style={{ flex: 1, display: "flex", gap: 3 }}>{relAssignments.map(id => { const x = c.assignments.find(a => a.id === id);
                 const words = (x?.name || "").split(' ');
                 const abbr = words.length >= 3 ? words.filter(w => w.length > 1).map(w => w[0]).join('').substring(0, 5) : (x?.name || "").substring(0, 6);
                 return <div key={id} style={{ flex: 1, minWidth: 28, maxWidth: 40, display: "flex", alignItems: "flex-end", justifyContent: "center" }} title={x?.name} aria-label={x?.name}>
                   <div style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", fontFamily: F.b, fontSize: 10, fontWeight: 600, color: "#555", textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", maxHeight: 72, lineHeight: 1.2, paddingBottom: 2 }}>{x?.name || ""}</div>
                 </div>; })}</div>
+              <div style={{ width: 20, flexShrink: 0 }} />
             </div>
             {(() => { const gq = gridSearch.toLowerCase(); const gridFiltered = gq ? sorted.filter(s => `${s.first} ${s.last}`.toLowerCase().includes(gq) || `${s.last}, ${s.first}`.toLowerCase().includes(gq)) : sorted; return gridFiltered.map((s, si) => {
               const ig = calcStudentGrade(sC[s.id] || {}, iS[s.id] || {}, relAssignments, ck, dueDates);
               const instrOnly = calcStudentGrade(iS[s.id] || {}, iS[s.id] || {}, relAssignments, ck, dueDates);
               const m = TM[ig] || TM.F; const mm = ig !== instrOnly && ig !== "early" && instrOnly !== "early";
-              return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < sorted.length - 1 ? "1px solid #F5F3EF" : "none", background: mm ? "#FFF8F0" : "transparent" }}>
+              return <div key={s.id} style={{ minWidth: 480, display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < sorted.length - 1 ? "1px solid #F5F3EF" : "none", background: mm ? "#FFF8F0" : "transparent" }}>
                 <div style={{ width: 22, height: 22, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 11, fontWeight: 700, color: m.c, flexShrink: 0 }}>{ig === "early" ? "—" : ig}</div>
                 <div style={{ width: 160, flexShrink: 0, display: "flex", alignItems: "center", gap: 3 }}>
                   <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{sortBy === "last" ? `${s.last}, ${s.first}` : s.name}</div>
@@ -1707,7 +1708,7 @@ export default function App() {
                     return <div key={id} title={c.assignments.find(a => a.id === id)?.name} style={{ flex: 1, minWidth: 28, maxWidth: 40, height: 22, borderRadius: 4, background: st === "mastery" ? "#D4EDDA" : st === "revision" ? "#FFF3CD" : "#F5F4F0", border: !st ? "1.5px dashed #E8E6E1" : "1.5px solid transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: st === "mastery" ? "#2D6A4F" : st === "revision" ? "#856404" : "transparent" }}>{st === "mastery" ? "M" : st === "revision" ? "R" : ""}</div>;
                   })}
                 </div>
-                {mm && <div style={{ width: 20, flexShrink: 0, textAlign: "right", fontFamily: F.b, fontSize: 11, color: "#E65100" }} title="Student has checked off items you haven't confirmed">⚠</div>}
+                <div style={{ width: 20, flexShrink: 0, textAlign: "right", fontFamily: F.b, fontSize: 11, color: "#E65100" }} title={mm ? "Student has checked off items you haven't confirmed" : ""}>{mm ? "⚠" : ""}</div>
               </div>;
             }); })()}
           </div>
@@ -1759,8 +1760,8 @@ export default function App() {
                 <input value={cpGridSearch} onChange={e => setCpGridSearch(e.target.value)} placeholder="Filter..." aria-label="Filter class prep students" style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#666", background: "#fff", width: 80, outline: "none" }} />
               </div>}
             </div>
-            {expClassPrep && <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-              <div style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "8px 16px 6px", borderBottom: "2px solid #F0EEEA", background: "#FAFAF7" }}>
+            {expClassPrep && <div role="region" aria-label="Class preparation grid" tabIndex={0} style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+              <div style={{ minWidth: 420, display: "flex", alignItems: "flex-end", gap: 8, padding: "8px 16px 6px", borderBottom: "2px solid #F0EEEA", background: "#FAFAF7" }}>
                 <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676" }}>Student</div>
                 <div style={{ flex: 1, display: "flex", gap: 3 }}>{(c.classPrep || []).map(cp => {
                   return <div key={cp.id} style={{ flex: 1, minWidth: 28, maxWidth: 40, display: "flex", alignItems: "flex-end", justifyContent: "center" }} title={cp.name} aria-label={cp.name}>
@@ -1773,7 +1774,7 @@ export default function App() {
                 const sCp = cP[s.id] || {};
                 const doneCount = (c.classPrep || []).filter(cp => !!sCp[cp.id]).length;
                 const allDone = doneCount === (c.classPrep || []).length;
-                return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < cpFiltered.length - 1 ? "1px solid #F5F3EF" : "none" }}>
+                return <div key={s.id} style={{ minWidth: 420, display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < cpFiltered.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                   <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.last}, {s.first}</div>
                   <div style={{ flex: 1, display: "flex", gap: 3 }}>
                     {(c.classPrep || []).map(cp => { const done = !!sCp[cp.id];
