@@ -259,6 +259,7 @@ export default function App() {
   const [editDueDate, setEditDueDate] = useState('');
   const [expScheduled, setExpScheduled] = useState(false);
   const [expStudents, setExpStudents] = useState(true);
+  const [copiedSummary, setCopiedSummary] = useState(null);
   const [expStruggles, setExpStruggles] = useState(true);
   const [expTokLookup, setExpTokLookup] = useState(false);
   const [expClassPrep, setExpClassPrep] = useState(true);
@@ -268,14 +269,6 @@ export default function App() {
   const [expTokens, setExpTokens] = useState(false);
   const [expPrep, setExpPrep] = useState(false);
   const [expTeach, setExpTeach] = useState(true);
-  const [toast, setToast] = useState(null);
-
-  // Auto-dismiss toast after 3.5 seconds
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 3500);
-    return () => clearTimeout(t);
-  }, [toast]);
 
   // Check auth on mount
   useEffect(() => {
@@ -823,49 +816,12 @@ export default function App() {
   const pending = fq.filter(f => !f.resolved);
 
   const handleInstrUpdate = async (pid, aid, val) => {
-    // Optimistic: update local state immediately
-    const prev = (iS[pid] || {})[aid] || null;
-    setCourseData(d => {
-      const newIS = { ...d.iS };
-      if (!newIS[pid]) newIS[pid] = {};
-      if (val) { newIS[pid] = { ...newIS[pid], [aid]: val }; }
-      else { const copy = { ...newIS[pid] }; delete copy[aid]; newIS[pid] = copy; }
-      return { ...d, iS: newIS };
-    });
-    try {
-      await upsertInstrStatus(pid, ck, aid, val);
-    } catch (e) {
-      // Rollback on failure
-      setCourseData(d => {
-        const newIS = { ...d.iS };
-        if (!newIS[pid]) newIS[pid] = {};
-        if (prev) { newIS[pid] = { ...newIS[pid], [aid]: prev }; }
-        else { const copy = { ...newIS[pid] }; delete copy[aid]; newIS[pid] = copy; }
-        return { ...d, iS: newIS };
-      });
-      setToast('Failed to save — try again');
-    }
+    await upsertInstrStatus(pid, ck, aid, val);
+    refresh();
   };
   const handleInstrNote = async (pid, aid, note) => {
-    // Optimistic: update local state immediately
-    const prev = (iN[pid] || {})[aid] || null;
-    setCourseData(d => {
-      const newIN = { ...d.iN };
-      if (!newIN[pid]) newIN[pid] = {};
-      newIN[pid] = { ...newIN[pid], [aid]: note };
-      return { ...d, iN: newIN };
-    });
-    try {
-      await upsertInstrNote(pid, ck, aid, note);
-    } catch (e) {
-      setCourseData(d => {
-        const newIN = { ...d.iN };
-        if (!newIN[pid]) newIN[pid] = {};
-        newIN[pid] = { ...newIN[pid], [aid]: prev };
-        return { ...d, iN: newIN };
-      });
-      setToast('Failed to save note — try again');
-    }
+    await upsertInstrNote(pid, ck, aid, note);
+    refresh();
   };
   const handleToggleRel = async (aid) => {
     await toggleReleased(ck, aid);
@@ -882,23 +838,8 @@ export default function App() {
     }
   };
   const markAllInstr = async (aid, val) => {
-    // Optimistic: update all students in local state immediately
-    setCourseData(d => {
-      const newIS = { ...d.iS };
-      for (const s of students) {
-        if (!newIS[s.id]) newIS[s.id] = {};
-        if (val) { newIS[s.id] = { ...newIS[s.id], [aid]: val }; }
-        else { const copy = { ...newIS[s.id] }; delete copy[aid]; newIS[s.id] = copy; }
-      }
-      return { ...d, iS: newIS };
-    });
-    try {
-      await Promise.all(students.map(s => upsertInstrStatus(s.id, ck, aid, val)));
-    } catch (e) {
-      // On failure, do a full refresh to get accurate state
-      setToast('Some updates may have failed — refreshing');
-      refresh();
-    }
+    for (const s of students) { await upsertInstrStatus(s.id, ck, aid, val); }
+    refresh();
   };
 
   // Section filtering — null-safe for Spring 2026 courses
@@ -919,6 +860,163 @@ export default function App() {
 
   const insights = relAssignments.map(id => { const a = c.assignments.find(x => x.id === id); const rc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "revision").length; const mc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "mastery").length; return { ...a, rc, mc, ns: filteredStudents.length - rc - mc }; }).filter(a => a.rc > 0).sort((a, b) => b.rc - a.rc);
   const cpSum = (c.classPrep || []).map(cp => ({ ...cp, done: filteredStudents.filter(s => (cP[s.id] || {})[cp.id]).length }));
+
+  const copyStudentSummary = async (s) => {
+    const si = iS[s.id] || {};
+    const ig = calcGrade(si, relAssignments, ck);
+    const relA = c.assignments.filter(a => relAssignments.includes(a.id));
+    const mastered = relA.filter(a => si[a.id] === "mastery");
+    const revision = relA.filter(a => si[a.id] === "revision");
+    const notYet = relA.filter(a => !si[a.id]);
+    const sToks = toks[s.id] || [];
+    const tok = tokBal(sToks.length, 0);
+    const sFq = fq.filter(f => f.profile_id === s.id);
+    const date = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    const done = new Set(Object.keys(si).filter(k => si[k] === "mastery"));
+
+    let txt = `${c.title} — Progress Summary\n`;
+    txt += `${s.first} ${s.last}\n`;
+    txt += `As of ${date}\n`;
+    txt += `Current Grade Track: ${ig === "early" ? "Not yet determined" : ig}\n`;
+    txt += `\n`;
+
+    if (mastered.length > 0) {
+      txt += `MASTERED (${mastered.length}):\n`;
+      mastered.forEach(a => { txt += `  - ${a.name}\n`; });
+      txt += `\n`;
+    }
+
+    if (revision.length > 0) {
+      txt += `NEEDS REVISION (${revision.length}):\n`;
+      revision.forEach(a => { txt += `  - ${a.name}\n`; });
+      txt += `\n`;
+    }
+
+    if (notYet.length > 0) {
+      txt += `NOT YET EVALUATED (${notYet.length}):\n`;
+      notYet.forEach(a => { txt += `  - ${a.name}\n`; });
+      txt += `\n`;
+    }
+
+    if (sToks.length > 0) {
+      txt += `TOKEN USAGE (${tok.used} used, ${tok.avail} remaining):\n`;
+      sToks.forEach(t => {
+        const aName = c.assignments.find(x => x.id === t.assignment_id)?.name || (c.tokenGroups || {})[t.assignment_id]?.name || t.assignment_id;
+        const qItem = sFq.find(f => f.assignment_id === t.assignment_id && f.token_type === t.token_type && Math.abs(new Date(f.submitted_at) - new Date(t.submitted_at)) < 60000);
+        let outcome = "Pending review";
+        if (qItem?.resolved) outcome = qItem.resolution === "M" ? "Mastered" : "Needs more revision";
+        txt += `  - ${t.token_type === "revision" ? "Revision" : "Late"}: ${aName} — ${outcome}\n`;
+      });
+      txt += `\n`;
+    } else {
+      txt += `TOKENS: ${tok.avail} of ${tok.total} available (none used)\n\n`;
+    }
+
+    // --- Track roadmaps for B and A ---
+    const buildRoadmap = (trackGrade) => {
+      const t = c.tracks[trackGrade];
+      if (!t) return null;
+      const needed = t.req.filter(id => !done.has(id));
+      if (needed.length === 0) return null;
+      const needsRevision = needed.filter(id => si[id] === "revision");
+      const notStarted = needed.filter(id => !si[id]);
+      const notReleased = needed.filter(id => !relAssignments.includes(id));
+      const tokensNeeded = needsRevision.length;
+      const freeTokensLeft = tok.avail;
+      const extraNeeded = Math.max(0, tokensNeeded - freeTokensLeft);
+      return { needed, needsRevision, notStarted, notReleased, tokensNeeded, freeTokensLeft, extraNeeded };
+    };
+
+    const trackOrder = ["A", "B", "C", "D"];
+    const currentIdx = trackOrder.indexOf(ig);
+    const tracksToShow = [];
+    if (ig !== "A") {
+      // Show the next track up, and A if it's not the next one
+      const nextUp = currentIdx >= 0 ? trackOrder[currentIdx - 1] : (ig === "F" || ig === "early" ? "D" : null);
+      if (nextUp) tracksToShow.push(nextUp);
+      if (nextUp !== "A" && c.tracks["A"]) tracksToShow.push("A");
+    }
+
+    if (tracksToShow.length > 0) {
+      txt += `${"—".repeat(40)}\n`;
+      txt += `WHAT IT WOULD TAKE TO MOVE UP\n\n`;
+    }
+
+    tracksToShow.forEach(tg => {
+      const rm = buildRoadmap(tg);
+      if (!rm) {
+        txt += `${tg} TRACK: All requirements met! (Remaining items not yet released.)\n\n`;
+        return;
+      }
+      txt += `${tg} TRACK (${rm.needed.length} item${rm.needed.length !== 1 ? "s" : ""} remaining):\n`;
+
+      if (rm.needsRevision.length > 0) {
+        txt += `  Revise (token required):\n`;
+        let tokenNum = 0;
+        rm.needsRevision.forEach(id => {
+          const a = c.assignments.find(x => x.id === id);
+          tokenNum++;
+          const isFree = tokenNum <= tok.avail;
+          txt += `    - ${a?.name || id}`;
+          txt += isFree ? ` [free token #${tok.used + tokenNum}]` : ` [requires extra token activity]`;
+          txt += `\n`;
+        });
+      }
+
+      const needToComplete = rm.notStarted.filter(id => relAssignments.includes(id));
+      if (needToComplete.length > 0) {
+        txt += `  Complete and submit:\n`;
+        needToComplete.forEach(id => {
+          const a = c.assignments.find(x => x.id === id);
+          txt += `    - ${a?.name || id}`;
+          if (a?.eval === "mastery") txt += ` (must reach mastery)`;
+          txt += `\n`;
+        });
+      }
+
+      if (rm.notReleased.length > 0) {
+        txt += `  Not yet assigned (${rm.notReleased.length}):\n`;
+        rm.notReleased.forEach(id => {
+          const a = c.assignments.find(x => x.id === id);
+          txt += `    - ${a?.name || id}\n`;
+        });
+      }
+
+      if (rm.extraNeeded > 0) {
+        txt += `\n  ⚠ Token note: You would need ${rm.tokensNeeded} token${rm.tokensNeeded !== 1 ? "s" : ""} for revisions, `;
+        txt += `but only ${tok.avail} free token${tok.avail !== 1 ? "s" : ""} remain${tok.avail === 1 ? "s" : ""}. `;
+        txt += `${rm.extraNeeded} extra token activit${rm.extraNeeded !== 1 ? "ies" : "y"} would be needed.`;
+        if ((c.bonus || []).length > 0) {
+          txt += `\n  Extra token options: ${c.bonus.map(b => b.name).join(", ")}`;
+        }
+        txt += `\n`;
+      } else if (rm.tokensNeeded > 0) {
+        txt += `\n  Token note: ${rm.tokensNeeded} of your ${tok.avail} free token${tok.avail !== 1 ? "s" : ""} would be used for revisions.\n`;
+      }
+      txt += `\n`;
+    });
+
+    const cutoff = pastCutoff(ck);
+    if (cutoff && tracksToShow.some(tg => { const rm = buildRoadmap(tg); return rm && rm.tokensNeeded > 0; })) {
+      txt += `Note: The token submission period has ended (${getTokenCutoff(ck)}).\n\n`;
+    }
+
+    txt += `—\nGenerated from Lumos (${c.title})`;
+
+    try {
+      await navigator.clipboard.writeText(txt);
+      setCopiedSummary(s.id);
+      setTimeout(() => setCopiedSummary(null), 2000);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setCopiedSummary(s.id);
+      setTimeout(() => setCopiedSummary(null), 2000);
+    }
+  };
 
   const exportCSV = () => {
     const filteredStudents = sectionFilter === 'all' ? students : students.filter(s => s.section === sectionFilter);
@@ -944,11 +1042,10 @@ export default function App() {
     return (
       <div>
         <a href="#main-content" className="skip-link">Skip to main content</a>
-        {toast && <div role="alert" aria-live="assertive" style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", background: "#C0392B", color: "#fff", fontFamily: F.b, fontSize: 13, fontWeight: 600, padding: "10px 20px", borderRadius: 8, zIndex: 100, boxShadow: "0 4px 12px rgba(0,0,0,.15)" }}>{toast}</div>}
         <main id="main-content" style={{ maxWidth: 900, margin: "0 auto", padding: "20px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button onClick={() => { setBatch(false); setBatchSearch(''); refresh(); }} aria-label="Back to overview" style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>← Overview</button>
+            <button onClick={() => { setBatch(false); setBatchSearch(''); }} aria-label="Back to overview" style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>← Overview</button>
             <h1 style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: "#555", margin: 0 }}>Grade by Assignment</h1>
           </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -978,13 +1075,13 @@ export default function App() {
                 ? [{ v: "mastery", l: "✓ Complete", bg: "#D4EDDA", c: "#2D6A4F" }, { v: "", l: "—", bg: "#F5F4F0", c: "#767676" }]
                 : [{ v: "mastery", l: "Mastered", bg: "#D4EDDA", c: "#2D6A4F" }, { v: "revision", l: "Revise", bg: "#FFF3CD", c: "#856404" }, { v: "", l: "—", bg: "#F5F4F0", c: "#767676" }];
               return <div key={s.id} style={{ borderBottom: si < bSorted.length - 1 ? "1px solid #F5F3EF" : "none" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px" }}>
                   <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, width: 120, flexShrink: 0 }}>{sortBy === "last" ? `${s.last}, ${s.first}` : `${s.first} ${s.last}`}</div>
-                  <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                    {opts.map(o => <button key={o.v} aria-label={`${sortBy === "last" ? s.last + " " + s.first : s.first + " " + s.last}: ${o.l}`} onClick={() => handleInstrUpdate(s.id, batchAsgn, o.v || null)} style={{ padding: "5px 10px", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer", background: st === o.v ? o.bg : "#F8F7F4", color: st === o.v ? o.c : "#767676", border: st === o.v ? `2px solid ${o.c}` : "1px solid #E8E6E1", minHeight: 44, minWidth: 44, display: "flex", alignItems: "center", justifyContent: "center" }}>{o.l}</button>)}
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {opts.map(o => <button key={o.v} aria-label={`${sortBy === "last" ? s.last + " " + s.first : s.first + " " + s.last}: ${o.l}`} onClick={() => handleInstrUpdate(s.id, batchAsgn, o.v || null)} style={{ padding: "5px 10px", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer", background: st === o.v ? o.bg : "#F8F7F4", color: st === o.v ? o.c : "#767676", border: st === o.v ? `2px solid ${o.c}` : "1px solid #E8E6E1" }}>{o.l}</button>)}
                   </div>
-                  <button onClick={() => { setNoteFor(isEN ? null : s.id); setNoteVal(note || ""); }} style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: note ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0, minHeight: 44, minWidth: 44, display: "flex", alignItems: "center", justifyContent: "center" }}>{note ? "✎ Note" : "+ Note"}</button>
-                  <div style={{ flexShrink: 0, textAlign: "right" }}>
+                  <button onClick={() => { setNoteFor(isEN ? null : s.id); setNoteVal(note || ""); }} style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: note ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{note ? "✎ Note" : "+ Note"}</button>
+                  <div style={{ width: 60, flexShrink: 0, textAlign: "right" }}>
                     {studentChecked && <Pill t="Self ✓" bg="#E8F5E9" c="#2D6A4F" />}
                   </div>
                 </div>
@@ -1067,7 +1164,6 @@ export default function App() {
   return (
     <div>
       <a href="#main-content" className="skip-link">Skip to main content</a>
-      {toast && <div role="alert" aria-live="assertive" style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", background: "#C0392B", color: "#fff", fontFamily: F.b, fontSize: 13, fontWeight: 600, padding: "10px 20px", borderRadius: 8, zIndex: 100, boxShadow: "0 4px 12px rgba(0,0,0,.15)" }}>{toast}</div>}
       <header style={{ borderBottom: "1px solid #E8E6E1", background: "#fff", position: "sticky", top: 0, zIndex: 10 }}>
         <div style={{ maxWidth: 1100, margin: "0 auto", padding: "10px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1357,10 +1453,10 @@ export default function App() {
             </div>}
           </div>
 
-          {expStudents && <><div role="region" aria-label="Student grades grid" tabIndex={0} style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "8px 16px 6px", borderBottom: "2px solid #F0EEEA", background: "#FAFAF7", minWidth: "fit-content" }}>
-              <div style={{ width: 24, flexShrink: 0, position: "sticky", left: 16, zIndex: 1, background: "#FAFAF7" }} />
-              <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", position: "sticky", left: 40, zIndex: 1, background: "#FAFAF7" }}>Student</div>
+          {expStudents && <><div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "8px 16px 6px", borderBottom: "2px solid #F0EEEA", background: "#FAFAF7" }}>
+              <div style={{ width: 24, flexShrink: 0 }} />
+              <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676" }}>Student</div>
               <div style={{ flex: 1, display: "flex", gap: 3 }}>{relAssignments.map(id => { const x = c.assignments.find(a => a.id === id);
                 const words = (x?.name || "").split(' ');
                 const abbr = words.length >= 3 ? words.filter(w => w.length > 1).map(w => w[0]).join('').substring(0, 5) : (x?.name || "").substring(0, 6);
@@ -1372,10 +1468,13 @@ export default function App() {
             {(() => { const gq = gridSearch.toLowerCase(); const gridFiltered = gq ? sorted.filter(s => `${s.first} ${s.last}`.toLowerCase().includes(gq) || `${s.last}, ${s.first}`.toLowerCase().includes(gq)) : sorted; return gridFiltered.map((s, si) => {
               const ig = calcGrade(iS[s.id] || {}, relAssignments, ck); const sg = calcGrade(sC[s.id] || {}, relAssignments, ck);
               const m = TM[ig] || TM.F; const mm = ig !== sg && ig !== "early" && sg !== "early";
-              const rowBg = mm ? "#FFF8F0" : "transparent";
-              return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < sorted.length - 1 ? "1px solid #F5F3EF" : "none", background: rowBg, minWidth: "fit-content" }}>
-                <div style={{ width: 22, height: 22, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 11, fontWeight: 700, color: m.c, flexShrink: 0, position: "sticky", left: 16, zIndex: 1 }}>{ig === "early" ? "—" : ig}</div>
-                <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", position: "sticky", left: 40, zIndex: 1, background: rowBg }}>{sortBy === "last" ? `${s.last}, ${s.first}` : s.name}</div>
+              return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < sorted.length - 1 ? "1px solid #F5F3EF" : "none", background: mm ? "#FFF8F0" : "transparent" }}>
+                <div style={{ width: 22, height: 22, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 11, fontWeight: 700, color: m.c, flexShrink: 0 }}>{ig === "early" ? "—" : ig}</div>
+                <div style={{ width: 140, flexShrink: 0, display: "flex", alignItems: "center", gap: 4 }}>
+                  <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{sortBy === "last" ? `${s.last}, ${s.first}` : s.name}</div>
+                  <button aria-label={`Copy progress summary for ${s.first} ${s.last}`} onClick={() => copyStudentSummary(s)} style={{ background: "none", border: "none", cursor: "pointer", padding: "1px 3px", fontSize: 12, lineHeight: 1, color: "#767676", borderRadius: 3, flexShrink: 0, opacity: copiedSummary === s.id ? 1 : 0.5, transition: "opacity .15s" }} onMouseEnter={e => { if (copiedSummary !== s.id) e.currentTarget.style.opacity = '0.85'; }} onMouseLeave={e => { if (copiedSummary !== s.id) e.currentTarget.style.opacity = '0.5'; }}>{copiedSummary === s.id ? "✓" : "📋"}</button>
+                  {copiedSummary === s.id && <span role="status" aria-live="polite" style={{ fontFamily: F.b, fontSize: 10, color: "#2D6A4F", fontWeight: 600, whiteSpace: "nowrap" }}>Copied</span>}
+                </div>
                 <div style={{ flex: 1, display: "flex", gap: 3 }}>
                   {relAssignments.map(id => { const st = (iS[s.id] || {})[id] || "";
                     return <div key={id} title={c.assignments.find(a => a.id === id)?.name} style={{ flex: 1, minWidth: 28, maxWidth: 40, height: 22, borderRadius: 4, background: st === "mastery" ? "#D4EDDA" : st === "revision" ? "#FFF3CD" : "#F5F4F0", border: !st ? "1.5px dashed #E8E6E1" : "1.5px solid transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: st === "mastery" ? "#2D6A4F" : st === "revision" ? "#856404" : "transparent" }}>{st === "mastery" ? "M" : st === "revision" ? "R" : ""}</div>;
@@ -1431,9 +1530,9 @@ export default function App() {
                 <input value={cpGridSearch} onChange={e => setCpGridSearch(e.target.value)} placeholder="Filter..." aria-label="Filter class prep students" style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#666", background: "#fff", width: 80, outline: "none" }} />
               </div>}
             </div>
-            {expClassPrep && <div role="region" aria-label="Class preparation grid" tabIndex={0} style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-              <div style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "8px 16px 6px", borderBottom: "2px solid #F0EEEA", background: "#FAFAF7", minWidth: "fit-content" }}>
-                <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", position: "sticky", left: 16, zIndex: 1, background: "#FAFAF7" }}>Student</div>
+            {expClassPrep && <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "8px 16px 6px", borderBottom: "2px solid #F0EEEA", background: "#FAFAF7" }}>
+                <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676" }}>Student</div>
                 <div style={{ flex: 1, display: "flex", gap: 3 }}>{(c.classPrep || []).map(cp => {
                   return <div key={cp.id} style={{ flex: 1, minWidth: 28, maxWidth: 40, display: "flex", alignItems: "flex-end", justifyContent: "center" }} title={cp.name} aria-label={cp.name}>
                     <div style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", fontFamily: F.b, fontSize: 10, fontWeight: 600, color: "#555", textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", maxHeight: 72, lineHeight: 1.2, paddingBottom: 2 }}>{cp.name}</div>
@@ -1445,8 +1544,8 @@ export default function App() {
                 const sCp = cP[s.id] || {};
                 const doneCount = (c.classPrep || []).filter(cp => !!sCp[cp.id]).length;
                 const allDone = doneCount === (c.classPrep || []).length;
-                return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < cpFiltered.length - 1 ? "1px solid #F5F3EF" : "none", minWidth: "fit-content" }}>
-                  <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", position: "sticky", left: 16, zIndex: 1, background: "#fff" }}>{s.last}, {s.first}</div>
+                return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < cpFiltered.length - 1 ? "1px solid #F5F3EF" : "none" }}>
+                  <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.last}, {s.first}</div>
                   <div style={{ flex: 1, display: "flex", gap: 3 }}>
                     {(c.classPrep || []).map(cp => { const done = !!sCp[cp.id];
                       return <div key={cp.id} title={`${cp.name}: ${done ? 'Complete' : 'Not complete'}`} style={{ flex: 1, minWidth: 28, maxWidth: 40, height: 22, borderRadius: 4, background: done ? "#D4EDDA" : "#F5F4F0", border: done ? "1.5px solid #B7DFBF" : "1.5px dashed #E8E6E1", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: done ? "#2D6A4F" : "transparent" }}>{done ? "✓" : ""}</div>;
