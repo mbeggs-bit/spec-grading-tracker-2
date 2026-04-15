@@ -1,4 +1,4 @@
-The following image can be moved on the page using keyboard controls (left, right, up, down)
+
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
