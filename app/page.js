@@ -265,6 +265,7 @@ export default function App() {
   const [editDueDate, setEditDueDate] = useState('');
   const [expScheduled, setExpScheduled] = useState(false);
   const [expStudents, setExpStudents] = useState(true);
+  const [copiedSummary, setCopiedSummary] = useState(null);
   const [expStruggles, setExpStruggles] = useState(true);
   const [expTokLookup, setExpTokLookup] = useState(false);
   const [expClassPrep, setExpClassPrep] = useState(true);
@@ -1072,6 +1073,171 @@ export default function App() {
   const insights = relAssignments.map(id => { const a = c.assignments.find(x => x.id === id); const rc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "revision").length; const mc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "mastery").length; return { ...a, rc, mc, ns: filteredStudents.length - rc - mc }; }).filter(a => a.rc > 0).sort((a, b) => b.rc - a.rc);
   const cpSum = (c.classPrep || []).map(cp => ({ ...cp, done: filteredStudents.filter(s => (cP[s.id] || {})[cp.id]).length }));
 
+  const copyStudentSummary = async (s) => {
+    const si = iS[s.id] || {};
+    const ig = calcGrade(si, relAssignments, ck);
+    const relA = c.assignments.filter(a => relAssignments.includes(a.id));
+    const mastered = relA.filter(a => si[a.id] === "mastery");
+    const revision = relA.filter(a => si[a.id] === "revision");
+    const notYet = relA.filter(a => !si[a.id]);
+    const sToks = toks[s.id] || [];
+    const tok = tokBal(sToks.length, 0);
+    const sFq = fq.filter(f => f.profile_id === s.id);
+    const date = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    const done = new Set(Object.keys(si).filter(k => si[k] === "mastery"));
+    const today = new Date(); today.setHours(0,0,0,0);
+
+    let txt = `${c.title} — Progress Summary\n`;
+    txt += `${s.first} ${s.last}\n`;
+    txt += `As of ${date}\n`;
+    txt += `Current Grade Track: ${ig === "early" ? "Not yet determined" : ig}\n\n`;
+
+    if (mastered.length > 0) {
+      txt += `MASTERED (${mastered.length}):\n`;
+      mastered.forEach(a => { txt += `  - ${a.name}\n`; });
+      txt += `\n`;
+    }
+    if (revision.length > 0) {
+      txt += `NEEDS REVISION (${revision.length}):\n`;
+      revision.forEach(a => { txt += `  - ${a.name}\n`; });
+      txt += `\n`;
+    }
+    if (notYet.length > 0) {
+      txt += `NOT YET EVALUATED (${notYet.length}):\n`;
+      notYet.forEach(a => { txt += `  - ${a.name}\n`; });
+      txt += `\n`;
+    }
+
+    if (sToks.length > 0) {
+      txt += `TOKEN USAGE (${tok.used} used, ${tok.avail} remaining):\n`;
+      sToks.forEach(t => {
+        const aName = c.assignments.find(x => x.id === t.assignment_id)?.name || (c.tokenGroups || {})[t.assignment_id]?.name || t.assignment_id;
+        const qItem = sFq.find(f => f.assignment_id === t.assignment_id && f.token_type === t.token_type && Math.abs(new Date(f.submitted_at) - new Date(t.submitted_at)) < 60000);
+        let outcome = "Pending review";
+        if (qItem?.resolved) outcome = qItem.resolution === "M" ? "Mastered" : "Needs more revision";
+        txt += `  - ${t.token_type === "revision" ? "Revision" : "Late"}: ${aName} — ${outcome}\n`;
+      });
+      txt += `\n`;
+    } else {
+      txt += `TOKENS: ${tok.avail} of ${tok.total} available (none used)\n\n`;
+    }
+
+    // --- Track roadmaps ---
+    const buildRoadmap = (trackGrade) => {
+      const t = c.tracks[trackGrade];
+      if (!t) return null;
+      const neededReq = t.req.filter(id => !done.has(id));
+      const pickNeeds = (t.pick || []).map(p => {
+        const completed = p.from.filter(id => done.has(id));
+        const still = Math.max(0, p.need - completed.length);
+        if (still === 0) return null;
+        const remaining = p.from.filter(id => !done.has(id));
+        return { from: p.from, need: p.need, have: completed.length, still, remaining };
+      }).filter(Boolean);
+      const allNeeded = [...neededReq];
+      pickNeeds.forEach(pn => { pn.remaining.forEach(id => { if (!allNeeded.includes(id)) allNeeded.push(id); }); });
+      if (allNeeded.length === 0 && pickNeeds.length === 0) return null;
+      const needsRevision = allNeeded.filter(id => si[id] === "revision");
+      const notStartedAll = allNeeded.filter(id => !si[id] && relAssignments.includes(id));
+      const lateSubmit = notStartedAll.filter(id => {
+        const dd = dueDates[id];
+        if (!dd?.date) return false;
+        return new Date(dd.date + 'T23:59:59') < today;
+      });
+      const onTime = notStartedAll.filter(id => !lateSubmit.includes(id));
+      const notReleased = allNeeded.filter(id => !relAssignments.includes(id));
+      const tokensNeeded = needsRevision.length + lateSubmit.length;
+      const extraNeeded = Math.max(0, tokensNeeded - tok.avail);
+      const totalRemaining = neededReq.filter(id => !done.has(id)).length + pickNeeds.reduce((sum, pn) => sum + pn.still, 0);
+      return { neededReq, pickNeeds, allNeeded, needsRevision, lateSubmit, onTime, notReleased, tokensNeeded, extraNeeded, totalRemaining };
+    };
+
+    const allCandidates = ["C", "B", "A"].filter(tg => {
+      const tOrder = { A: 0, B: 1, C: 2, D: 3, F: 4, early: 5 };
+      return c.tracks[tg] && tOrder[tg] < tOrder[ig];
+    });
+    const tracksToShow = [];
+    for (let i = allCandidates.length - 1; i >= 0; i--) {
+      const tg = allCandidates[i];
+      const rm = buildRoadmap(tg);
+      const key = rm ? JSON.stringify([...rm.allNeeded].sort()) + rm.pickNeeds.map(p => p.still).join(",") : "null";
+      const dup = tracksToShow.find(ht => {
+        const hRm = buildRoadmap(ht);
+        if (!hRm) return false;
+        return JSON.stringify([...hRm.allNeeded].sort()) + hRm.pickNeeds.map(p => p.still).join(",") === key;
+      });
+      if (!dup) tracksToShow.push(tg);
+    }
+    tracksToShow.reverse();
+
+    if (tracksToShow.length > 0) {
+      txt += `${"—".repeat(40)}\nWHAT IT WOULD TAKE TO MOVE UP\n\n`;
+    }
+
+    tracksToShow.forEach(tg => {
+      const rm = buildRoadmap(tg);
+      if (!rm) { txt += `${tg} TRACK: All requirements met!\n\n`; return; }
+      txt += `${tg} TRACK (${rm.totalRemaining} item${rm.totalRemaining !== 1 ? "s" : ""} remaining):\n`;
+
+      const tokenItems = [...rm.needsRevision.map(id => ({ id, type: "revise" })), ...rm.lateSubmit.map(id => ({ id, type: "late submit" }))];
+      if (tokenItems.length > 0) {
+        txt += `  Token required:\n`;
+        let tokenNum = 0;
+        tokenItems.forEach(({ id, type }) => {
+          const a = c.assignments.find(x => x.id === id);
+          tokenNum++;
+          txt += `    - ${a?.name || id} (${type})`;
+          txt += tokenNum <= tok.avail ? ` [free token #${tok.used + tokenNum}]` : ` [requires extra token activity]`;
+          txt += `\n`;
+        });
+      }
+      if (rm.onTime.length > 0) {
+        txt += `  Complete and submit:\n`;
+        rm.onTime.forEach(id => {
+          const a = c.assignments.find(x => x.id === id);
+          txt += `    - ${a?.name || id}${a?.eval === "mastery" ? " (must reach mastery)" : ""}\n`;
+        });
+      }
+      rm.pickNeeds.forEach(pn => {
+        if (pn.still > 0 && pn.still < pn.from.length) {
+          const names = pn.from.map(id => c.assignments.find(x => x.id === id)?.name || id);
+          txt += `  (${pn.still} more needed from: ${names.join(", ")})\n`;
+        }
+      });
+      if (rm.notReleased.length > 0) {
+        txt += `  Not yet assigned (${rm.notReleased.length}):\n`;
+        rm.notReleased.forEach(id => { txt += `    - ${c.assignments.find(x => x.id === id)?.name || id}\n`; });
+      }
+      if (rm.extraNeeded > 0) {
+        txt += `\n  ⚠ Token note: ${rm.tokensNeeded} token${rm.tokensNeeded !== 1 ? "s" : ""} needed, ${tok.avail} free remaining. ${rm.extraNeeded} extra token activit${rm.extraNeeded !== 1 ? "ies" : "y"} needed.\n  Extra token options on Brightspace.\n`;
+      } else if (rm.tokensNeeded > 0) {
+        txt += `\n  Token note: ${rm.tokensNeeded} of ${tok.avail} free token${tok.avail !== 1 ? "s" : ""} would be used.\n`;
+      }
+      txt += `\n`;
+    });
+
+    const cutoff = pastCutoff(ck);
+    if (cutoff && tracksToShow.some(tg => { const rm = buildRoadmap(tg); return rm && rm.tokensNeeded > 0; })) {
+      txt += `Note: The token submission period has ended (${getTokenCutoff(ck)}).\n\n`;
+    }
+
+    txt += `—\nGenerated from Lumos (${c.title})`;
+
+    try {
+      await navigator.clipboard.writeText(txt);
+      setCopiedSummary(s.id);
+      setTimeout(() => setCopiedSummary(null), 2000);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setCopiedSummary(s.id);
+      setTimeout(() => setCopiedSummary(null), 2000);
+    }
+  };
+
   const exportCSV = () => {
     const filteredStudents = sectionFilter === 'all' ? students : students.filter(s => s.section === sectionFilter);
     const allA = c.assignments.filter(x => relAssignments.includes(x.id)); const cpI = c.classPrep || [];
@@ -1531,7 +1697,11 @@ export default function App() {
               const m = TM[ig] || TM.F; const mm = ig !== instrOnly && ig !== "early" && instrOnly !== "early";
               return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < sorted.length - 1 ? "1px solid #F5F3EF" : "none", background: mm ? "#FFF8F0" : "transparent" }}>
                 <div style={{ width: 22, height: 22, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 11, fontWeight: 700, color: m.c, flexShrink: 0 }}>{ig === "early" ? "—" : ig}</div>
-                <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sortBy === "last" ? `${s.last}, ${s.first}` : s.name}</div>
+                <div style={{ width: 160, flexShrink: 0, display: "flex", alignItems: "center", gap: 3 }}>
+                  <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{sortBy === "last" ? `${s.last}, ${s.first}` : s.name}</div>
+                  <button aria-label={`Copy progress summary for ${s.first} ${s.last}`} onClick={() => copyStudentSummary(s)} style={{ background: "none", border: "none", cursor: "pointer", padding: "1px 3px", fontSize: 12, lineHeight: 1, color: "#767676", borderRadius: 3, flexShrink: 0, opacity: copiedSummary === s.id ? 1 : 0.5 }} onMouseEnter={e => { if (copiedSummary !== s.id) e.currentTarget.style.opacity = '0.85'; }} onMouseLeave={e => { if (copiedSummary !== s.id) e.currentTarget.style.opacity = '0.5'; }}>{copiedSummary === s.id ? "✓" : "📋"}</button>
+                  {copiedSummary === s.id && <span role="status" aria-live="polite" style={{ fontFamily: F.b, fontSize: 10, color: "#2D6A4F", fontWeight: 600, whiteSpace: "nowrap" }}>Copied</span>}
+                </div>
                 <div style={{ flex: 1, display: "flex", gap: 3 }}>
                   {relAssignments.map(id => { const st = (iS[s.id] || {})[id] || "";
                     return <div key={id} title={c.assignments.find(a => a.id === id)?.name} style={{ flex: 1, minWidth: 28, maxWidth: 40, height: 22, borderRadius: 4, background: st === "mastery" ? "#D4EDDA" : st === "revision" ? "#FFF3CD" : "#F5F4F0", border: !st ? "1.5px dashed #E8E6E1" : "1.5px solid transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: st === "mastery" ? "#2D6A4F" : st === "revision" ? "#856404" : "transparent" }}>{st === "mastery" ? "M" : st === "revision" ? "R" : ""}</div>;
