@@ -1081,7 +1081,9 @@ export default function App() {
     const revision = relA.filter(a => si[a.id] === "revision");
     const notYet = relA.filter(a => !si[a.id]);
     const sToks = toks[s.id] || [];
-    const tok = tokBal(sToks.length, 0);
+    const sFreeUsed = sToks.filter(t => t.token_type !== 'extra').length;
+    const sExtraUsed = sToks.filter(t => t.token_type === 'extra').length;
+    const tok = tokBal(sFreeUsed, sExtraUsed);
     const sFq = fq.filter(f => f.profile_id === s.id);
     const date = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
     const done = new Set(Object.keys(si).filter(k => si[k] === "mastery"));
@@ -1109,13 +1111,14 @@ export default function App() {
     }
 
     if (sToks.length > 0) {
-      txt += `TOKEN USAGE (${tok.used} used, ${tok.avail} remaining):\n`;
+      txt += `TOKEN USAGE (${tok.used} free used, ${tok.avail} free remaining${tok.extra > 0 ? `, ${tok.extra} extra` : ""}):\n`;
       sToks.forEach(t => {
         const aName = c.assignments.find(x => x.id === t.assignment_id)?.name || (c.tokenGroups || {})[t.assignment_id]?.name || t.assignment_id;
         const qItem = sFq.find(f => f.assignment_id === t.assignment_id && f.token_type === t.token_type && Math.abs(new Date(f.submitted_at) - new Date(t.submitted_at)) < 60000);
         let outcome = "Pending review";
         if (qItem?.resolved) outcome = qItem.resolution === "M" ? "Mastered" : "Needs more revision";
-        txt += `  - ${t.token_type === "revision" ? "Revision" : "Late"}: ${aName} — ${outcome}\n`;
+        const typeLabel = t.token_type === "revision" ? "Revision" : t.token_type === "late" ? "Late" : "Extra";
+        txt += `  - ${typeLabel}: ${aName} — ${outcome}\n`;
       });
       txt += `\n`;
     } else {
@@ -1859,10 +1862,10 @@ export default function App() {
                 const a = c.assignments.find(x => x.id === item.assignment_id) || (c.tokenGroups || {})[item.assignment_id];
                 return <div key={item.id} style={{ padding: "12px 16px", borderBottom: i < filtered.length - 1 ? "1px solid #F5F3EF" : "none", opacity: item.resolved ? .7 : 1, background: item.resolved ? "#FAFAF7" : "transparent" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: item.resolved ? 0 : 8 }}>
-                    <div style={{ width: 26, height: 26, borderRadius: 6, background: item.token_type === "late" ? "#F3E8FF" : "#FFF3CD", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0 }}>{item.token_type === "late" ? "📥" : "↻"}</div>
+                    <div aria-label={item.token_type === "extra" ? "Extra token" : item.token_type === "late" ? "Late submission token" : "Revision token"} style={{ width: 26, height: 26, borderRadius: 6, background: item.token_type === "extra" ? "#FFFCF5" : item.token_type === "late" ? "#F3E8FF" : "#FFF3CD", border: item.token_type === "extra" ? "1px solid #FFECB5" : "none", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0 }}>{item.token_type === "extra" ? "✦" : item.token_type === "late" ? "📥" : "↻"}</div>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}><strong>{item.sName}</strong> — {a?.name || item.assignment_id}</div>
-                      <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{item.token_type === "late" ? "Late submission" : "Revision"} · {new Date(item.submitted_at).toLocaleDateString()}{item.note ? ` · "${item.note}"` : ""}</div>
+                      <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{item.token_type === "extra" ? <><strong style={{ color: "#856404" }}>Extra token</strong></> : item.token_type === "late" ? "Late submission" : "Revision"} · {new Date(item.submitted_at).toLocaleDateString()}{item.note ? ` · "${item.note}"` : ""}</div>
                       {item.link && <a href={item.link} target="_blank" rel="noopener noreferrer" style={{ fontFamily: F.b, fontSize: 11, color: "#1565C0", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 3, marginTop: 2 }} onMouseEnter={e => e.currentTarget.style.textDecoration = "underline"} onMouseLeave={e => e.currentTarget.style.textDecoration = "none"}>🔗 View submission</a>}
                     </div>
                     {item.resolved && <Pill t={`→ ${item.resolution}`} bg={item.resolution === "M" ? "#D4EDDA" : "#FFF3CD"} c={item.resolution === "M" ? "#2D6A4F" : "#856404"} />}
