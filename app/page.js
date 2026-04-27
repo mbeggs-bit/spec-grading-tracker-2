@@ -1286,20 +1286,28 @@ export default function App() {
     const fpIds = fpGroupDef ? fpGroupDef.ids : [];
     const fpAssignments = fpIds.map(id => c.assignments.find(a => a.id === id)).filter(Boolean);
 
+    // Optimistic iS update — reflects change immediately, syncs to Supabase in background
+    const optimisticInstrUpdate = (pid, aid, next) => {
+      setCourseData(prev => {
+        const prevStudentIS = prev.iS[pid] || {};
+        const updatedStudentIS = { ...prevStudentIS, [aid]: next === null ? undefined : next };
+        return { ...prev, iS: { ...prev.iS, [pid]: updatedStudentIS } };
+      });
+      upsertInstrStatus(pid, ck, aid, next).catch(() => refresh());
+    };
+
     // Chip click handler for PwA: cycles blank → mastery → revision → blank
-    const handlePwaChipClick = async (pid, aid) => {
+    const handlePwaChipClick = (pid, aid) => {
       const cur = (iS[pid] || {})[aid] || "";
       const next = cur === "" ? "mastery" : cur === "mastery" ? "revision" : null;
-      await upsertInstrStatus(pid, ck, aid, next);
-      refresh();
+      optimisticInstrUpdate(pid, aid, next);
     };
 
     // Chip click handler for FP warm-ups: completion items toggle complete / blank
-    const handleFpChipClick = async (pid, aid) => {
+    const handleFpChipClick = (pid, aid) => {
       const cur = (iS[pid] || {})[aid] || "";
       const next = cur === "mastery" ? null : "mastery";
-      await upsertInstrStatus(pid, ck, aid, next);
-      refresh();
+      optimisticInstrUpdate(pid, aid, next);
     };
 
     // Build dropdown options: grouped entries inserted before their individual parts
@@ -1365,13 +1373,14 @@ export default function App() {
                   return <div key={a.id} style={{ fontFamily: F.b, fontSize: 10, fontWeight: 600, color: "#6B6B6B", minWidth: 72, textAlign: "center" }}>{shortName}</div>;
                 })}
               </div>
+              <div style={{ fontFamily: F.b, fontSize: 10, fontWeight: 600, color: "#6B6B6B", width: 90, flexShrink: 0, textAlign: "center" }}>All Mastered</div>
               <div style={{ width: 70, flexShrink: 0 }} />
             </div>
             {bSorted.map((s, si) => {
               const sName = sortBy === "last" ? `${s.last}, ${s.first}` : `${s.first} ${s.last}`;
               const isEN = noteFor === s.id;
-              // Use first pwa assignment id as the note key for the whole project
               const pwaNote = (iN[s.id] || {})[pwaIds[0]];
+              const allPwaMastered = pwaAssignments.every(a => (iS[s.id] || {})[a.id] === "mastery");
               return <div key={s.id} style={{ borderBottom: si < bSorted.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px" }}>
                   <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, width: 140, flexShrink: 0 }}>{sName}</div>
@@ -1396,6 +1405,14 @@ export default function App() {
                       </button>;
                     })}
                   </div>
+                  {allPwaMastered
+                    ? <div aria-label={`${sName}: all parts mastered`} style={{ width: 90, flexShrink: 0, textAlign: "center", fontFamily: F.b, fontSize: 11, fontWeight: 700, color: "#2D6A4F" }}>✓ All</div>
+                    : <button
+                        onClick={() => pwaAssignments.forEach(a => { if ((iS[s.id] || {})[a.id] !== "mastery") optimisticInstrUpdate(s.id, a.id, "mastery"); })}
+                        aria-label={`${sName}: mark all PwA components mastered`}
+                        style={{ width: 90, flexShrink: 0, padding: "4px 0", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 700, color: "#2D6A4F", cursor: "pointer", textAlign: "center" }}>
+                        ✓ All
+                      </button>}
                   <button
                     onClick={() => { setNoteFor(isEN ? null : s.id); setNoteVal(pwaNote || ""); }}
                     aria-label={`${sName}: ${pwaNote ? "Edit project note" : "Add project note"}`}
@@ -1435,12 +1452,14 @@ export default function App() {
                   <div key={a.id} style={{ fontFamily: F.b, fontSize: 10, fontWeight: 600, color: "#6B6B6B", minWidth: 80, textAlign: "center" }}>{a.name}</div>
                 ))}
               </div>
+              <div style={{ fontFamily: F.b, fontSize: 10, fontWeight: 600, color: "#6B6B6B", width: 90, flexShrink: 0, textAlign: "center" }}>All Complete</div>
               <div style={{ width: 70, flexShrink: 0 }} />
             </div>
             {bSorted.map((s, si) => {
               const sName = sortBy === "last" ? `${s.last}, ${s.first}` : `${s.first} ${s.last}`;
               const isEN = noteFor === s.id;
               const fpNote = (iN[s.id] || {})[fpIds[0]];
+              const allFpComplete = fpAssignments.every(a => (iS[s.id] || {})[a.id] === "mastery");
               return <div key={s.id} style={{ borderBottom: si < bSorted.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px" }}>
                   <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, width: 140, flexShrink: 0 }}>{sName}</div>
@@ -1464,6 +1483,14 @@ export default function App() {
                       </button>;
                     })}
                   </div>
+                  {allFpComplete
+                    ? <div aria-label={`${sName}: all warm-ups complete`} style={{ width: 90, flexShrink: 0, textAlign: "center", fontFamily: F.b, fontSize: 11, fontWeight: 700, color: "#2D6A4F" }}>✓ All</div>
+                    : <button
+                        onClick={() => fpAssignments.forEach(a => { if ((iS[s.id] || {})[a.id] !== "mastery") optimisticInstrUpdate(s.id, a.id, "mastery"); })}
+                        aria-label={`${sName}: mark all warm-ups complete`}
+                        style={{ width: 90, flexShrink: 0, padding: "4px 0", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 700, color: "#2D6A4F", cursor: "pointer", textAlign: "center" }}>
+                        ✓ All
+                      </button>}
                   <button
                     onClick={() => { setNoteFor(isEN ? null : s.id); setNoteVal(fpNote || ""); }}
                     aria-label={`${sName}: ${fpNote ? "Edit portfolio note" : "Add portfolio note"}`}
