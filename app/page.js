@@ -1269,10 +1269,66 @@ export default function App() {
     const bAll = [...students].sort((a, b) => sortBy === "first" ? (a.first || "").localeCompare(b.first || "") : (a.last || "").localeCompare(b.last || ""));
     const bq = batchSearch.toLowerCase();
     const bSorted = bq ? bAll.filter(s => `${s.first} ${s.last}`.toLowerCase().includes(bq) || `${s.last}, ${s.first}`.toLowerCase().includes(bq)) : bAll;
+
+    // Check if the selected value is a grouped sentinel
+    const PWA_GROUP_KEY = "__pwa_group__";
+    const FP_GROUP_KEY = "__fp_group__";
+    const isPwaGroup = batchAsgn === PWA_GROUP_KEY;
+    const isFpGroup = batchAsgn === FP_GROUP_KEY;
+
+    // PwA group (mastery, token-grouped)
+    const pwaGroup = c.tokenGroups?.pwa;
+    const pwaIds = pwaGroup ? pwaGroup.ids : [];
+    const pwaAssignments = pwaIds.map(id => c.assignments.find(a => a.id === id)).filter(Boolean);
+
+    // Final Portfolio group (completion warm-ups) — detect from courses.js groups array
+    const fpGroupDef = (c.groups || []).find(g => g.name === "Final Portfolio");
+    const fpIds = fpGroupDef ? fpGroupDef.ids : [];
+    const fpAssignments = fpIds.map(id => c.assignments.find(a => a.id === id)).filter(Boolean);
+
+    // Chip click handler for PwA: cycles blank → mastery → revision → blank
+    const handlePwaChipClick = async (pid, aid) => {
+      const cur = (iS[pid] || {})[aid] || "";
+      const next = cur === "" ? "mastery" : cur === "mastery" ? "revision" : null;
+      await upsertInstrStatus(pid, ck, aid, next);
+      refresh();
+    };
+
+    // Chip click handler for FP warm-ups: completion items toggle complete / blank
+    const handleFpChipClick = async (pid, aid) => {
+      const cur = (iS[pid] || {})[aid] || "";
+      const next = cur === "mastery" ? null : "mastery";
+      await upsertInstrStatus(pid, ck, aid, next);
+      refresh();
+    };
+
+    // Build dropdown options: grouped entries inserted before their individual parts
+    const dropdownOptions = [];
+    let pwaGroupInserted = false;
+    let fpGroupInserted = false;
+    for (const id of relAssignments) {
+      const a = c.assignments.find(x => x.id === id);
+      if (a?.tokenGroup === "pwa") {
+        if (!pwaGroupInserted) {
+          dropdownOptions.push({ value: PWA_GROUP_KEY, label: "Planning with Assessment (Project — all parts)" });
+          pwaGroupInserted = true;
+        }
+        dropdownOptions.push({ value: id, label: `  ↳ ${a.name}` });
+      } else if (fpIds.includes(id)) {
+        if (!fpGroupInserted) {
+          dropdownOptions.push({ value: FP_GROUP_KEY, label: "Final Portfolio (Warm-ups — all parts)" });
+          fpGroupInserted = true;
+        }
+        dropdownOptions.push({ value: id, label: `  ↳ ${a.name}` });
+      } else {
+        dropdownOptions.push({ value: id, label: a?.name || id });
+      }
+    }
+
     return (
       <div>
         <a href="#main-content" className="skip-link">Skip to main content</a>
-        <main id="main-content" style={{ maxWidth: 900, margin: "0 auto", padding: "20px" }}>
+        <main id="main-content" style={{ maxWidth: 960, margin: "0 auto", padding: "20px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button onClick={() => { setBatch(false); setBatchSearch(''); }} aria-label="Back to overview" style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>← Overview</button>
@@ -1285,10 +1341,152 @@ export default function App() {
         </div>
         <div style={{ marginBottom: 14 }}>
           <select aria-label="Select assignment" value={batchAsgn} onChange={e => setBatchAsgn(e.target.value)} style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, background: "#fff" }}>
-            {relAssignments.map(id => { const x = c.assignments.find(a => a.id === id); return <option key={id} value={id}>{x?.name || id}</option>; })}
+            {dropdownOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
           </select>
         </div>
-        {ba && <div>
+
+        {/* ── PwA GROUPED VIEW ── */}
+        {isPwaGroup && pwaAssignments.length > 0 && <div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ fontFamily: F.d, fontSize: 17, fontWeight: 600 }}>Planning with Assessment</span>
+            <Pill t="Project" bg="#FFF0F0" c="#C0392B" />
+            <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>(1 token covers entire project)</span>
+          </div>
+          <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12 }}>
+            Click a component to cycle: <span style={{ background: "#D4EDDA", color: "#2D6A4F", padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>M</span> Mastered → <span style={{ background: "#FFF3CD", color: "#856404", padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>R</span> Revise → blank
+          </div>
+          <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+            {/* Header row */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", background: "#FAFAF7", borderBottom: "1px solid #E8E6E1" }}>
+              <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#6B6B6B", width: 140, flexShrink: 0 }}>Student</div>
+              <div style={{ display: "flex", gap: 6, flex: 1, flexWrap: "wrap" }}>
+                {pwaAssignments.map(a => {
+                  const shortName = a.name.replace("Individual Analysis", "Analysis").replace("Data Chart", "Chart").replace("Follow-Up Lesson Outline", "Follow-Up");
+                  return <div key={a.id} style={{ fontFamily: F.b, fontSize: 10, fontWeight: 600, color: "#6B6B6B", minWidth: 72, textAlign: "center" }}>{shortName}</div>;
+                })}
+              </div>
+              <div style={{ width: 70, flexShrink: 0 }} />
+            </div>
+            {bSorted.map((s, si) => {
+              const sName = sortBy === "last" ? `${s.last}, ${s.first}` : `${s.first} ${s.last}`;
+              const isEN = noteFor === s.id;
+              // Use first pwa assignment id as the note key for the whole project
+              const pwaNote = (iN[s.id] || {})[pwaIds[0]];
+              return <div key={s.id} style={{ borderBottom: si < bSorted.length - 1 ? "1px solid #F5F3EF" : "none" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px" }}>
+                  <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, width: 140, flexShrink: 0 }}>{sName}</div>
+                  <div style={{ display: "flex", gap: 6, flex: 1, flexWrap: "wrap" }}>
+                    {pwaAssignments.map(a => {
+                      const st = (iS[s.id] || {})[a.id] || "";
+                      const studentChecked = !!(sC[s.id] || {})[a.id];
+                      const shortName = a.name.replace("Individual Analysis", "Analysis").replace("Data Chart", "Chart").replace("Follow-Up Lesson Outline", "Follow-Up");
+                      const chipBg = st === "mastery" ? "#D4EDDA" : st === "revision" ? "#FFF3CD" : "#F8F7F4";
+                      const chipColor = st === "mastery" ? "#2D6A4F" : st === "revision" ? "#856404" : "#767676";
+                      const chipBorder = st === "mastery" ? "2px solid #2D6A4F" : st === "revision" ? "2px solid #856404" : "1px solid #E8E6E1";
+                      const chipLabel = st === "mastery" ? "M" : st === "revision" ? "R" : "—";
+                      const ariaDesc = `${sName}: ${a.name} — ${st === "mastery" ? "Mastered" : st === "revision" ? "Revise" : "not graded"}. Click to change.${studentChecked ? " Student self-checked." : ""}`;
+                      return <button
+                        key={a.id}
+                        aria-label={ariaDesc}
+                        onClick={() => handlePwaChipClick(s.id, a.id)}
+                        title={`${a.name}${studentChecked ? " · Self ✓" : ""}`}
+                        style={{ minWidth: 72, padding: "4px 8px", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 700, cursor: "pointer", background: chipBg, color: chipColor, border: chipBorder, textAlign: "center", position: "relative" }}>
+                        {chipLabel}
+                        {studentChecked && <span aria-hidden="true" style={{ position: "absolute", top: -4, right: -4, width: 8, height: 8, borderRadius: "50%", background: "#2D6A4F", border: "1px solid #fff" }} />}
+                      </button>;
+                    })}
+                  </div>
+                  <button
+                    onClick={() => { setNoteFor(isEN ? null : s.id); setNoteVal(pwaNote || ""); }}
+                    aria-label={`${sName}: ${pwaNote ? "Edit project note" : "Add project note"}`}
+                    style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: pwaNote ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0, width: 70 }}>
+                    {pwaNote ? "✎ Note" : "+ Note"}
+                  </button>
+                </div>
+                {pwaNote && !isEN && <div style={{ padding: "2px 16px 6px 156px", fontFamily: F.b, fontSize: 11, color: "#666", fontStyle: "italic" }}>Note: {pwaNote}</div>}
+                {isEN && <div style={{ padding: "4px 16px 8px 156px", display: "flex", gap: 6 }}>
+                  <input value={noteVal} onChange={e => setNoteVal(e.target.value)} placeholder="Project feedback note..." aria-label={`Feedback note for ${sName}`} autoFocus style={{ flex: 1, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={e => { if (e.key === "Enter") { handleInstrNote(s.id, pwaIds[0], noteVal); setNoteFor(null); } }} />
+                  <button onClick={() => { handleInstrNote(s.id, pwaIds[0], noteVal); setNoteFor(null); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
+                </div>}
+              </div>;
+            })}
+          </div>
+          <div style={{ marginTop: 8, fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#2D6A4F", display: "inline-block", marginRight: 4, verticalAlign: "middle" }} aria-hidden="true" />
+            Green dot = student has self-checked that component
+          </div>
+        </div>}
+
+        {/* ── FINAL PORTFOLIO GROUPED VIEW ── */}
+        {isFpGroup && fpAssignments.length > 0 && <div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ fontFamily: F.d, fontSize: 17, fontWeight: 600 }}>Final Portfolio</span>
+            <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />
+          </div>
+          <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12 }}>
+            Click a warm-up to toggle: <span style={{ background: "#D4EDDA", color: "#2D6A4F", padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>✓</span> Complete ↔ blank
+          </div>
+          <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+            {/* Header row */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", background: "#FAFAF7", borderBottom: "1px solid #E8E6E1" }}>
+              <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#6B6B6B", width: 140, flexShrink: 0 }}>Student</div>
+              <div style={{ display: "flex", gap: 6, flex: 1 }}>
+                {fpAssignments.map(a => (
+                  <div key={a.id} style={{ fontFamily: F.b, fontSize: 10, fontWeight: 600, color: "#6B6B6B", minWidth: 80, textAlign: "center" }}>{a.name}</div>
+                ))}
+              </div>
+              <div style={{ width: 70, flexShrink: 0 }} />
+            </div>
+            {bSorted.map((s, si) => {
+              const sName = sortBy === "last" ? `${s.last}, ${s.first}` : `${s.first} ${s.last}`;
+              const isEN = noteFor === s.id;
+              const fpNote = (iN[s.id] || {})[fpIds[0]];
+              return <div key={s.id} style={{ borderBottom: si < bSorted.length - 1 ? "1px solid #F5F3EF" : "none" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px" }}>
+                  <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, width: 140, flexShrink: 0 }}>{sName}</div>
+                  <div style={{ display: "flex", gap: 6, flex: 1 }}>
+                    {fpAssignments.map(a => {
+                      const st = (iS[s.id] || {})[a.id] || "";
+                      const studentChecked = !!(sC[s.id] || {})[a.id];
+                      const isDone = st === "mastery";
+                      const chipBg = isDone ? "#D4EDDA" : "#F8F7F4";
+                      const chipColor = isDone ? "#2D6A4F" : "#767676";
+                      const chipBorder = isDone ? "2px solid #2D6A4F" : "1px solid #E8E6E1";
+                      const ariaDesc = `${sName}: ${a.name} — ${isDone ? "Complete" : "not marked"}. Click to toggle.${studentChecked ? " Student self-checked." : ""}`;
+                      return <button
+                        key={a.id}
+                        aria-label={ariaDesc}
+                        onClick={() => handleFpChipClick(s.id, a.id)}
+                        title={`${a.name}${studentChecked ? " · Self ✓" : ""}`}
+                        style={{ minWidth: 80, padding: "4px 8px", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 700, cursor: "pointer", background: chipBg, color: chipColor, border: chipBorder, textAlign: "center", position: "relative" }}>
+                        {isDone ? "✓" : "—"}
+                        {studentChecked && <span aria-hidden="true" style={{ position: "absolute", top: -4, right: -4, width: 8, height: 8, borderRadius: "50%", background: "#2D6A4F", border: "1px solid #fff" }} />}
+                      </button>;
+                    })}
+                  </div>
+                  <button
+                    onClick={() => { setNoteFor(isEN ? null : s.id); setNoteVal(fpNote || ""); }}
+                    aria-label={`${sName}: ${fpNote ? "Edit portfolio note" : "Add portfolio note"}`}
+                    style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: fpNote ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0, width: 70 }}>
+                    {fpNote ? "✎ Note" : "+ Note"}
+                  </button>
+                </div>
+                {fpNote && !isEN && <div style={{ padding: "2px 16px 6px 156px", fontFamily: F.b, fontSize: 11, color: "#666", fontStyle: "italic" }}>Note: {fpNote}</div>}
+                {isEN && <div style={{ padding: "4px 16px 8px 156px", display: "flex", gap: 6 }}>
+                  <input value={noteVal} onChange={e => setNoteVal(e.target.value)} placeholder="Portfolio feedback note..." aria-label={`Feedback note for ${sName}`} autoFocus style={{ flex: 1, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={e => { if (e.key === "Enter") { handleInstrNote(s.id, fpIds[0], noteVal); setNoteFor(null); } }} />
+                  <button onClick={() => { handleInstrNote(s.id, fpIds[0], noteVal); setNoteFor(null); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
+                </div>}
+              </div>;
+            })}
+          </div>
+          <div style={{ marginTop: 8, fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#2D6A4F", display: "inline-block", marginRight: 4, verticalAlign: "middle" }} aria-hidden="true" />
+            Green dot = student has self-checked that warm-up
+          </div>
+        </div>}
+
+        {/* ── STANDARD SINGLE-ASSIGNMENT VIEW ── */}
+        {!isPwaGroup && !isFpGroup && ba && <div>
           <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ fontFamily: F.d, fontSize: 17, fontWeight: 600 }}>{ba.name}</span>
             {ba.eval === "mastery" ? <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" /> : <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
