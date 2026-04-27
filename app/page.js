@@ -132,9 +132,9 @@ async function toggleClassPrep(profileId, courseKey, prepId) {
   }
 }
 
-async function submitToken(profileId, courseKey, assignmentId, tokenType, note, link) {
-  await supabase.from('tokens').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, token_type: tokenType, note, link });
-  await supabase.from('feedback_queue').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, token_type: tokenType, note, link });
+async function submitToken(profileId, courseKey, assignmentId, tokenType, note, link, pastDeadline) {
+  await supabase.from('tokens').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, token_type: tokenType, note, link, past_deadline: pastDeadline || false });
+  await supabase.from('feedback_queue').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, token_type: tokenType, note, link, past_deadline: pastDeadline || false });
 }
 
 async function resolveQueueItem(queueId, profileId, courseKey, assignmentId, resolution) {
@@ -505,7 +505,7 @@ export default function App() {
       try {
         const tokenType = isExtra ? 'extra' : tfType;
         const note = isExtra ? `Extra token activity: ${tfExtra.trim()}${tfNote ? ' — ' + tfNote : ''}` : tfNote;
-        await submitToken(myId, ck, modal.id, tokenType, note, tfLink);
+        await submitToken(myId, ck, modal.id, tokenType, note, tfLink, cutoff);
         setModal(null); setTfNote(''); setTfType('revision'); setTfLink(''); setTfExtra('');
         refresh();
       } finally {
@@ -520,7 +520,7 @@ export default function App() {
       if (!grp) return true;
       return grp.ids.find(id => relAssignments.includes(id) && !myChecks[id]) === a.id;
     };
-    const showTokenBtn = (a) => !cutoff && !myChecks[a.id] && relAssignments.includes(a.id) && !(a.tokenGroup && hasGroupToken(a.tokenGroup));
+    const showTokenBtn = (a) => !myChecks[a.id] && relAssignments.includes(a.id) && !(a.tokenGroup && hasGroupToken(a.tokenGroup));
 
     return (
       <div>
@@ -709,7 +709,11 @@ export default function App() {
           {modal && <div role="dialog" aria-modal="true" aria-label="Submit a token" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.3)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }} onClick={() => setModal(null)}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: "24px", maxWidth: 420, width: "90%", boxShadow: "0 12px 40px rgba(0,0,0,.15)" }}>
               <h2 style={{ fontFamily: F.d, fontSize: 18, fontWeight: 600, marginBottom: 4 }}>Submit a Token</h2>
-              <div style={{ fontFamily: F.b, fontSize: 13, color: "#555", marginBottom: 14 }}>{modal.name}</div>
+              <div style={{ fontFamily: F.b, fontSize: 13, color: "#555", marginBottom: cutoff ? 10 : 14 }}>{modal.name}</div>
+              {cutoff && <div role="alert" style={{ background: "#FFF0F0", border: "1px solid #FCDEDE", borderRadius: 8, padding: "10px 12px", marginBottom: 14 }}>
+                <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 700, color: "#C0392B", marginBottom: 2 }}>⚠ Token deadline has passed ({getTokenCutoff(ck)})</div>
+                <div style={{ fontFamily: F.b, fontSize: 11, color: "#7B1A1A", lineHeight: 1.5 }}>You may still submit, but this will be flagged as past the deadline and may not be accepted. Only submit if you have received approval or have extenuating circumstances to share with Dr. Beggs.</div>
+              </div>}
               <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 6 }}>What is this token for?</div>
               <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
                 {[{ v: "revision", l: "I revised this" }, { v: "late", l: "I'm submitting late" }].map(o => <button key={o.v} onClick={() => setTfType(o.v)} style={{ padding: "7px 14px", borderRadius: 6, fontFamily: F.b, fontSize: 11, cursor: "pointer", background: tfType === o.v ? c.color : "#fff", color: tfType === o.v ? "#fff" : "#555", border: tfType === o.v ? `1px solid ${c.color}` : "1px solid #E0DDD8", flex: 1, textAlign: "center" }}>{o.l}</button>)}
@@ -719,9 +723,9 @@ export default function App() {
                 <input value={tfExtra} onChange={e => setTfExtra(e.target.value)} placeholder="Which extra token activity did you complete?" aria-label="Extra token activity completed on Brightspace" aria-required="true" style={{ width: "100%", padding: "8px 12px", border: tfExtra.trim() ? "1px solid #E0DDD8" : "1px solid #FFECB5", borderRadius: 6, fontFamily: F.b, fontSize: 12, boxSizing: "border-box", background: "#fff" }} />
               </div>}
               <input value={tfLink} onChange={e => setTfLink(e.target.value)} placeholder="Paste a link to your work (Google Doc, Slides, Canva, etc.)" aria-label="Link to your work" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 8, boxSizing: "border-box" }} />
-              <input value={tfNote} onChange={e => setTfNote(e.target.value)} placeholder="Note for Dr. Beggs (optional)" aria-label="Note for Dr. Beggs" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 14, boxSizing: "border-box" }} />
+              <input value={tfNote} onChange={e => setTfNote(e.target.value)} placeholder={cutoff ? "Explain your circumstances (recommended)" : "Note for Dr. Beggs (optional)"} aria-label={cutoff ? "Explanation for late submission past deadline" : "Note for Dr. Beggs"} style={{ width: "100%", padding: "8px 12px", border: cutoff ? "1px solid #FCDEDE" : "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 14, boxSizing: "border-box" }} />
               <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={handleToken} disabled={tfSubmitting || (tok.freeExhausted && !tfExtra.trim())} style={{ padding: "8px 18px", background: (tfSubmitting || (tok.freeExhausted && !tfExtra.trim())) ? "#E0DDD8" : c.color, color: "#fff", border: "none", borderRadius: 6, cursor: (tfSubmitting || (tok.freeExhausted && !tfExtra.trim())) ? "not-allowed" : "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600 }}>{tfSubmitting ? "Submitting..." : "Submit Token"}</button>
+                <button onClick={handleToken} disabled={tfSubmitting || (tok.freeExhausted && !tfExtra.trim())} style={{ padding: "8px 18px", background: (tfSubmitting || (tok.freeExhausted && !tfExtra.trim())) ? "#E0DDD8" : cutoff ? "#C0392B" : c.color, color: "#fff", border: "none", borderRadius: 6, cursor: (tfSubmitting || (tok.freeExhausted && !tfExtra.trim())) ? "not-allowed" : "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600 }}>{tfSubmitting ? "Submitting..." : cutoff ? "Submit Past Deadline" : "Submit Token"}</button>
                 <button onClick={() => setModal(null)} style={{ padding: "8px 14px", background: "#F0EEEA", color: "#6B6B6B", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 12 }}>Cancel</button>
               </div>
               <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 8 }}>{tok.freeExhausted ? "Requires completion of an extra token activity on Brightspace." : `Uses 1 of your ${tok.avail} free token${tok.avail !== 1 ? "s" : ""}.`}</div>
@@ -1866,6 +1870,7 @@ export default function App() {
                     <div style={{ flex: 1 }}>
                       <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}><strong>{item.sName}</strong> — {a?.name || item.assignment_id}</div>
                       <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{item.token_type === "extra" ? <><strong style={{ color: "#856404" }}>Extra token</strong></> : item.token_type === "late" ? "Late submission" : "Revision"} · {new Date(item.submitted_at).toLocaleDateString()}{item.note ? ` · "${item.note}"` : ""}</div>
+                      {item.past_deadline && <div style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 3, padding: "2px 7px", background: "#FFF0F0", border: "1px solid #FCDEDE", borderRadius: 4, fontFamily: F.b, fontSize: 10, fontWeight: 700, color: "#C0392B" }} aria-label="Submitted past the token deadline">⚠ Past deadline</div>}
                       {item.link && <a href={item.link} target="_blank" rel="noopener noreferrer" style={{ fontFamily: F.b, fontSize: 11, color: "#1565C0", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 3, marginTop: 2 }} onMouseEnter={e => e.currentTarget.style.textDecoration = "underline"} onMouseLeave={e => e.currentTarget.style.textDecoration = "none"}>🔗 View submission</a>}
                     </div>
                     {item.resolved && <Pill t={`→ ${item.resolution}`} bg={item.resolution === "M" ? "#D4EDDA" : "#FFF3CD"} c={item.resolution === "M" ? "#2D6A4F" : "#856404"} />}
