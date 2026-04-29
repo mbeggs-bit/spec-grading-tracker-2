@@ -2168,7 +2168,7 @@ export default function App() {
               })}
               {filtered.length === 0 && <div style={{ padding: "18px", textAlign: "center", fontFamily: F.b, fontSize: 11, color: "#767676" }}>{queueFilter === "resolved" ? "No resolved tokens yet." : "No submissions yet."}</div>}
             </div>;
-          })()}          })()}
+          })()}
         </div>}
 
         {/* TRACKS */}
