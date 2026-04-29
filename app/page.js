@@ -254,6 +254,7 @@ export default function App() {
   const [editDue, setEditDue] = useState(null);
   const [editDueVal, setEditDueVal] = useState('');
   const [queueFilter, setQueueFilter] = useState('pending');
+  const [queueChipOverrides, setQueueChipOverrides] = useState({}); // { [queueItemId]: { [assignmentId]: status } }
   const [tokExpand, setTokExpand] = useState(null);
   const [tokSearch, setTokSearch] = useState('');
   const [gridSearch, setGridSearch] = useState('');
@@ -1044,7 +1045,17 @@ export default function App() {
     refresh();
   };
   const handleResolve = async (qId, pid, aid, res) => {
-    await resolveQueueItem(qId, pid, ck, aid, res);
+    const tokenGroupDef = c.tokenGroups?.[aid];
+    const groupIds = tokenGroupDef?.ids;
+    if (groupIds?.length) {
+      await supabase.from('feedback_queue').update({ resolved: true, resolution: res, resolved_at: new Date().toISOString() }).eq('id', qId);
+      const status = res === 'M' ? 'mastery' : 'revision';
+      for (const componentId of groupIds) {
+        await upsertInstrStatus(pid, ck, componentId, status);
+      }
+    } else {
+      await resolveQueueItem(qId, pid, ck, aid, res);
+    }
     refresh();
   };
   const handleReturn = async (qId, pid, aid) => {
@@ -2089,6 +2100,28 @@ export default function App() {
             return <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
               {filtered.map((item, i) => {
                 const a = c.assignments.find(x => x.id === item.assignment_id) || (c.tokenGroups || {})[item.assignment_id];
+                // Detect if this is a token group submission (e.g. PwA submitted as "pwa")
+                const qTokenGroup = c.tokenGroups?.[item.assignment_id];
+                const qGroupIds = qTokenGroup?.ids || [];
+                const qGroupAssignments = qGroupIds.map(id => c.assignments.find(x => x.id === id)).filter(Boolean);
+                const isGroupToken = qGroupAssignments.length > 0;
+                // Chip state: overrides take priority, then fall back to saved iS for this student
+                const chipState = queueChipOverrides[item.id] || {};
+                const getChipStatus = (aid) => aid in chipState ? chipState[aid] : ((iS[item.profile_id] || {})[aid] || "");
+                const setChipStatus = (aid, next) => setQueueChipOverrides(prev => ({ ...prev, [item.id]: { ...(prev[item.id] || {}), [aid]: next } }));
+                const cycleChip = (aid) => { const cur = getChipStatus(aid); setChipStatus(aid, cur === "" ? "mastery" : cur === "mastery" ? "revision" : ""); };
+                // Resolution: M if all components mastered, R otherwise
+                const resolveGroupToken = async () => {
+                  const allMastered = qGroupAssignments.every(ga => getChipStatus(ga.id) === "mastery");
+                  const res = allMastered ? "M" : "R";
+                  await supabase.from("feedback_queue").update({ resolved: true, resolution: res, resolved_at: new Date().toISOString() }).eq("id", item.id);
+                  for (const ga of qGroupAssignments) {
+                    const st = getChipStatus(ga.id);
+                    await upsertInstrStatus(item.profile_id, ck, ga.id, st === "" ? null : st);
+                  }
+                  setQueueChipOverrides(prev => { const n = { ...prev }; delete n[item.id]; return n; });
+                  refresh();
+                };
                 return <div key={item.id} style={{ padding: "12px 16px", borderBottom: i < filtered.length - 1 ? "1px solid #F5F3EF" : "none", opacity: item.resolved ? .7 : 1, background: item.resolved ? "#FAFAF7" : "transparent" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: item.resolved ? 0 : 8 }}>
                     <div aria-label={item.token_type === "extra" ? "Extra token" : item.token_type === "late" ? "Late submission token" : "Revision token"} style={{ width: 26, height: 26, borderRadius: 6, background: item.token_type === "extra" ? "#FFFCF5" : item.token_type === "late" ? "#F3E8FF" : "#FFF3CD", border: item.token_type === "extra" ? "1px solid #FFECB5" : "none", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0 }}>{item.token_type === "extra" ? "✦" : item.token_type === "late" ? "📥" : "↻"}</div>
@@ -2100,7 +2133,30 @@ export default function App() {
                     </div>
                     {item.resolved && <Pill t={`→ ${item.resolution}`} bg={item.resolution === "M" ? "#D4EDDA" : "#FFF3CD"} c={item.resolution === "M" ? "#2D6A4F" : "#856404"} />}
                   </div>
-                  {!item.resolved && <div style={{ display: "flex", gap: 6, marginLeft: 36 }}>
+                  {/* Group token (PwA): inline component chips + single Resolve button */}
+                  {!item.resolved && isGroupToken && <div style={{ marginLeft: 36 }}>
+                    <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 6 }}>Mark which components were mastered, then resolve:</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                      {qGroupAssignments.map(ga => {
+                        const st = getChipStatus(ga.id);
+                        const shortName = ga.name.replace("Individual Analysis", "Analysis").replace("Data Chart", "Chart").replace("Follow-Up Lesson Outline", "Follow-Up");
+                        const chipBg = st === "mastery" ? "#D4EDDA" : st === "revision" ? "#FFF3CD" : "#F8F7F4";
+                        const chipColor = st === "mastery" ? "#2D6A4F" : st === "revision" ? "#856404" : "#767676";
+                        const chipBorder = st === "mastery" ? "2px solid #2D6A4F" : st === "revision" ? "2px solid #856404" : "1px solid #E8E6E1";
+                        const chipLabel = st === "mastery" ? "M" : st === "revision" ? "R" : "—";
+                        return <button key={ga.id} onClick={() => cycleChip(ga.id)} aria-label={`${ga.name}: ${st === "mastery" ? "Mastered" : st === "revision" ? "Revise" : "not graded"}. Click to change.`} style={{ padding: "5px 10px", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 700, cursor: "pointer", background: chipBg, color: chipColor, border: chipBorder, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+                          <span style={{ fontSize: 10, fontWeight: 400 }}>{shortName}</span>
+                          <span>{chipLabel}</span>
+                        </button>;
+                      })}
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={resolveGroupToken} style={{ padding: "6px 14px", background: "#2D6A4F", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontFamily: F.b, fontSize: 11, fontWeight: 600 }}>Resolve</button>
+                      <button onClick={() => handleReturn(item.id, item.profile_id, item.assignment_id)} style={{ padding: "6px 10px", background: "#fff", color: "#C0392B", border: "1px solid #F5B7B7", borderRadius: 5, cursor: "pointer", fontFamily: F.b, fontSize: 11, fontWeight: 600 }}>Return Token</button>
+                    </div>
+                  </div>}
+                  {/* Standard single-assignment token */}
+                  {!item.resolved && !isGroupToken && <div style={{ display: "flex", gap: 6, marginLeft: 36 }}>
                     <button onClick={() => handleResolve(item.id, item.profile_id, item.assignment_id, "M")} style={{ padding: "6px 14px", background: "#2D6A4F", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontFamily: F.b, fontSize: 11, fontWeight: 600 }}>Reviewed → Mastered</button>
                     <button onClick={() => handleResolve(item.id, item.profile_id, item.assignment_id, "R")} style={{ padding: "6px 14px", background: "#fff", color: "#856404", border: "1px solid #FFECB5", borderRadius: 5, cursor: "pointer", fontFamily: F.b, fontSize: 11, fontWeight: 600 }}>Reviewed → Still Needs Revision</button>
                     <button onClick={() => handleReturn(item.id, item.profile_id, item.assignment_id)} style={{ padding: "6px 10px", background: "#fff", color: "#C0392B", border: "1px solid #F5B7B7", borderRadius: 5, cursor: "pointer", fontFamily: F.b, fontSize: 11, fontWeight: 600 }}>Return Token</button>
@@ -2112,7 +2168,7 @@ export default function App() {
               })}
               {filtered.length === 0 && <div style={{ padding: "18px", textAlign: "center", fontFamily: F.b, fontSize: 11, color: "#767676" }}>{queueFilter === "resolved" ? "No resolved tokens yet." : "No submissions yet."}</div>}
             </div>;
-          })()}
+          })()}          })()}
         </div>}
 
         {/* TRACKS */}
