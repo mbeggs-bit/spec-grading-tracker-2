@@ -202,6 +202,25 @@ async function removeTeachingSelection(profileId, courseKey, assignmentId) {
   await supabase.from('teaching_selections').delete().match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId });
 }
 
+async function addTeachingDate(courseKey, assignmentId, teachDate) {
+  const { error } = await supabase.from('teaching_dates').insert({ course_key: courseKey, assignment_id: assignmentId, teach_date: teachDate });
+  return !error;
+}
+
+// NOTE (Fall 2026): Dates are stored per section code (MATH4850LS / MATH4850WB) and entered
+// separately for each section. If dates never differ between sections, consider storing them
+// under the parent course key ('ECEL 4850') and loading by parent key instead — that would
+// eliminate the need to enter dates twice. Revisit after Fall 2026.
+async function updateTeachingDate(courseKey, assignmentId, oldDate, newDate) {
+  const planDue = new Date(newDate);
+  planDue.setDate(planDue.getDate() - 3);
+  const planDueStr = planDue.toISOString().slice(0, 10);
+  // Update the teaching_dates row
+  await supabase.from('teaching_dates').update({ teach_date: newDate }).match({ course_key: courseKey, assignment_id: assignmentId, teach_date: oldDate });
+  // Cascade update to any student selections using the old date so their plan due date stays correct
+  await supabase.from('teaching_selections').update({ teach_date: newDate, plan_due_date: planDueStr }).match({ course_key: courseKey, assignment_id: assignmentId, teach_date: oldDate });
+}
+
 /* ================================================================
    TINY COMPONENTS
    ================================================================ */
@@ -264,6 +283,9 @@ export default function App() {
   const [teachSearch, setTeachSearch] = useState('');
   const [sectionFilter, setSectionFilter] = useState('all');
   const [editDueDate, setEditDueDate] = useState('');
+  const [editTeachDate, setEditTeachDate] = useState(null); // { aid, date } — which date row is being edited
+  const [editTeachDateVal, setEditTeachDateVal] = useState('');
+  const [newTeachDate, setNewTeachDate] = useState({}); // { [aid]: 'YYYY-MM-DD' } — add-date inputs per lesson
   const [expScheduled, setExpScheduled] = useState(false);
   const [expStudents, setExpStudents] = useState(true);
   const [expStruggles, setExpStruggles] = useState(true);
@@ -1518,6 +1540,65 @@ export default function App() {
               </div>;
             })}
           </div>
+          </>}
+
+          {c.assignments.some(a => a.id === 'les1') && <>
+          <Lbl s={{ marginTop: 20 }}>Teaching Dates</Lbl>
+          <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12, lineHeight: 1.5, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
+            Dates when TCs may teach their lesson. Students pick from these dates; their lesson plan is due 3 days before their chosen date. Enter dates for this section — if both sections always share the same dates, this could be simplified in a future update.
+          </div>
+          {['les1', 'les2'].map(aid => {
+            const a = c.assignments.find(x => x.id === aid);
+            if (!a) return null;
+            const dates = teachDates.filter(td => td.assignment_id === aid);
+            return <div key={aid} style={{ marginBottom: 14 }}>
+              <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: c.color, marginBottom: 4 }}>{a.name}</div>
+              <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+                {dates.length === 0 && <div style={{ padding: "12px 16px", fontFamily: F.b, fontSize: 11, color: "#767676" }}>No dates added yet.</div>}
+                {dates.map((td, i) => {
+                  const isEditing = editTeachDate?.aid === aid && editTeachDate?.date === td.teach_date;
+                  return <div key={td.teach_date} style={{ borderBottom: "1px solid #F5F3EF" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px" }}
+                      onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                      <div style={{ flex: 1, fontFamily: F.b, fontSize: 12 }}>
+                        {new Date(td.teach_date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                      </div>
+                      <button onClick={() => { setEditTeachDate(isEditing ? null : { aid, date: td.teach_date }); setEditTeachDateVal(td.teach_date); }}
+                        aria-label={`Edit teaching date ${td.teach_date} for ${a.name}`}
+                        style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#856404", cursor: "pointer", background: "#fff", flexShrink: 0 }}>
+                        ✎ Edit
+                      </button>
+                    </div>
+                    {isEditing && <div style={{ padding: "4px 16px 10px 16px", display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                      <input type="date" value={editTeachDateVal} onChange={e => setEditTeachDateVal(e.target.value)}
+                        aria-label={`New date for ${a.name} teaching date`}
+                        autoFocus
+                        style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
+                      <button onClick={async () => {
+                        if (!editTeachDateVal) return;
+                        await updateTeachingDate(ck, aid, td.teach_date, editTeachDateVal);
+                        setEditTeachDate(null);
+                        refresh();
+                      }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
+                      <button onClick={() => setEditTeachDate(null)}
+                        style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Cancel</button>
+                    </div>}
+                  </div>;
+                })}
+                <div style={{ padding: "10px 16px", borderTop: dates.length > 0 ? "1px solid #F5F3EF" : "none", display: "flex", gap: 6, alignItems: "center" }}>
+                  <input type="date" value={newTeachDate[aid] || ''} onChange={e => setNewTeachDate(prev => ({ ...prev, [aid]: e.target.value }))}
+                    aria-label={`New teaching date to add for ${a.name}`}
+                    style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
+                  <button onClick={async () => {
+                    const d = newTeachDate[aid];
+                    if (!d) return;
+                    const ok = await addTeachingDate(ck, aid, d);
+                    if (ok) { setNewTeachDate(prev => ({ ...prev, [aid]: '' })); refresh(); }
+                  }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>+ Add Date</button>
+                </div>
+              </div>
+            </div>;
+          })}
           </>}
         </div>}
         {tab === "queue" && <div>
