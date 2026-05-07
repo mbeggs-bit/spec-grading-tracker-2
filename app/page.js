@@ -101,9 +101,9 @@ async function loadFeedbackQueue(courseKey) {
 // WRITE OPERATIONS
 async function upsertInstrStatus(profileId, courseKey, assignmentId, status) {
   if (!status) {
-    await supabase.from('instructor_statuses').delete().match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId });
+    return await supabase.from('instructor_statuses').delete().match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId });
   } else {
-    await supabase.from('instructor_statuses').upsert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, status, updated_at: new Date().toISOString() }, { onConflict: 'profile_id,course_key,assignment_id' });
+    return await supabase.from('instructor_statuses').upsert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, status, updated_at: new Date().toISOString() }, { onConflict: 'profile_id,course_key,assignment_id' });
   }
 }
 
@@ -275,6 +275,12 @@ export default function App() {
   const [expTokens, setExpTokens] = useState(false);
   const [expPrep, setExpPrep] = useState(false);
   const [expTeach, setExpTeach] = useState(true);
+  const [toast, setToast] = useState(null); // { msg, type }
+
+  const showToast = (msg, type = 'error') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 4000);
+  };
 
   // Check auth on mount
   useEffect(() => {
@@ -836,8 +842,21 @@ export default function App() {
   const pending = fq.filter(f => !f.resolved);
 
   const handleInstrUpdate = async (pid, aid, val) => {
-    await upsertInstrStatus(pid, ck, aid, val);
-    refresh();
+    // Optimistic update — reflect immediately in UI
+    const prevIS = courseData.iS;
+    setCourseData(prev => {
+      const prevStudent = prev.iS[pid] || {};
+      const updatedStudent = val === null
+        ? Object.fromEntries(Object.entries(prevStudent).filter(([k]) => k !== aid))
+        : { ...prevStudent, [aid]: val };
+      return { ...prev, iS: { ...prev.iS, [pid]: updatedStudent } };
+    });
+    // Background DB write — roll back on failure
+    const { error } = await upsertInstrStatus(pid, ck, aid, val);
+    if (error) {
+      setCourseData(prev => ({ ...prev, iS: prevIS }));
+      showToast('Failed to save — please try again.');
+    }
   };
   const handleInstrNote = async (pid, aid, note) => {
     await upsertInstrNote(pid, ck, aid, note);
@@ -858,8 +877,25 @@ export default function App() {
     }
   };
   const markAllInstr = async (aid, val) => {
-    for (const s of students) { await upsertInstrStatus(s.id, ck, aid, val); }
-    refresh();
+    // Optimistic update — apply to all students at once
+    const prevIS = courseData.iS;
+    setCourseData(prev => {
+      const updatedIS = { ...prev.iS };
+      students.forEach(s => {
+        const prevStudent = updatedIS[s.id] || {};
+        updatedIS[s.id] = val === null
+          ? Object.fromEntries(Object.entries(prevStudent).filter(([k]) => k !== aid))
+          : { ...prevStudent, [aid]: val };
+      });
+      return { ...prev, iS: updatedIS };
+    });
+    // Parallel DB writes — roll back if any fail
+    const results = await Promise.all(students.map(s => upsertInstrStatus(s.id, ck, aid, val)));
+    const anyError = results.some(r => r?.error);
+    if (anyError) {
+      setCourseData(prev => ({ ...prev, iS: prevIS }));
+      showToast('Some saves failed — please try again.');
+    }
   };
 
   // Section filtering — null-safe for Spring 2026 courses
@@ -1027,6 +1063,11 @@ export default function App() {
   return (
     <div>
       <a href="#main-content" className="skip-link">Skip to main content</a>
+      {toast && (
+        <div role="alert" aria-live="assertive" style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", zIndex: 1000, background: "#C0392B", color: "#fff", fontFamily: F.b, fontSize: 13, fontWeight: 600, padding: "10px 20px", borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,.18)", pointerEvents: "none" }}>
+          {toast.msg}
+        </div>
+      )}
       <header style={{ borderBottom: "1px solid #E8E6E1", background: "#fff", position: "sticky", top: 0, zIndex: 10 }}>
         <div style={{ maxWidth: 1100, margin: "0 auto", padding: "10px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1336,7 +1377,10 @@ export default function App() {
                 <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sortBy === "last" ? `${s.last}, ${s.first}` : s.name}</div>
                 <div style={{ flex: 1, display: "flex", gap: 3 }}>
                   {relAssignments.map(id => { const st = (iS[s.id] || {})[id] || "";
-                    return <div key={id} title={c.assignments.find(a => a.id === id)?.name} style={{ flex: 1, minWidth: 28, maxWidth: 40, height: 22, borderRadius: 4, background: st === "mastery" ? "#D4EDDA" : st === "revision" ? "#FFF3CD" : "#F5F4F0", border: !st ? "1.5px dashed #E8E6E1" : "1.5px solid transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: st === "mastery" ? "#2D6A4F" : st === "revision" ? "#856404" : "transparent" }}>{st === "mastery" ? "M" : st === "revision" ? "R" : ""}</div>;
+                    const aName = c.assignments.find(a => a.id === id)?.name || id;
+                    const nextVal = st === "" ? "mastery" : st === "mastery" ? "revision" : null;
+                    const cycleLabel = st === "" ? `Mark ${aName} mastered` : st === "mastery" ? `Change ${aName} to needs revision` : `Clear ${aName}`;
+                    return <button key={id} title={aName} aria-label={cycleLabel} onClick={() => handleInstrUpdate(s.id, id, nextVal)} style={{ flex: 1, minWidth: 28, maxWidth: 40, height: 22, borderRadius: 4, background: st === "mastery" ? "#D4EDDA" : st === "revision" ? "#FFF3CD" : "#F5F4F0", border: !st ? "1.5px dashed #E8E6E1" : "1.5px solid transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: st === "mastery" ? "#2D6A4F" : st === "revision" ? "#856404" : "transparent", cursor: "pointer", padding: 0 }}>{st === "mastery" ? "M" : st === "revision" ? "R" : ""}</button>;
                   })}
                 </div>
                 <div style={{ width: 50, flexShrink: 0, textAlign: "right", fontFamily: F.b, fontSize: 11, color: mm ? "#E65100" : "#767676" }}>{sg === "early" ? "—" : sg}{mm ? " ⚠" : ""}</div>
