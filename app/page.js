@@ -405,7 +405,13 @@ export default function App() {
       await supabase.from('profiles').insert({ id: authId, email, first_name: signupFirst.trim(), last_name: signupLast.trim(), role: 'student' });
       // Create enrollment with section if course code has one
       await supabase.from('enrollments').insert({ profile_id: authId, course_key: courseCode.course_key, section: courseCode.section || null });
-    } else if (existingProfile.id !== authId) {
+    } else if (existingProfile.id === authId) {
+      // Returning student from another course — add enrollment for this course if not already enrolled
+      const existingEnrollments = await loadEnrollments(authId);
+      if (!existingEnrollments.includes(courseCode.course_key)) {
+        await supabase.from('enrollments').insert({ profile_id: authId, course_key: courseCode.course_key, section: courseCode.section || null });
+      }
+    } else {
       // Profile exists but with wrong ID — this shouldn't happen with new flow but just in case
       setLoginErr('Account issue — contact Dr. Beggs.');
       return;
@@ -700,7 +706,7 @@ export default function App() {
                       <div style={{ flex: 1 }}>
                         <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, color: isChecked ? "#767676" : "#1A1A1A", textDecoration: isChecked ? "line-through" : "none", textDecorationColor: "#DDD" }}>{a.name}</span>
                         {(dueDates[a.id]?.date || dueDates[a.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 11, color: isChecked ? "#767676" : "#6B6B6B", marginTop: 1 }}>{dueDates[a.id].date ? new Date(dueDates[a.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[a.id].date && dueDates[a.id].label ? ' · ' : ''}{dueDates[a.id].label || ''}</div>}
-                        {isMastery && instrStatus && !isChecked && <div style={{ fontFamily: F.b, fontSize: 11, color: isRevision ? "#856404" : "#2D6A4F", marginTop: 2 }}>{isRevision ? "Dr. Beggs has left feedback — revision needed" : "Dr. Beggs has left feedback — you've met the specs!"}</div>}
+                        {isMastery && instrStatus && !isChecked && <div style={{ fontFamily: F.b, fontSize: 11, color: isRevision ? "#856404" : "#2D6A4F", marginTop: 2 }}>{"Dr. Beggs has left you feedback — please review it before checking off"}</div>}
                       </div>
                       {isMastery && <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />}
                       {a.eval === "completion" && <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
