@@ -298,6 +298,7 @@ export default function App() {
   const [expPrep, setExpPrep] = useState(false);
   const [expTeach, setExpTeach] = useState(true);
   const [toast, setToast] = useState(null); // { msg, type }
+  const [previewStudent, setPreviewStudent] = useState(null); // { id, name } — instructor preview of student view
 
   const showToast = (msg, type = 'error') => {
     setToast({ msg, type });
@@ -1402,7 +1403,7 @@ export default function App() {
               const m = TM[ig] || TM.F; const mm = ig !== sg && ig !== "early" && sg !== "early";
               return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < sorted.length - 1 ? "1px solid #F5F3EF" : "none", background: mm ? "#FFF8F0" : "transparent" }}>
                 <div style={{ width: 22, height: 22, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 11, fontWeight: 700, color: m.c, flexShrink: 0 }}>{ig === "early" ? "—" : ig}</div>
-                <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sortBy === "last" ? `${s.last}, ${s.first}` : s.name}</div>
+                <button onClick={() => setPreviewStudent({ id: s.id, name: s.name })} aria-label={`Preview ${s.name}'s student view`} style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1565C0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", background: "none", border: "none", cursor: "pointer", textAlign: "left", padding: 0, textDecoration: "underline", textDecorationStyle: "dotted", textUnderlineOffset: 2 }}>{sortBy === "last" ? `${s.last}, ${s.first}` : s.name}</button>
                 <div style={{ flex: 1, display: "flex", gap: 3 }}>
                   {relAssignments.map(id => { const st = (iS[s.id] || {})[id] || "";
                     const aName = c.assignments.find(a => a.id === id)?.name || id;
@@ -1672,6 +1673,111 @@ export default function App() {
           </div>
         </div>}
       </main>
+
+      {/* Student Preview Modal */}
+      {previewStudent && (() => {
+        const ps = previewStudent;
+        const pvChecks = sC[ps.id] || {};
+        const pvInstrSt = iS[ps.id] || {};
+        const pvToks = toks[ps.id] || [];
+        const pvGrade = calcStudentGrade(pvChecks, pvInstrSt, relAssignments, ck, dueDates);
+        const { target: pvTarget, blockers: pvBlockers } = getBlockers(pvChecks, relAssignments, ck, pvInstrSt, dueDates);
+        const pvTok = tokBal(pvToks.length, 0);
+        return (
+          <div role="dialog" aria-modal="true" aria-label={`Student view preview: ${ps.name}`}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 200, overflowY: "auto", padding: "20px 16px" }}
+            onClick={() => setPreviewStudent(null)}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#F7F6F2", borderRadius: 14, width: "100%", maxWidth: 680, boxShadow: "0 16px 48px rgba(0,0,0,.2)", overflow: "hidden", marginBottom: 20 }}>
+              {/* Preview header banner */}
+              <div style={{ background: "#1A1A2E", padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontFamily: F.b, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: "#A0AEC0" }}>Preview</span>
+                  <span style={{ width: 1, height: 12, background: "#4A5568" }} aria-hidden="true" />
+                  <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: "#fff" }}>{ps.name}</span>
+                  <span style={{ fontFamily: F.b, fontSize: 11, color: "#718096", marginLeft: 2 }}>— student view (read-only)</span>
+                </div>
+                <button onClick={() => setPreviewStudent(null)} aria-label="Close student preview" style={{ background: "none", border: "none", cursor: "pointer", color: "#A0AEC0", fontSize: 18, lineHeight: 1, padding: "0 4px" }}>✕</button>
+              </div>
+
+              {/* Simulated student view */}
+              <div style={{ padding: "20px 20px 24px" }}>
+                {/* Grade card */}
+                <div style={{ background: "#fff", border: `2px solid ${(TM[pvGrade] || TM.F).c}`, borderRadius: 14, padding: "20px", marginBottom: 16 }}>
+                  <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+                    <GradeRing grade={pvGrade} size={50} label={`${ps.name}'s grade track: ${pvGrade}`} />
+                    <div style={{ flex: 1, minWidth: 160 }}>
+                      <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "#6B6B6B", marginBottom: 2 }}>
+                        {pvGrade === "early" ? "Status" : pvGrade === "F" ? "Current Track" : "On Track For"}
+                      </div>
+                      <div style={{ fontFamily: F.d, fontSize: 20, fontWeight: 700, color: (TM[pvGrade] || TM.F).c }}>
+                        {pvGrade === "early" ? "Getting Started" : pvGrade === "F" ? "Check off assignments to build your track" : `${pvGrade} Track`}
+                      </div>
+                      <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{relAssignments.filter(id => pvChecks[id]).length} of {relAssignments.length} checked off</div>
+                    </div>
+                    <div style={{ textAlign: "center", padding: "6px 12px", background: "#F9F8F5", borderRadius: 8 }}>
+                      <div style={{ display: "flex", gap: 3, justifyContent: "center", marginBottom: 3 }} aria-hidden="true">
+                        {Array.from({ length: pvTok.total }).map((_, i) => <div key={i} style={{ width: 12, height: 12, borderRadius: "50%", background: i < pvTok.avail ? "#CF202E" : "#E0DDD8" }} />)}
+                      </div>
+                      <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{pvTok.avail} token{pvTok.avail !== 1 ? "s" : ""}</div>
+                    </div>
+                  </div>
+                  {pvTarget && pvBlockers.length > 0 && <div style={{ marginTop: 12, padding: "10px 14px", background: "#FFFCF5", borderRadius: 8, borderLeft: `3px solid ${(TM[pvTarget] || TM.F).c}` }}>
+                    <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: (TM[pvTarget] || TM.F).c, marginBottom: 3 }}>To reach {pvTarget} track:</div>
+                    <div style={{ fontFamily: F.b, fontSize: 12, color: "#666", lineHeight: 1.6 }}>
+                      {pvBlockers.map((id, i) => { const a = c.assignments.find(x => x.id === id); return <span key={id}>{i > 0 ? " · " : ""}<strong>{a?.name || id}</strong>{a?.eval === "mastery" ? <span style={{ fontSize: 11, color: "#C0392B", marginLeft: 2 }}>(mastery)</span> : <span style={{ fontSize: 11, color: "#1565C0", marginLeft: 2 }}>(completion)</span>}</span>; })}
+                    </div>
+                  </div>}
+                  {pvGrade === "early" && <div style={{ marginTop: 10, padding: "10px 14px", background: "#F3F4F6", borderRadius: 8, fontFamily: F.b, fontSize: 12, color: "#6B7280" }}>Check off your first assignment to see your grade track!</div>}
+                  {pvGrade === "A" && <div style={{ marginTop: 10, padding: "10px 14px", background: "#D4EDDA", borderRadius: 8, fontFamily: F.b, fontSize: 12, color: "#2D6A4F" }}>You're on the highest track — keep it up!</div>}
+                </div>
+
+                {/* Assignment checklist — read-only */}
+                <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 10 }}>Assignment status as this student sees it.</div>
+                {c.groups.map((grp, gi) => {
+                  const grpA = grp.ids.map(id => c.assignments.find(a => a.id === id)).filter(Boolean);
+                  return <div key={gi} style={{ marginBottom: 12 }}>
+                    {grp.name && <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: c.color, marginBottom: 5, padding: "0 4px" }}>{grp.name}</div>}
+                    <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+                      {grpA.map((a, i) => {
+                        const isChecked = !!pvChecks[a.id];
+                        const isMastery = a.eval === "mastery";
+                        const pvInstr = pvInstrSt[a.id];
+                        const isLocked = isMastery && !pvInstr;
+                        const isRevision = pvInstr === "revision";
+
+                        if (isLocked) return <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderBottom: i < grpA.length - 1 ? "1px solid #F5F3EF" : "none" }}>
+                          <div aria-hidden="true" style={{ width: 22, height: 22, borderRadius: 6, border: "2px solid #E0DDD8", background: "#F5F4F0", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                            <span style={{ fontSize: 10, color: "#B0ADA8" }}>🔒</span>
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <span style={{ fontFamily: F.b, fontSize: 13, color: "#555" }}>{a.name}</span>
+                            {(dueDates[a.id]?.date || dueDates[a.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{dueDates[a.id].date ? new Date(dueDates[a.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[a.id].date && dueDates[a.id].label ? ' · ' : ''}{dueDates[a.id].label || ''}</div>}
+                            <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 2, fontStyle: "italic" }}>Awaiting review from Dr. Beggs</div>
+                          </div>
+                          <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />
+                        </div>;
+
+                        return <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderBottom: i < grpA.length - 1 ? "1px solid #F5F3EF" : "none" }}>
+                          <div aria-hidden="true" style={{ width: 22, height: 22, borderRadius: 6, border: isChecked ? "none" : "2px solid #D0CEC9", background: isChecked ? "#CF202E" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                            {isChecked && <span style={{ color: "#fff", fontSize: 13, fontWeight: 700 }}>✓</span>}
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, color: isChecked ? "#767676" : "#1A1A1A", textDecoration: isChecked ? "line-through" : "none", textDecorationColor: "#DDD" }}>{a.name}</span>
+                            {(dueDates[a.id]?.date || dueDates[a.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 11, color: isChecked ? "#767676" : "#6B6B6B", marginTop: 1 }}>{dueDates[a.id].date ? new Date(dueDates[a.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[a.id].date && dueDates[a.id].label ? ' · ' : ''}{dueDates[a.id].label || ''}</div>}
+                            {isMastery && pvInstr && !isChecked && <div style={{ fontFamily: F.b, fontSize: 11, color: isRevision ? "#856404" : "#2D6A4F", marginTop: 2 }}>Dr. Beggs has left you feedback — please review it before checking off</div>}
+                          </div>
+                          {isMastery && <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />}
+                          {a.eval === "completion" && <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
+                        </div>;
+                      })}
+                    </div>
+                  </div>;
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
