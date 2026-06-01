@@ -390,9 +390,31 @@ export default function App() {
     
     // Create the auth account
     const { error } = await supabase.auth.signUp({ email, password: loginPass });
-    if (error) { setLoginErr(error.message); return; }
     
-    // Sign in immediately
+    // If already registered, try signing in with the provided password instead of showing an error.
+    // This handles returning students who were in a previous course and are joining a new one.
+    if (error) {
+      if (error.message.includes('already registered') || error.message.includes('already been registered') || error.message.includes('User already registered')) {
+        const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({ email, password: loginPass });
+        if (signInErr) {
+          // Password was wrong — give a clear, actionable message
+          setLoginErr('You already have a Lumos account. Please use "Already have an account? Sign in" and enter your existing password.');
+          return;
+        }
+        // Sign-in succeeded — fall through to enrollment logic below
+        const authId = signInData.user.id;
+        const existingEnrollments = await loadEnrollments(authId);
+        if (!existingEnrollments.includes(courseCode.course_key)) {
+          await supabase.from('enrollments').insert({ profile_id: authId, course_key: courseCode.course_key, section: courseCode.section || null });
+        }
+        await checkAuth();
+        return;
+      }
+      setLoginErr(error.message);
+      return;
+    }
+    
+    // Sign in immediately (new account)
     const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({ email, password: loginPass });
     if (signInErr) { setLoginErr('Account created! Please sign in.'); setIsSignup(false); return; }
     
