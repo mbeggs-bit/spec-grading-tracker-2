@@ -248,6 +248,8 @@ export default function App() {
   const [signupCode, setSignupCode] = useState('');
   const [signupFirst, setSignupFirst] = useState('');
   const [signupLast, setSignupLast] = useState('');
+  const [joinCode, setJoinCode] = useState('');
+  const [joinErr, setJoinErr] = useState(''); // '' | error string | { ok: true, msg: string }
 
   // Course data
   // Course data — single object to prevent multiple re-renders
@@ -448,6 +450,31 @@ export default function App() {
     setUser(null); setCk(null); setLoginEmail(''); setLoginPass(''); setLoginErr(''); setSignupCode(''); setSignupFirst(''); setSignupLast('');
   }
 
+  async function handleJoinCourse() {
+    setJoinErr('');
+    const code = joinCode.trim().toUpperCase();
+    if (!code) { setJoinErr('Please enter a course code.'); return; }
+
+    // Validate the code is active
+    const { data: courseCode } = await supabase.from('course_codes').select('*').eq('code', code).eq('active', true).single();
+    if (!courseCode) { setJoinErr('Invalid course code. Check with Dr. Beggs for the correct code.'); return; }
+
+    // Check not already enrolled
+    const existing = await loadEnrollments(user.profile.id);
+    if (existing.includes(courseCode.course_key)) {
+      setJoinErr("You're already enrolled in that course.");
+      return;
+    }
+
+    // Add enrollment
+    const { error } = await supabase.from('enrollments').insert({ profile_id: user.profile.id, course_key: courseCode.course_key, section: courseCode.section || null });
+    if (error) { setJoinErr('Something went wrong — please try again or contact Dr. Beggs.'); return; }
+
+    setJoinCode('');
+    setJoinErr({ ok: true, msg: 'Course added! Select it below.' });
+    await checkAuth();
+  }
+
   // ---- LOADING ----
   if (loading) return <Loading />;
 
@@ -518,6 +545,34 @@ export default function App() {
               <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{co.assignments.length} assignments</div>
             </button>;
           })}
+
+          {/* Join another course — students only */}
+          {user.profile.role === 'student' && (
+            <div style={{ marginTop: 28, paddingTop: 24, borderTop: "1px solid #E8E6E1" }}>
+              <h2 style={{ fontFamily: F.b, fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: "#555", marginBottom: 12 }}>Join Another Course</h2>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  value={joinCode}
+                  onChange={e => { setJoinCode(e.target.value); setJoinErr(''); }}
+                  onKeyDown={e => { if (e.key === 'Enter') handleJoinCourse(); }}
+                  placeholder="Course code (e.g. FAMILY3468)"
+                  aria-label="Course code to join"
+                  style={{ flex: 1, padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, boxSizing: "border-box", outline: "none" }}
+                />
+                <button
+                  onClick={handleJoinCourse}
+                  aria-label="Join course"
+                  style={{ padding: "8px 16px", background: "#CF202E", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
+                  Join
+                </button>
+              </div>
+              {joinErr && (
+                <div role="alert" aria-live="assertive" style={{ fontFamily: F.b, fontSize: 11, marginTop: 8, color: joinErr.ok ? "#2D6A4F" : "#C0392B" }}>
+                  {joinErr.ok ? joinErr.msg : joinErr}
+                </div>
+              )}
+            </div>
+          )}
         </main>
       </div>
     );
