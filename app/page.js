@@ -1170,7 +1170,7 @@ export default function App() {
     <div>
       <a href="#main-content" className="skip-link">Skip to main content</a>
       {toast && (
-        <div role="alert" aria-live="assertive" style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", zIndex: 1000, background: "#C0392B", color: "#fff", fontFamily: F.b, fontSize: 13, fontWeight: 600, padding: "10px 20px", borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,.18)", pointerEvents: "none" }}>
+        <div role="alert" aria-live="assertive" style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", zIndex: 1000, background: toast.type === 'success' ? "#2D6A4F" : "#C0392B", color: "#fff", fontFamily: F.b, fontSize: 13, fontWeight: 600, padding: "10px 20px", borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,.18)", pointerEvents: "none" }}>
           {toast.msg}
         </div>
       )}
@@ -1592,9 +1592,9 @@ export default function App() {
                     <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label={`Due date for ${a.name}`} autoFocus style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
                     <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class, By end of day" aria-label={`Due date note for ${a.name}`}
                       style={{ flex: 2, minWidth: 140, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }}
-                      onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, id, editDueVal, editDueDate); setEditDue(null); refresh(); } }} />
-                    <button onClick={async () => { await upsertDueDate(ck, id, editDueVal, editDueDate); setEditDue(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
-                    <button onClick={async () => { await upsertDueDate(ck, id, '', ''); setEditDue(null); refresh(); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
+                      onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, id, editDueVal, editDueDate); setCourseData(prev => ({ ...prev, dueDates: { ...prev.dueDates, [id]: editDueVal || editDueDate ? { label: editDueVal || null, date: editDueDate || null } : undefined } })); setEditDue(null); showToast('Due date saved ✓', 'success'); } }} />
+                    <button onClick={async () => { await upsertDueDate(ck, id, editDueVal, editDueDate); setCourseData(prev => ({ ...prev, dueDates: { ...prev.dueDates, [id]: editDueVal || editDueDate ? { label: editDueVal || null, date: editDueDate || null } : undefined } })); setEditDue(null); showToast('Due date saved ✓', 'success'); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
+                    <button onClick={async () => { await upsertDueDate(ck, id, '', ''); setCourseData(prev => { const updated = { ...prev.dueDates }; delete updated[id]; return { ...prev, dueDates: updated }; }); setEditDue(null); showToast('Due date cleared', 'success'); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
                   </div>}
                 </div>;
               })}
@@ -1617,9 +1617,9 @@ export default function App() {
                 </div>
                 {isEditingDue && <div style={{ padding: "4px 16px 10px 16px", display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label={`Due date for ${cp.name}`} autoFocus style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
-                  <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class, By end of day" aria-label={`Due date note for ${cp.name}`} style={{ flex: 2, minWidth: 140, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, cp.id, editDueVal, editDueDate); setEditDue(null); refresh(); } }} />
-                  <button onClick={async () => { await upsertDueDate(ck, cp.id, editDueVal, editDueDate); setEditDue(null); refresh(); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
-                  <button onClick={async () => { await upsertDueDate(ck, cp.id, '', ''); setEditDue(null); refresh(); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
+                  <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class, By end of day" aria-label={`Due date note for ${cp.name}`} style={{ flex: 2, minWidth: 140, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={async e => { if (e.key === "Enter") { await upsertDueDate(ck, cp.id, editDueVal, editDueDate); setCourseData(prev => ({ ...prev, dueDates: { ...prev.dueDates, [cp.id]: editDueVal || editDueDate ? { label: editDueVal || null, date: editDueDate || null } : undefined } })); setEditDue(null); showToast('Due date saved ✓', 'success'); } }} />
+                  <button onClick={async () => { await upsertDueDate(ck, cp.id, editDueVal, editDueDate); setCourseData(prev => ({ ...prev, dueDates: { ...prev.dueDates, [cp.id]: editDueVal || editDueDate ? { label: editDueVal || null, date: editDueDate || null } : undefined } })); setEditDue(null); showToast('Due date saved ✓', 'success'); }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
+                  <button onClick={async () => { await upsertDueDate(ck, cp.id, '', ''); setCourseData(prev => { const updated = { ...prev.dueDates }; delete updated[cp.id]; return { ...prev, dueDates: updated }; }); setEditDue(null); showToast('Due date cleared', 'success'); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
                 </div>}
               </div>;
             })}
@@ -1662,6 +1662,7 @@ export default function App() {
                         if (!editTeachDateVal) return;
                         await updateTeachingDate(ck, aid, td.teach_date, editTeachDateVal);
                         setEditTeachDate(null);
+                        showToast('Teaching date saved ✓', 'success');
                         refresh();
                       }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
                       <button onClick={() => setEditTeachDate(null)}
