@@ -1030,7 +1030,6 @@ export default function App() {
       }
     }
     if (relevant.size === 0) return "early";
-    if (done.size === 0 && relevant.size < 2) return "early";
     if (done.size === 0) return "F";
     const relArr = [...relevant];
     for (const g of ["A", "B", "C", "D"]) {
