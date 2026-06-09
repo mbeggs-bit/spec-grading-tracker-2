@@ -1160,7 +1160,7 @@ export default function App() {
     const header = ["Last", "First", "Email", ...(hasSections ? ["Section"] : []), ...allA.map(x => x.name + " (Instr)"), ...allA.map(x => x.name + " (Student)"), ...cpI.map(x => x.name + " (Prep)"), "Tokens Used", "Tokens Avail", "Instr Track", "Student Track"].join(",");
     const rows = filteredStudents.map(st => {
       const si = iS[st.id] || {}; const sc = sC[st.id] || {}; const cp2 = cP[st.id] || {}; const tk = (toks[st.id] || []).length;
-      const ig = calcInstrGrade(si, relAssignments); const sg = calcGrade(sc, relAssignments, ck); const tok = tokBal(tk, 0);
+      const ig = calcInstrGrade(si, relAssignments); const sg = calcStudentGrade(sc, si, relAssignments, ck, dueDates); const tok = tokBal(tk, 0);
       return [st.last, st.first, st.email, ...(hasSections ? [st.section || ''] : []), ...allA.map(x => si[x.id] === "mastery" ? "M" : si[x.id] === "revision" ? "R" : ""), ...allA.map(x => sc[x.id] ? "Y" : ""), ...cpI.map(x => cp2[x.id] ? "Y" : ""), tok.used, tok.avail, ig === "early" ? "" : ig, sg === "early" ? "" : sg].map(v => `"${v}"`).join(",");
     });
     const csvContent = header + "\n" + rows.join("\n");
@@ -1607,7 +1607,7 @@ export default function App() {
               <div style={{ width: 50, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", textAlign: "right" }}>Self</div>
             </div>
             {(() => { const gq = gridSearch.toLowerCase(); const gridFiltered = gq ? sorted.filter(s => `${s.first} ${s.last}`.toLowerCase().includes(gq) || `${s.last}, ${s.first}`.toLowerCase().includes(gq)) : sorted; return gridFiltered.map((s, si) => {
-              const ig = calcInstrGrade(iS[s.id] || {}, relAssignments); const sg = calcGrade(sC[s.id] || {}, relAssignments, ck);
+              const ig = calcInstrGrade(iS[s.id] || {}, relAssignments); const sg = calcStudentGrade(sC[s.id] || {}, iS[s.id] || {}, relAssignments, ck, dueDates);
               const m = TM[ig] || TM.F; const mm = ig !== sg && ig !== "early" && sg !== "early";
               return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < sorted.length - 1 ? "1px solid #F5F3EF" : "none", background: mm ? "#FFF8F0" : "transparent" }}>
                 <div style={{ width: 22, height: 22, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 11, fontWeight: 700, color: m.c, flexShrink: 0 }}>{ig === "early" ? "—" : ig}</div>
