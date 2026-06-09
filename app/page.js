@@ -628,7 +628,7 @@ export default function App() {
     const showTokenBtn = (a) => !cutoff && tok.avail > 0 && !myChecks[a.id] && relAssignments.includes(a.id) && !(a.tokenGroup && hasGroupToken(a.tokenGroup));
 
     return (
-      <div>
+      <div style={{ overflowX: "hidden" }}>
         <a href="#main-content" className="skip-link">Skip to main content</a>
         <header style={{ borderBottom: "1px solid #E8E6E1", background: "#fff", position: "sticky", top: 0, zIndex: 10 }}>
           <div style={{ maxWidth: 780, margin: "0 auto", padding: "10px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
@@ -1010,15 +1010,145 @@ export default function App() {
   const sectionKeys = hasSections ? [...new Set(students.map(s => s.section).filter(Boolean))] : [];
   const filteredStudents = sectionFilter === 'all' ? students : students.filter(s => s.section === sectionFilter);
 
+  // ── Instructor grade helper ──────────────────────────────────────
+  // Rules (per assignment, regardless of eval type):
+  //   M marked             → done
+  //   R marked             → in calc, not done
+  //   No mark, due passed  → in calc, not done (missing)
+  //   No mark, due not yet → invisible (not in calc)
+  const calcInstrGrade = (instrStatuses, relIds) => {
+    const done = new Set();
+    const relevant = new Set();
+    const today = new Date(); today.setHours(23, 59, 59, 999);
+    for (const id of relIds) {
+      const st = instrStatuses[id];
+      if (st === "mastery") { relevant.add(id); done.add(id); }
+      else if (st === "revision") { relevant.add(id); }
+      else {
+        const dd = dueDates[id]?.date;
+        if (dd && new Date(dd + 'T23:59:59') <= today) relevant.add(id);
+      }
+    }
+    if (relevant.size === 0) return "early";
+    if (done.size === 0 && relevant.size < 2) return "early";
+    if (done.size === 0) return "F";
+    const relArr = [...relevant];
+    for (const g of ["A", "B", "C", "D"]) {
+      const t = c.tracks[g]; if (!t) continue;
+      const hasReq = t.req.some(id => relArr.includes(id));
+      const hasPick = (t.pick || []).some(p => p.from.some(id => relArr.includes(id)));
+      const hasPickGroup = (t.pickGroup || []).some(pg => pg.from.some(gr => gr.some(id => relArr.includes(id))));
+      if (!hasReq && !hasPick && !hasPickGroup) continue;
+      const reqMet = t.req.filter(id => relArr.includes(id)).every(id => done.has(id));
+      const pickMet = (t.pick || []).every(p => {
+        const avail = p.from.filter(id => relArr.includes(id));
+        if (avail.length === 0) return true;
+        return avail.filter(id => done.has(id)).length >= p.need;
+      });
+      const pickGroupMet = (t.pickGroup || []).every(pg => {
+        const anyAvail = pg.from.some(gr => gr.some(id => relArr.includes(id)));
+        if (!anyAvail) return true;
+        let completed = 0;
+        for (const gr of pg.from) { if (gr.filter(id => relArr.includes(id)).every(id => done.has(id))) completed++; }
+        return completed >= pg.need;
+      });
+      if (g === "D" && t.isOr) {
+        const mOk = t.req.filter(id => relArr.includes(id)).every(id => done.has(id));
+        const aOk = (t.alt || []).filter(id => relArr.includes(id)).every(id => done.has(id));
+        if ((t.req.some(id => relArr.includes(id)) && mOk) || (t.alt && t.alt.some(id => relArr.includes(id)) && aOk)) return g;
+      } else {
+        if (reqMet && pickMet && pickGroupMet) return g;
+      }
+    }
+    return "F";
+  };
+
+  // ── Instructor blockers for email ────────────────────────────────
+  // Returns what a student still needs to reach a given target track,
+  // based on instructor M/R marks + passed due dates only.
+  const getInstrBlockers = (instrStatuses, relIds, targetGrade) => {
+    const t = c.tracks[targetGrade]; if (!t) return [];
+    const today = new Date(); today.setHours(23, 59, 59, 999);
+    const done = new Set();
+    const relevant = new Set();
+    for (const id of relIds) {
+      const st = instrStatuses[id];
+      if (st === "mastery") { relevant.add(id); done.add(id); }
+      else if (st === "revision") { relevant.add(id); }
+      else { const dd = dueDates[id]?.date; if (dd && new Date(dd + 'T23:59:59') <= today) relevant.add(id); }
+    }
+    const relArr = [...relevant];
+    const blockers = [];
+    t.req.filter(id => relIds.includes(id) && !done.has(id)).forEach(id => blockers.push(id));
+    (t.pick || []).forEach(p => {
+      const avail = p.from.filter(id => relIds.includes(id));
+      const need = p.need - avail.filter(id => done.has(id)).length;
+      if (need > 0) avail.filter(id => !done.has(id)).slice(0, need).forEach(id => { if (!blockers.includes(id)) blockers.push(id); });
+    });
+    (t.pickGroup || []).forEach(pg => {
+      let completed = 0;
+      for (const gr of pg.from) { if (gr.filter(id => relIds.includes(id)).length > 0 && gr.filter(id => relIds.includes(id)).every(id => done.has(id))) completed++; }
+      const need = pg.need - completed;
+      if (need > 0) { for (const gr of pg.from) { const grAvail = gr.filter(id => relIds.includes(id)); if (!grAvail.every(id => done.has(id))) { grAvail.filter(id => !done.has(id)).forEach(id => { if (!blockers.includes(id)) blockers.push(id); }); break; } } }
+    });
+    return blockers;
+  };
+
+  // ── Progress email builder ───────────────────────────────────────
+  const copyProgressEmail = (student) => {
+    const instrSt = iS[student.id] || {};
+    const grade = calcInstrGrade(instrSt, relAssignments);
+    const sToks = toks[student.id] || [];
+    const tok = tokBal(sToks.length, 0);
+    const aName = (id) => c.assignments.find(a => a.id === id)?.name || id;
+    const order = ["A", "B", "C", "D", "F"];
+    const idx = order.indexOf(grade);
+
+    let body = `Hi ${student.first},\n\nHere's a quick update on your current grade track in ${c.short}.\n\n`;
+    body += `📊 Current track (based on my records): ${grade === "early" ? "Not yet established" : grade + " Track"}\n`;
+
+    if (grade === "early") {
+      body += `\nI haven't recorded any completed work yet. If you believe this is an error, please reach out.\n`;
+    } else if (grade === "A") {
+      body += `\nYou're on the A track — great work! Keep it up through the end of the semester.\n`;
+    } else {
+      const targets = idx > 0 ? [order[idx - 1]] : [];
+      if (idx > 1) targets.push(order[idx - 2]);
+      targets.forEach(target => {
+        const blockers = getInstrBlockers(instrSt, relAssignments, target);
+        body += `\n📌 To reach ${target} Track:\n`;
+        if (blockers.length === 0) {
+          body += `  You may already have what you need — double-check your checkoffs.\n`;
+        } else {
+          blockers.forEach(id => { body += `  • ${aName(id)}\n`; });
+        }
+      });
+    }
+
+    if (tok.avail > 0) {
+      body += `\n🎟 You have ${tok.avail} token${tok.avail !== 1 ? "s" : ""} remaining. These can be used for late submissions or revisions.\n`;
+    } else {
+      body += `\n🎟 You have no tokens remaining.\n`;
+    }
+
+    body += `\nIf you have questions about your grade or need to discuss your work, feel free to reach out or schedule a meeting.\n\nDr. Beggs`;
+
+    navigator.clipboard.writeText(body).then(() => {
+      showToast(`Email copied for ${student.first} ${student.last}`, 'success');
+    }).catch(() => {
+      showToast('Copy failed — try again', 'error');
+    });
+  };
+
   const sorted = [...filteredStudents].sort((a, b) => {
     if (sortBy === "first") return (a.first || "").localeCompare(b.first || "");
     if (sortBy === "last") return (a.last || "").localeCompare(b.last || "");
     const o = { A: 0, B: 1, C: 2, D: 3, F: 4, early: 5 };
-    return (o[calcGrade(iS[a.id] || {}, relAssignments, ck)] || 5) - (o[calcGrade(iS[b.id] || {}, relAssignments, ck)] || 5);
+    return (o[calcInstrGrade(iS[a.id] || {}, relAssignments)] || 5) - (o[calcInstrGrade(iS[b.id] || {}, relAssignments)] || 5);
   });
 
   const dist = { A: 0, B: 0, C: 0, D: 0, F: 0, early: 0 };
-  filteredStudents.forEach(s => { const g = calcGrade(iS[s.id] || {}, relAssignments, ck); dist[g] = (dist[g] || 0) + 1; });
+  filteredStudents.forEach(s => { const g = calcInstrGrade(iS[s.id] || {}, relAssignments); dist[g] = (dist[g] || 0) + 1; });
 
   const insights = relAssignments.map(id => { const a = c.assignments.find(x => x.id === id); const rc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "revision").length; const mc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "mastery").length; return { ...a, rc, mc, ns: filteredStudents.length - rc - mc }; }).filter(a => a.rc > 0).sort((a, b) => b.rc - a.rc);
   const cpSum = (c.classPrep || []).map(cp => ({ ...cp, done: filteredStudents.filter(s => (cP[s.id] || {})[cp.id]).length }));
@@ -1030,7 +1160,7 @@ export default function App() {
     const header = ["Last", "First", "Email", ...(hasSections ? ["Section"] : []), ...allA.map(x => x.name + " (Instr)"), ...allA.map(x => x.name + " (Student)"), ...cpI.map(x => x.name + " (Prep)"), "Tokens Used", "Tokens Avail", "Instr Track", "Student Track"].join(",");
     const rows = filteredStudents.map(st => {
       const si = iS[st.id] || {}; const sc = sC[st.id] || {}; const cp2 = cP[st.id] || {}; const tk = (toks[st.id] || []).length;
-      const ig = calcGrade(si, relAssignments, ck); const sg = calcGrade(sc, relAssignments, ck); const tok = tokBal(tk, 0);
+      const ig = calcInstrGrade(si, relAssignments); const sg = calcGrade(sc, relAssignments, ck); const tok = tokBal(tk, 0);
       return [st.last, st.first, st.email, ...(hasSections ? [st.section || ''] : []), ...allA.map(x => si[x.id] === "mastery" ? "M" : si[x.id] === "revision" ? "R" : ""), ...allA.map(x => sc[x.id] ? "Y" : ""), ...cpI.map(x => cp2[x.id] ? "Y" : ""), tok.used, tok.avail, ig === "early" ? "" : ig, sg === "early" ? "" : sg].map(v => `"${v}"`).join(",");
     });
     const csvContent = header + "\n" + rows.join("\n");
@@ -1167,7 +1297,7 @@ export default function App() {
 
   // MAIN INSTRUCTOR VIEW
   return (
-    <div>
+    <div style={{ overflowX: "hidden" }}>
       <a href="#main-content" className="skip-link">Skip to main content</a>
       {toast && (
         <div role="alert" aria-live="assertive" style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", zIndex: 1000, background: toast.type === 'success' ? "#2D6A4F" : "#C0392B", color: "#fff", fontFamily: F.b, fontSize: 13, fontWeight: 600, padding: "10px 20px", borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,.18)", pointerEvents: "none" }}>
@@ -1463,7 +1593,8 @@ export default function App() {
             </div>}
           </div>
 
-          {expStudents && <><div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+          {expStudents && <><div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+            <div style={{ minWidth: 400 }}>
             <div style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "8px 16px 6px", borderBottom: "2px solid #F0EEEA", background: "#FAFAF7" }}>
               <div style={{ width: 24, flexShrink: 0 }} />
               <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676" }}>Student</div>
@@ -1476,11 +1607,12 @@ export default function App() {
               <div style={{ width: 50, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", textAlign: "right" }}>Self</div>
             </div>
             {(() => { const gq = gridSearch.toLowerCase(); const gridFiltered = gq ? sorted.filter(s => `${s.first} ${s.last}`.toLowerCase().includes(gq) || `${s.last}, ${s.first}`.toLowerCase().includes(gq)) : sorted; return gridFiltered.map((s, si) => {
-              const ig = calcGrade(iS[s.id] || {}, relAssignments, ck); const sg = calcGrade(sC[s.id] || {}, relAssignments, ck);
+              const ig = calcInstrGrade(iS[s.id] || {}, relAssignments); const sg = calcGrade(sC[s.id] || {}, relAssignments, ck);
               const m = TM[ig] || TM.F; const mm = ig !== sg && ig !== "early" && sg !== "early";
               return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < sorted.length - 1 ? "1px solid #F5F3EF" : "none", background: mm ? "#FFF8F0" : "transparent" }}>
                 <div style={{ width: 22, height: 22, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 11, fontWeight: 700, color: m.c, flexShrink: 0 }}>{ig === "early" ? "—" : ig}</div>
-                <button onClick={() => setPreviewStudent({ id: s.id, name: s.name })} aria-label={`Preview ${s.name}'s student view`} style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1565C0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", background: "none", border: "none", cursor: "pointer", textAlign: "left", padding: 0, textDecoration: "underline", textDecorationStyle: "dotted", textUnderlineOffset: 2 }}>{sortBy === "last" ? `${s.last}, ${s.first}` : s.name}</button>
+                <button onClick={() => setPreviewStudent({ id: s.id, name: s.name })} aria-label={`Preview ${s.name}'s student view`} style={{ width: 130, flexShrink: 0, fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1565C0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", background: "none", border: "none", cursor: "pointer", textAlign: "left", padding: 0, textDecoration: "underline", textDecorationStyle: "dotted", textUnderlineOffset: 2 }}>{sortBy === "last" ? `${s.last}, ${s.first}` : s.name}</button>
+                <button onClick={() => copyProgressEmail(s)} aria-label={`Copy progress email for ${s.name}`} title={`Copy progress email for ${s.name}`} style={{ flexShrink: 0, width: 22, height: 22, borderRadius: 4, background: "none", border: "1px solid #E0DDD8", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "#767676", padding: 0 }}>✉</button>
                 <div style={{ flex: 1, display: "flex", gap: 3 }}>
                   {relAssignments.map(id => { const st = (iS[s.id] || {})[id] || "";
                     const aName = c.assignments.find(a => a.id === id)?.name || id;
@@ -1492,6 +1624,7 @@ export default function App() {
                 <div style={{ width: 50, flexShrink: 0, textAlign: "right", fontFamily: F.b, fontSize: 11, color: mm ? "#E65100" : "#767676" }}>{sg === "early" ? "—" : sg}{mm ? " ⚠" : ""}</div>
               </div>;
             }); })()}
+            </div>{/* end minWidth scroll inner */}
           </div>
           <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 8 }}>"Self" = student self-reported track. ⚠ = mismatch.{gridSearch && ` Showing ${gridSearch} filter.`}</div>
           </>}
@@ -1539,7 +1672,8 @@ export default function App() {
                 <input value={cpGridSearch} onChange={e => setCpGridSearch(e.target.value)} placeholder="Filter..." aria-label="Filter class prep students" style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#666", background: "#fff", width: 80, outline: "none" }} />
               </div>}
             </div>
-            {expClassPrep && <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+            {expClassPrep && <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+              <div style={{ minWidth: 400 }}>
               <div style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "8px 16px 6px", borderBottom: "2px solid #F0EEEA", background: "#FAFAF7" }}>
                 <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676" }}>Student</div>
                 <div style={{ flex: 1, display: "flex", gap: 3 }}>{(c.classPrep || []).map(cp => {
@@ -1563,6 +1697,7 @@ export default function App() {
                   <div style={{ width: 50, flexShrink: 0, textAlign: "right", fontFamily: F.b, fontSize: 11, color: allDone ? "#2D6A4F" : "#767676" }}>{doneCount}/{(c.classPrep || []).length}</div>
                 </div>;
               }); })()}
+              </div>{/* end minWidth scroll inner */}
             </div>}
           </div>}
 
@@ -1727,7 +1862,7 @@ export default function App() {
         {/* TRACKS */}
         {tab === "tracks" && <div>
           <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 14 }}>Based on <strong>your</strong> records.{sectionFilter !== 'all' ? ` Showing ${courseSections?.[sectionFilter]?.name || sectionFilter} section.` : ''}</div>
-          {["A", "B", "C", "D"].map(g => { const t = c.tracks[g]; const m = TM[g]; const on = filteredStudents.filter(s => calcGrade(iS[s.id] || {}, relAssignments, ck) === g);
+          {["A", "B", "C", "D"].map(g => { const t = c.tracks[g]; const m = TM[g]; const on = filteredStudents.filter(s => calcInstrGrade(iS[s.id] || {}, relAssignments) === g);
             return <div key={g} style={{ marginBottom: 12, background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
               <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid #F0EEEA" }}>
                 <div style={{ width: 28, height: 28, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 14, fontWeight: 700, color: m.c }}>{g}</div>
@@ -1741,7 +1876,7 @@ export default function App() {
             <Lbl s={{ marginBottom: 8 }} onClick={() => setExpFinalGrades(!expFinalGrades)} expanded={expFinalGrades}>Final Grades Summary</Lbl>
             {expFinalGrades && <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
               {[...filteredStudents].sort((a, b) => (a.last || "").localeCompare(b.last || "")).map((s, i) => {
-                const g = calcGrade(iS[s.id] || {}, relAssignments, ck); const m = TM[g] || TM.F;
+                const g = calcInstrGrade(iS[s.id] || {}, relAssignments); const m = TM[g] || TM.F;
                 return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", borderBottom: i < filteredStudents.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                   <div style={{ width: 26, height: 26, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 12, fontWeight: 700, color: m.c }}>{g === "early" ? "—" : g}</div>
                   <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500 }}>{s.last}, {s.first}</div>
