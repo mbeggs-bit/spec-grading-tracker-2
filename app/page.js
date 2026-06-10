@@ -252,6 +252,9 @@ export default function App() {
   const [signupLast, setSignupLast] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [joinErr, setJoinErr] = useState(''); // '' | error string | { ok: true, msg: string }
+  const [forgotMode, setForgotMode] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotMsg, setForgotMsg] = useState(''); // confirmation message after submission
 
   // Course data
   // Course data — single object to prevent multiple re-renders
@@ -452,6 +455,17 @@ export default function App() {
     setUser(null); setCk(null); setLoginEmail(''); setLoginPass(''); setLoginErr(''); setSignupCode(''); setSignupFirst(''); setSignupLast('');
   }
 
+  async function handleForgotPassword() {
+    setForgotMsg('');
+    const email = forgotEmail.trim().toLowerCase();
+    if (!email) { setForgotMsg('error:Please enter your email address.'); return; }
+    await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/`
+    });
+    // Always show neutral success — Supabase does not reveal whether the email exists (privacy)
+    setForgotMsg('ok:If an account exists for that email, a reset link is on its way. Check your spam folder too.');
+  }
+
   async function handleJoinCourse() {
     setJoinErr('');
     const code = joinCode.trim().toUpperCase();
@@ -489,33 +503,67 @@ export default function App() {
           <h1 style={{ fontSize: 30, fontWeight: 700, color: "#1A1A1A", lineHeight: 1.15, marginBottom: 6 }}>Learning, illuminated.</h1>
           <p style={{ fontFamily: F.b, fontSize: 13, color: "#6B6B6B" }}>Own your learning. Track your growth. Pursue mastery.</p>
         </div>
-        <div role="region" aria-label={isSignup ? "Create account" : "Sign in"} style={{ background: "#fff", border: "1px solid #E8E6E1", borderRadius: 10, padding: "20px" }}>
-          <h2 style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "#6B6B6B", marginBottom: 10 }}>
-            {isSignup ? "Create Your Account" : "Sign In"}
-          </h2>
-          {isSignup && <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-            <input value={signupFirst} onChange={e => { setSignupFirst(e.target.value); setLoginErr(''); }} placeholder="First name" aria-label="First name"
-              style={{ flex: 1, padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, boxSizing: "border-box", outline: "none" }} />
-            <input value={signupLast} onChange={e => { setSignupLast(e.target.value); setLoginErr(''); }} placeholder="Last name" aria-label="Last name"
-              style={{ flex: 1, padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, boxSizing: "border-box", outline: "none" }} />
-          </div>}
-          <input value={loginEmail} onChange={e => { setLoginEmail(e.target.value); setLoginErr(''); }} placeholder="UCM email (@ucmo.edu)" aria-label="UCM email"
-            style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: 8, boxSizing: "border-box", outline: "none" }} />
-          <input value={loginPass} onChange={e => { setLoginPass(e.target.value); setLoginErr(''); }} placeholder={isSignup ? "Create a password (6+ characters)" : "Password"} type="password" aria-label="Password"
-            style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: isSignup ? 8 : 12, boxSizing: "border-box", outline: "none" }} />
-          {isSignup && <input value={signupCode} onChange={e => { setSignupCode(e.target.value); setLoginErr(''); }} placeholder="Course code (provided by Dr. Beggs)" aria-label="Course code"
-            onKeyDown={e => { if (e.key === 'Enter') handleSignup(); }}
-            style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: 4, boxSizing: "border-box", outline: "none" }} />}
-          {isSignup && <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginBottom: 12, paddingLeft: 2 }}>Example: MATH4850 or MATH3820</div>}
-          {loginErr && <div role="alert" aria-live="assertive" style={{ fontFamily: F.b, fontSize: 11, color: "#C0392B", marginBottom: 10, lineHeight: 1.4 }}>{loginErr}</div>}
-          <button onClick={isSignup ? handleSignup : handleLogin}
-            style={{ width: "100%", padding: "10px", background: "#CF202E", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
-            {isSignup ? "Create Account" : "Sign In"}
-          </button>
-          <button onClick={() => { setIsSignup(!isSignup); setLoginErr(''); }}
-            style={{ width: "100%", padding: "8px", background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>
-            {isSignup ? "Already have an account? Sign in" : "First time? Create account"}
-          </button>
+        <div role="region" aria-label={forgotMode ? "Reset password" : isSignup ? "Create account" : "Sign in"} style={{ background: "#fff", border: "1px solid #E8E6E1", borderRadius: 10, padding: "20px" }}>
+          {forgotMode ? (
+            <>
+              <h2 style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "#6B6B6B", marginBottom: 10 }}>Reset Password</h2>
+              <p style={{ fontFamily: F.b, fontSize: 12, color: "#555", marginBottom: 12, lineHeight: 1.5 }}>Enter your UCM email and we'll send you a link to reset your password.</p>
+              <input value={forgotEmail} onChange={e => { setForgotEmail(e.target.value); setForgotMsg(''); }} placeholder="UCM email (@ucmo.edu)" aria-label="UCM email address for password reset" type="email"
+                onKeyDown={e => { if (e.key === 'Enter') handleForgotPassword(); }}
+                style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: 8, boxSizing: "border-box", outline: "none" }} />
+              {forgotMsg && (
+                <div role="alert" aria-live="polite" style={{ fontFamily: F.b, fontSize: 11, color: forgotMsg.startsWith('ok:') ? "#2D6A4F" : "#C0392B", marginBottom: 10, lineHeight: 1.4, background: forgotMsg.startsWith('ok:') ? "#D4EDDA" : "#FFF0F0", padding: "8px 10px", borderRadius: 6 }}>
+                  {forgotMsg.replace(/^(ok|error):/, '')}
+                </div>
+              )}
+              <button onClick={handleForgotPassword}
+                style={{ width: "100%", padding: "10px", background: "#CF202E", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
+                Send Reset Link
+              </button>
+              <button onClick={() => { setForgotMode(false); setForgotMsg(''); setForgotEmail(''); }}
+                style={{ width: "100%", padding: "8px", background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>
+                ← Back to sign in
+              </button>
+            </>
+          ) : (
+            <>
+              <h2 style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "#6B6B6B", marginBottom: 10 }}>
+                {isSignup ? "Create Your Account" : "Sign In"}
+              </h2>
+              {isSignup && <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                <input value={signupFirst} onChange={e => { setSignupFirst(e.target.value); setLoginErr(''); }} placeholder="First name" aria-label="First name"
+                  style={{ flex: 1, padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, boxSizing: "border-box", outline: "none" }} />
+                <input value={signupLast} onChange={e => { setSignupLast(e.target.value); setLoginErr(''); }} placeholder="Last name" aria-label="Last name"
+                  style={{ flex: 1, padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, boxSizing: "border-box", outline: "none" }} />
+              </div>}
+              <input value={loginEmail} onChange={e => { setLoginEmail(e.target.value); setLoginErr(''); }} placeholder="UCM email (@ucmo.edu)" aria-label="UCM email"
+                style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: 8, boxSizing: "border-box", outline: "none" }} />
+              <input value={loginPass} onChange={e => { setLoginPass(e.target.value); setLoginErr(''); }} placeholder={isSignup ? "Create a password (6+ characters)" : "Password"} type="password" aria-label="Password"
+                onKeyDown={e => { if (e.key === 'Enter' && !isSignup) handleLogin(); }}
+                style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: isSignup ? 8 : 4, boxSizing: "border-box", outline: "none" }} />
+              {!isSignup && (
+                <div style={{ textAlign: "right", marginBottom: 10 }}>
+                  <button onClick={() => { setForgotMode(true); setForgotEmail(loginEmail); setForgotMsg(''); }} aria-label="Forgot your password? Reset it here"
+                    style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 11, color: "#1565C0", padding: 0 }}>
+                    Forgot password?
+                  </button>
+                </div>
+              )}
+              {isSignup && <input value={signupCode} onChange={e => { setSignupCode(e.target.value); setLoginErr(''); }} placeholder="Course code (provided by Dr. Beggs)" aria-label="Course code"
+                onKeyDown={e => { if (e.key === 'Enter') handleSignup(); }}
+                style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: 4, boxSizing: "border-box", outline: "none" }} />}
+              {isSignup && <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginBottom: 12, paddingLeft: 2 }}>Example: MATH4850 or MATH3820</div>}
+              {loginErr && <div role="alert" aria-live="assertive" style={{ fontFamily: F.b, fontSize: 11, color: "#C0392B", marginBottom: 10, lineHeight: 1.4 }}>{loginErr}</div>}
+              <button onClick={isSignup ? handleSignup : handleLogin}
+                style={{ width: "100%", padding: "10px", background: "#CF202E", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
+                {isSignup ? "Create Account" : "Sign In"}
+              </button>
+              <button onClick={() => { setIsSignup(!isSignup); setLoginErr(''); }}
+                style={{ width: "100%", padding: "8px", background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>
+                {isSignup ? "Already have an account? Sign in" : "First time? Create account"}
+              </button>
+            </>
+          )}
         </div>
         <div style={{ marginTop: 20, padding: "12px 16px", background: "#F9F8F5", borderRadius: 8, border: "1px solid #E8E6E1" }}>
           <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 4 }}>Accessibility Statement</div>
