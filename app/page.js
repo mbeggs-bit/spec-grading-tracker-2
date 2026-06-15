@@ -55,9 +55,9 @@ async function loadInstrStatuses(courseKey) {
 }
 
 async function loadMyInstrStatuses(courseKey, profileId) {
-  const { data } = await supabase.from('instructor_statuses').select('assignment_id, status').eq('course_key', courseKey).eq('profile_id', profileId);
+  const { data } = await supabase.from('instructor_statuses').select('assignment_id, status, updated_at').eq('course_key', courseKey).eq('profile_id', profileId);
   const map = {};
-  (data || []).forEach(r => { map[r.assignment_id] = r.status; });
+  (data || []).forEach(r => { map[r.assignment_id] = { status: r.status, updated_at: r.updated_at }; });
   return map;
 }
 
@@ -642,8 +642,11 @@ export default function App() {
     const myChecks = sC[myId] || {};
     const myPrep = cP[myId] || {};
     const myToks = toks[myId] || [];
-    const grade = calcStudentGrade(myChecks, myInstrSt, relAssignments, ck, dueDates);
-    const { target, blockers, msg: bMsg } = getBlockers(myChecks, relAssignments, ck, myInstrSt, dueDates);
+    // myInstrSt is now { [assignmentId]: { status, updated_at } }
+    // Derive a plain status map for the calc functions
+    const myInstrStatuses = Object.fromEntries(Object.entries(myInstrSt).map(([k, v]) => [k, v?.status]));
+    const grade = calcStudentGrade(myChecks, myInstrStatuses, relAssignments, ck, dueDates);
+    const { target, blockers, msg: bMsg } = getBlockers(myChecks, relAssignments, ck, myInstrStatuses, dueDates);
     const tok = tokBal(myToks.length, 0);
     const cutoff = pastCutoff(ck);
 
@@ -805,11 +808,14 @@ export default function App() {
                 {grpA.map((a, i) => {
                   const isChecked = !!myChecks[a.id];
                   const isMastery = a.eval === "mastery";
-                  const instrStatus = myInstrSt[a.id]; // 'mastery' | 'revision' | undefined
-                  const isLocked = isMastery && !instrStatus; // mastery items locked until instructor evaluates
+                  const instrRec = myInstrSt[a.id]; // { status, updated_at } | undefined
+                  const instrStatus = instrRec?.status; // 'mastery' | 'revision' | 'not_submitted' | undefined
+                  const instrDate = instrRec?.updated_at ? new Date(instrRec.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
+                  const isLocked = isMastery && (!instrStatus || instrStatus === 'not_submitted');
                   const isRevision = instrStatus === 'revision';
+                  const isNS = instrStatus === 'not_submitted';
 
-                  // Locked mastery item — not yet evaluated by instructor
+                  // Locked mastery item — not yet evaluated, or marked NS
                   if (isLocked) return <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", borderBottom: i < grpA.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                     <div aria-hidden="true" style={{ width: 22, height: 22, borderRadius: 6, border: "2px solid #E0DDD8", background: "#F5F4F0", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                       <span style={{ fontSize: 10, color: "#B0ADA8" }}>🔒</span>
@@ -817,7 +823,10 @@ export default function App() {
                     <div style={{ flex: 1 }}>
                       <span style={{ fontFamily: F.b, fontSize: 13, color: "#555" }}>{a.name}</span>
                       {(dueDates[a.id]?.date || dueDates[a.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{dueDates[a.id].date ? new Date(dueDates[a.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[a.id].date && dueDates[a.id].label ? ' · ' : ''}{dueDates[a.id].label || ''}</div>}
-                      <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 2, fontStyle: "italic" }}>Awaiting review from Dr. Beggs</div>
+                      {isNS
+                        ? <div style={{ fontFamily: F.b, fontSize: 11, color: "#C0392B", marginTop: 2, fontStyle: "italic" }}>No submission recorded. If you believe this is an error, contact Dr. Beggs.</div>
+                        : <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 2, fontStyle: "italic" }}>Awaiting review from Dr. Beggs</div>
+                      }
                     </div>
                     <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />
                   </div>;
@@ -834,7 +843,7 @@ export default function App() {
                       <div style={{ flex: 1 }}>
                         <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, color: isChecked ? "#767676" : "#1A1A1A", textDecoration: isChecked ? "line-through" : "none", textDecorationColor: "#DDD" }}>{a.name}</span>
                         {(dueDates[a.id]?.date || dueDates[a.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 11, color: isChecked ? "#767676" : "#6B6B6B", marginTop: 1 }}>{dueDates[a.id].date ? new Date(dueDates[a.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[a.id].date && dueDates[a.id].label ? ' · ' : ''}{dueDates[a.id].label || ''}</div>}
-                        {isMastery && instrStatus && !isChecked && <div style={{ fontFamily: F.b, fontSize: 11, color: isRevision ? "#856404" : "#2D6A4F", marginTop: 2 }}>{"Dr. Beggs has left you feedback — please review it before checking off"}</div>}
+                        {isMastery && instrStatus && instrStatus !== 'not_submitted' && !isChecked && <div style={{ fontFamily: F.b, fontSize: 11, color: isRevision ? "#856404" : "#2D6A4F", marginTop: 2 }}>{`Dr. Beggs left feedback${instrDate ? ` on ${instrDate}` : ''} — please review it before checking off`}</div>}
                       </div>
                       {isMastery && <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />}
                       {a.eval === "completion" && <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
@@ -2013,8 +2022,9 @@ export default function App() {
                         const isChecked = !!pvChecks[a.id];
                         const isMastery = a.eval === "mastery";
                         const pvInstr = pvInstrSt[a.id];
-                        const isLocked = isMastery && !pvInstr;
+                        const isLocked = isMastery && (!pvInstr || pvInstr === 'not_submitted');
                         const isRevision = pvInstr === "revision";
+                        const isNS = pvInstr === "not_submitted";
 
                         if (isLocked) return <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderBottom: i < grpA.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                           <div aria-hidden="true" style={{ width: 22, height: 22, borderRadius: 6, border: "2px solid #E0DDD8", background: "#F5F4F0", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -2023,7 +2033,10 @@ export default function App() {
                           <div style={{ flex: 1 }}>
                             <span style={{ fontFamily: F.b, fontSize: 13, color: "#555" }}>{a.name}</span>
                             {(dueDates[a.id]?.date || dueDates[a.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{dueDates[a.id].date ? new Date(dueDates[a.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[a.id].date && dueDates[a.id].label ? ' · ' : ''}{dueDates[a.id].label || ''}</div>}
-                            <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 2, fontStyle: "italic" }}>Awaiting review from Dr. Beggs</div>
+                            {isNS
+                              ? <div style={{ fontFamily: F.b, fontSize: 11, color: "#C0392B", marginTop: 2, fontStyle: "italic" }}>No submission recorded. If you believe this is an error, contact Dr. Beggs.</div>
+                              : <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 2, fontStyle: "italic" }}>Awaiting review from Dr. Beggs</div>
+                            }
                           </div>
                           <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />
                         </div>;
@@ -2035,7 +2048,7 @@ export default function App() {
                           <div style={{ flex: 1 }}>
                             <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, color: isChecked ? "#767676" : "#1A1A1A", textDecoration: isChecked ? "line-through" : "none", textDecorationColor: "#DDD" }}>{a.name}</span>
                             {(dueDates[a.id]?.date || dueDates[a.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 11, color: isChecked ? "#767676" : "#6B6B6B", marginTop: 1 }}>{dueDates[a.id].date ? new Date(dueDates[a.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[a.id].date && dueDates[a.id].label ? ' · ' : ''}{dueDates[a.id].label || ''}</div>}
-                            {isMastery && pvInstr && !isChecked && <div style={{ fontFamily: F.b, fontSize: 11, color: isRevision ? "#856404" : "#2D6A4F", marginTop: 2 }}>Dr. Beggs has left you feedback — please review it before checking off</div>}
+                            {isMastery && pvInstr && pvInstr !== 'not_submitted' && !isChecked && <div style={{ fontFamily: F.b, fontSize: 11, color: isRevision ? "#856404" : "#2D6A4F", marginTop: 2 }}>Dr. Beggs left feedback — please review it before checking off</div>}
                           </div>
                           {isMastery && <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />}
                           {a.eval === "completion" && <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
