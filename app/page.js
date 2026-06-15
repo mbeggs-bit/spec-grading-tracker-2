@@ -1256,7 +1256,7 @@ export default function App() {
               const st = (iS[s.id] || {})[batchAsgn] || ""; const note = (iN[s.id] || {})[batchAsgn]; const isEN = noteFor === s.id;
               const studentChecked = !!(sC[s.id] || {})[batchAsgn];
               const opts = ba.eval === "completion"
-                ? [{ v: "mastery", l: "✓ Complete", bg: "#D4EDDA", c: "#2D6A4F" }, { v: "", l: "—", bg: "#F5F4F0", c: "#767676" }]
+                ? [{ v: "mastery", l: "✓ Complete", bg: "#D4EDDA", c: "#2D6A4F" }, { v: "not_submitted", l: "NS", bg: "#FCE8E8", c: "#C0392B" }, { v: "", l: "—", bg: "#F5F4F0", c: "#767676" }]
                 : [{ v: "mastery", l: "Mastered", bg: "#D4EDDA", c: "#2D6A4F" }, { v: "revision", l: "Revise", bg: "#FFF3CD", c: "#856404" }, { v: "not_submitted", l: "NS", bg: "#FCE8E8", c: "#C0392B" }, { v: "", l: "—", bg: "#F5F4F0", c: "#767676" }];
               return <div key={s.id} style={{ borderBottom: si < bSorted.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px" }}>
@@ -1674,8 +1674,8 @@ export default function App() {
                   {relAssignments.map(id => { const st = (iS[s.id] || {})[id] || "";
                     const aName = c.assignments.find(a => a.id === id)?.name || id;
                     const isMastery = c.assignments.find(a => a.id === id)?.eval === "mastery";
-                    const nextVal = st === "" ? "mastery" : st === "mastery" ? (isMastery ? "revision" : null) : st === "revision" ? "not_submitted" : null;
-                    const cycleLabel = st === "" ? `Mark ${aName} mastered` : st === "mastery" ? (isMastery ? `Change ${aName} to needs revision` : `Clear ${aName}`) : st === "revision" ? `Change ${aName} to not submitted` : `Clear ${aName}`;
+                    const nextVal = st === "" ? "mastery" : st === "mastery" ? (isMastery ? "revision" : "not_submitted") : st === "revision" ? "not_submitted" : null;
+                    const cycleLabel = st === "" ? `Mark ${aName} mastered` : st === "mastery" ? (isMastery ? `Change ${aName} to needs revision` : `Change ${aName} to not submitted`) : st === "revision" ? `Change ${aName} to not submitted` : `Clear ${aName}`;
                     return <button key={id} title={aName} aria-label={cycleLabel} onClick={() => handleInstrUpdate(s.id, id, nextVal)} style={{ flex: 1, minWidth: 28, maxWidth: 40, height: 22, borderRadius: 4, background: st === "mastery" ? "#D4EDDA" : st === "revision" ? "#FFF3CD" : st === "not_submitted" ? "#FCE8E8" : "#F5F4F0", border: !st ? "1.5px dashed #E8E6E1" : "1.5px solid transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: st === "mastery" ? "#2D6A4F" : st === "revision" ? "#856404" : st === "not_submitted" ? "#C0392B" : "transparent", cursor: "pointer", padding: 0 }}>{st === "mastery" ? "M" : st === "revision" ? "R" : st === "not_submitted" ? "NS" : ""}</button>;
                   })}
                 </div>
