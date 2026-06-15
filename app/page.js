@@ -1073,7 +1073,7 @@ export default function App() {
     for (const id of relIds) {
       const st = instrStatuses[id];
       if (st === "mastery") { relevant.add(id); done.add(id); }
-      else if (st === "revision") { relevant.add(id); }
+      else if (st === "revision" || st === "not_submitted") { relevant.add(id); }
       else {
         const dd = dueDates[id]?.date;
         if (dd && new Date(dd + 'T23:59:59') <= today) relevant.add(id);
@@ -1123,7 +1123,7 @@ export default function App() {
     for (const id of relIds) {
       const st = instrStatuses[id];
       if (st === "mastery") { relevant.add(id); done.add(id); }
-      else if (st === "revision") { relevant.add(id); }
+      else if (st === "revision" || st === "not_submitted") { relevant.add(id); }
       else { const dd = dueDates[id]?.date; if (dd && new Date(dd + 'T23:59:59') <= today) relevant.add(id); }
     }
     const relArr = [...relevant];
@@ -1199,7 +1199,7 @@ export default function App() {
   const dist = { A: 0, B: 0, C: 0, D: 0, F: 0, early: 0 };
   filteredStudents.forEach(s => { const g = calcInstrGrade(iS[s.id] || {}, relAssignments); dist[g] = (dist[g] || 0) + 1; });
 
-  const insights = relAssignments.map(id => { const a = c.assignments.find(x => x.id === id); const rc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "revision").length; const mc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "mastery").length; return { ...a, rc, mc, ns: filteredStudents.length - rc - mc }; }).filter(a => a.rc > 0).sort((a, b) => b.rc - a.rc);
+  const insights = relAssignments.map(id => { const a = c.assignments.find(x => x.id === id); const rc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "revision").length; const nsc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "not_submitted").length; const mc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "mastery").length; return { ...a, rc, nsc, mc, ns: filteredStudents.length - rc - nsc - mc }; }).filter(a => a.rc > 0 || a.nsc > 0).sort((a, b) => (b.rc + b.nsc) - (a.rc + a.nsc));
   const cpSum = (c.classPrep || []).map(cp => ({ ...cp, done: filteredStudents.filter(s => (cP[s.id] || {})[cp.id]).length }));
 
   const exportCSV = () => {
@@ -1210,7 +1210,7 @@ export default function App() {
     const rows = filteredStudents.map(st => {
       const si = iS[st.id] || {}; const sc = sC[st.id] || {}; const cp2 = cP[st.id] || {}; const tk = (toks[st.id] || []).length;
       const ig = calcInstrGrade(si, relAssignments); const sg = calcStudentGrade(sc, si, relAssignments, ck, dueDates); const tok = tokBal(tk, 0);
-      return [st.last, st.first, st.email, ...(hasSections ? [st.section || ''] : []), ...allA.map(x => si[x.id] === "mastery" ? "M" : si[x.id] === "revision" ? "R" : ""), ...allA.map(x => sc[x.id] ? "Y" : ""), ...cpI.map(x => cp2[x.id] ? "Y" : ""), tok.used, tok.avail, ig === "early" ? "" : ig, sg === "early" ? "" : sg].map(v => `"${v}"`).join(",");
+      return [st.last, st.first, st.email, ...(hasSections ? [st.section || ''] : []), ...allA.map(x => si[x.id] === "mastery" ? "M" : si[x.id] === "revision" ? "R" : si[x.id] === "not_submitted" ? "NS" : ""), ...allA.map(x => sc[x.id] ? "Y" : ""), ...cpI.map(x => cp2[x.id] ? "Y" : ""), tok.used, tok.avail, ig === "early" ? "" : ig, sg === "early" ? "" : sg].map(v => `"${v}"`).join(",");
     });
     const csvContent = header + "\n" + rows.join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" }); const url = URL.createObjectURL(blob);
@@ -1257,7 +1257,7 @@ export default function App() {
               const studentChecked = !!(sC[s.id] || {})[batchAsgn];
               const opts = ba.eval === "completion"
                 ? [{ v: "mastery", l: "✓ Complete", bg: "#D4EDDA", c: "#2D6A4F" }, { v: "", l: "—", bg: "#F5F4F0", c: "#767676" }]
-                : [{ v: "mastery", l: "Mastered", bg: "#D4EDDA", c: "#2D6A4F" }, { v: "revision", l: "Revise", bg: "#FFF3CD", c: "#856404" }, { v: "", l: "—", bg: "#F5F4F0", c: "#767676" }];
+                : [{ v: "mastery", l: "Mastered", bg: "#D4EDDA", c: "#2D6A4F" }, { v: "revision", l: "Revise", bg: "#FFF3CD", c: "#856404" }, { v: "not_submitted", l: "NS", bg: "#FCE8E8", c: "#C0392B" }, { v: "", l: "—", bg: "#F5F4F0", c: "#767676" }];
               return <div key={s.id} style={{ borderBottom: si < bSorted.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px" }}>
                   <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, width: 120, flexShrink: 0 }}>{sortBy === "last" ? `${s.last}, ${s.first}` : `${s.first} ${s.last}`}</div>
@@ -1571,25 +1571,32 @@ export default function App() {
                         const sName = `${ts.profiles?.first_name || ''} ${ts.profiles?.last_name || ''}`.trim();
                         const initials = `${(ts.profiles?.first_name || '')[0] || ''}${(ts.profiles?.last_name || '')[0] || ''}`;
                         const st = (iS[ts.profile_id] || {})[ts.assignment_id] || '';
-                        const circBg = st === 'mastery' ? '#D4EDDA' : st === 'revision' ? '#FFF3CD' : '#DCEEFB';
-                        const circColor = st === 'mastery' ? '#2D6A4F' : st === 'revision' ? '#856404' : '#1565C0';
+                        const circBg = st === 'mastery' ? '#D4EDDA' : st === 'revision' ? '#FFF3CD' : st === 'not_submitted' ? '#FCE8E8' : '#DCEEFB';
+                        const circColor = st === 'mastery' ? '#2D6A4F' : st === 'revision' ? '#856404' : st === 'not_submitted' ? '#C0392B' : '#1565C0';
                         const noteKey = `teach_${ts.profile_id}_${ts.assignment_id}`;
                         const isEditingNote = noteFor === noteKey;
                         const existingNote = (iN[ts.profile_id] || {})[ts.assignment_id];
                         return <div key={ts.id} style={{ borderBottom: si < grp.students.length - 1 ? "1px solid #F5F3EF" : "none", opacity: st === 'mastery' ? 0.5 : 1 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px" }}>
-                            <div style={{ width: 32, height: 32, borderRadius: "50%", background: circBg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: circColor, flexShrink: 0 }}>{st === 'mastery' ? '✓' : st === 'revision' ? 'R' : initials}</div>
+                            <div style={{ width: 32, height: 32, borderRadius: "50%", background: circBg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: circColor, flexShrink: 0 }}>{st === 'mastery' ? '✓' : st === 'revision' ? 'R' : st === 'not_submitted' ? 'NS' : initials}</div>
                             <div style={{ flex: 1 }}>
                               <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, textDecoration: st === 'mastery' ? 'line-through' : 'none', color: st === 'mastery' ? '#767676' : '#1A1A1A' }}>{sName}</div>
-                              <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>Teaching {formatDate(ts.teach_date)}{st ? ` · ${st === 'mastery' ? 'Mastered' : 'Needs revision'}` : ''}</div>
+                              <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>Teaching {formatDate(ts.teach_date)}{st ? ` · ${st === 'mastery' ? 'Mastered' : st === 'revision' ? 'Needs revision' : 'Not submitted'}` : ''}</div>
                             </div>
                             {!st && <div style={{ display: "flex", gap: 4 }}>
                               <button aria-label={`Mark ${sName} mastered`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'mastery'); refresh(); }} style={{ padding: "4px 10px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>M</button>
                               <button aria-label={`Mark ${sName} revision`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'revision'); refresh(); }} style={{ padding: "4px 10px", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>R</button>
+                              <button aria-label={`Mark ${sName} not submitted`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'not_submitted'); refresh(); }} style={{ padding: "4px 10px", background: "#FCE8E8", border: "1px solid #F5B7B7", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#C0392B", cursor: "pointer" }}>NS</button>
                               <button aria-label={`Add note for ${sName}`} onClick={() => { setNoteFor(isEditingNote ? null : noteKey); setNoteVal(existingNote || ''); }} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: existingNote ? "#856404" : "#767676", cursor: "pointer", background: "#fff" }}>{existingNote ? "✎" : "+"}</button>
                             </div>}
                             {st === 'revision' && <div style={{ display: "flex", gap: 4 }}>
                               <button aria-label={`Mark ${sName} mastered`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'mastery'); refresh(); }} style={{ padding: "4px 10px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>→ M</button>
+                              <button aria-label={`Mark ${sName} not submitted`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'not_submitted'); refresh(); }} style={{ padding: "4px 10px", background: "#FCE8E8", border: "1px solid #F5B7B7", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#C0392B", cursor: "pointer" }}>NS</button>
+                              <button aria-label={`Add note for ${sName}`} onClick={() => { setNoteFor(isEditingNote ? null : noteKey); setNoteVal(existingNote || ''); }} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: existingNote ? "#856404" : "#767676", cursor: "pointer", background: "#fff" }}>{existingNote ? "✎" : "+"}</button>
+                            </div>}
+                            {st === 'not_submitted' && <div style={{ display: "flex", gap: 4 }}>
+                              <button aria-label={`Mark ${sName} mastered`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'mastery'); refresh(); }} style={{ padding: "4px 10px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>→ M</button>
+                              <button aria-label={`Mark ${sName} revision needed`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'revision'); refresh(); }} style={{ padding: "4px 10px", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>→ R</button>
                               <button aria-label={`Add note for ${sName}`} onClick={() => { setNoteFor(isEditingNote ? null : noteKey); setNoteVal(existingNote || ''); }} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: existingNote ? "#856404" : "#767676", cursor: "pointer", background: "#fff" }}>{existingNote ? "✎" : "+"}</button>
                             </div>}
                           </div>
@@ -1666,9 +1673,10 @@ export default function App() {
                 <div style={{ flex: 1, display: "flex", gap: 3 }}>
                   {relAssignments.map(id => { const st = (iS[s.id] || {})[id] || "";
                     const aName = c.assignments.find(a => a.id === id)?.name || id;
-                    const nextVal = st === "" ? "mastery" : st === "mastery" ? "revision" : null;
-                    const cycleLabel = st === "" ? `Mark ${aName} mastered` : st === "mastery" ? `Change ${aName} to needs revision` : `Clear ${aName}`;
-                    return <button key={id} title={aName} aria-label={cycleLabel} onClick={() => handleInstrUpdate(s.id, id, nextVal)} style={{ flex: 1, minWidth: 28, maxWidth: 40, height: 22, borderRadius: 4, background: st === "mastery" ? "#D4EDDA" : st === "revision" ? "#FFF3CD" : "#F5F4F0", border: !st ? "1.5px dashed #E8E6E1" : "1.5px solid transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: st === "mastery" ? "#2D6A4F" : st === "revision" ? "#856404" : "transparent", cursor: "pointer", padding: 0 }}>{st === "mastery" ? "M" : st === "revision" ? "R" : ""}</button>;
+                    const isMastery = c.assignments.find(a => a.id === id)?.eval === "mastery";
+                    const nextVal = st === "" ? "mastery" : st === "mastery" ? (isMastery ? "revision" : null) : st === "revision" ? "not_submitted" : null;
+                    const cycleLabel = st === "" ? `Mark ${aName} mastered` : st === "mastery" ? (isMastery ? `Change ${aName} to needs revision` : `Clear ${aName}`) : st === "revision" ? `Change ${aName} to not submitted` : `Clear ${aName}`;
+                    return <button key={id} title={aName} aria-label={cycleLabel} onClick={() => handleInstrUpdate(s.id, id, nextVal)} style={{ flex: 1, minWidth: 28, maxWidth: 40, height: 22, borderRadius: 4, background: st === "mastery" ? "#D4EDDA" : st === "revision" ? "#FFF3CD" : st === "not_submitted" ? "#FCE8E8" : "#F5F4F0", border: !st ? "1.5px dashed #E8E6E1" : "1.5px solid transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: st === "mastery" ? "#2D6A4F" : st === "revision" ? "#856404" : st === "not_submitted" ? "#C0392B" : "transparent", cursor: "pointer", padding: 0 }}>{st === "mastery" ? "M" : st === "revision" ? "R" : st === "not_submitted" ? "NS" : ""}</button>;
                   })}
                 </div>
                 <div style={{ width: 50, flexShrink: 0, textAlign: "right", fontFamily: F.b, fontSize: 11, color: mm ? "#E65100" : "#767676" }}>{sg === "early" ? "—" : sg}{mm ? " ⚠" : ""}</div>
