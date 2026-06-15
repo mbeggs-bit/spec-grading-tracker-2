@@ -1645,8 +1645,9 @@ export default function App() {
           {expStudents && <><div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
             <div style={{ minWidth: 400 }}>
             <div style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "8px 16px 6px", borderBottom: "2px solid #F0EEEA", background: "#FAFAF7" }}>
-              <div style={{ width: 24, flexShrink: 0 }} />
-              <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676" }}>Student</div>
+              <div style={{ width: 22, flexShrink: 0 }} aria-hidden="true" />
+              <div style={{ width: 130, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676" }}>Student</div>
+              <div style={{ width: 22, flexShrink: 0 }} aria-hidden="true" />
               <div style={{ flex: 1, display: "flex", gap: 3 }}>{relAssignments.map(id => { const x = c.assignments.find(a => a.id === id);
                 const words = (x?.name || "").split(' ');
                 const abbr = words.length >= 3 ? words.filter(w => w.length > 1).map(w => w[0]).join('').substring(0, 5) : (x?.name || "").substring(0, 6);
