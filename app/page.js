@@ -1007,8 +1007,9 @@ export default function App() {
   const pending = fq.filter(f => !f.resolved);
 
   const handleInstrUpdate = async (pid, aid, val) => {
+    // Capture only this field's prior value, for a surgical rollback.
+    const prevVal = (courseData.iS[pid] || {})[aid];
     // Optimistic update — reflect immediately in UI
-    const prevIS = courseData.iS;
     setCourseData(prev => {
       const prevStudent = prev.iS[pid] || {};
       const updatedStudent = val === null
@@ -1016,10 +1017,17 @@ export default function App() {
         : { ...prevStudent, [aid]: val };
       return { ...prev, iS: { ...prev.iS, [pid]: updatedStudent } };
     });
-    // Background DB write — roll back on failure
+    // Background DB write — on failure, reverse ONLY this field, functionally,
+    // so any other marks made during the in-flight window are preserved.
     const { error } = await upsertInstrStatus(pid, ck, aid, val);
     if (error) {
-      setCourseData(prev => ({ ...prev, iS: prevIS }));
+      setCourseData(prev => {
+        const cur = prev.iS[pid] || {};
+        const reverted = prevVal === undefined
+          ? Object.fromEntries(Object.entries(cur).filter(([k]) => k !== aid))
+          : { ...cur, [aid]: prevVal };
+        return { ...prev, iS: { ...prev.iS, [pid]: reverted } };
+      });
       showToast('Failed to save — please try again.');
     }
   };
@@ -1042,8 +1050,10 @@ export default function App() {
     }
   };
   const markAllInstr = async (aid, val) => {
+    // Capture each student's prior value for THIS assignment only.
+    const prevVals = {};
+    students.forEach(s => { prevVals[s.id] = (courseData.iS[s.id] || {})[aid]; });
     // Optimistic update — apply to all students at once
-    const prevIS = courseData.iS;
     setCourseData(prev => {
       const updatedIS = { ...prev.iS };
       students.forEach(s => {
@@ -1054,11 +1064,23 @@ export default function App() {
       });
       return { ...prev, iS: updatedIS };
     });
-    // Parallel DB writes — roll back if any fail
+    // Parallel DB writes — on failure, reverse ONLY this assignment column per
+    // student, functionally, so marks on other assignments made during the
+    // in-flight window are preserved.
     const results = await Promise.all(students.map(s => upsertInstrStatus(s.id, ck, aid, val)));
     const anyError = results.some(r => r?.error);
     if (anyError) {
-      setCourseData(prev => ({ ...prev, iS: prevIS }));
+      setCourseData(prev => {
+        const updatedIS = { ...prev.iS };
+        students.forEach(s => {
+          const cur = updatedIS[s.id] || {};
+          const pv = prevVals[s.id];
+          updatedIS[s.id] = pv === undefined
+            ? Object.fromEntries(Object.entries(cur).filter(([k]) => k !== aid))
+            : { ...cur, [aid]: pv };
+        });
+        return { ...prev, iS: updatedIS };
+      });
       showToast('Some saves failed — please try again.');
     }
   };
@@ -1076,18 +1098,25 @@ export default function App() {
   //   No mark, due passed  → in calc, not done (missing)
   //   No mark, due not yet → invisible (not in calc)
   const calcInstrGrade = (instrStatuses, relIds) => {
+    // INSTRUCTOR VIEW ONLY. The grade reflects exactly what the instructor has
+    // evaluated — nothing else. An item the instructor has not marked is invisible
+    // to the calc, regardless of whether its due date has passed. This means being
+    // behind on grading never produces an F: blank items neither help nor hurt.
+    //   M               -> done (helps)
+    //   R / NS           -> in calc, not done (hurts)
+    //   blank (any date) -> invisible
+    // To register a genuine miss on an overdue item, the instructor marks it NS.
+    // (This is separate from calcStudentGrade, which is governed by the spec's
+    // dual-gate rules and is not affected by this function.)
     const done = new Set();
     const relevant = new Set();
-    const today = new Date(); today.setHours(23, 59, 59, 999);
     for (const id of relIds) {
       const st = instrStatuses[id];
       if (st === "mastery") { relevant.add(id); done.add(id); }
       else if (st === "revision" || st === "not_submitted") { relevant.add(id); }
-      else {
-        const dd = dueDates[id]?.date;
-        if (dd && new Date(dd + 'T23:59:59') <= today) relevant.add(id);
-      }
+      // blank: not added to relevant — invisible to the instructor calc
     }
+    // No items evaluated yet -> ungraded.
     if (relevant.size === 0) return "early";
     if (done.size === 0) return "F";
     const relArr = [...relevant];
@@ -1122,32 +1151,35 @@ export default function App() {
   };
 
   // ── Instructor blockers for email ────────────────────────────────
-  // Returns what a student still needs to reach a given target track,
-  // based on instructor M/R marks + passed due dates only.
+  // Returns what a student still needs to reach a given target track, based
+  // ONLY on what the instructor has evaluated — matching calcInstrGrade.
+  // An item the instructor has not marked is invisible here (not listed as a
+  // blocker), regardless of due date. Only items marked R or NS (evaluated,
+  // not done) appear as outstanding. M counts as done. This keeps the email's
+  // to-do list consistent with the instructor-side grade.
   const getInstrBlockers = (instrStatuses, relIds, targetGrade) => {
     const t = c.tracks[targetGrade]; if (!t) return [];
-    const today = new Date(); today.setHours(23, 59, 59, 999);
     const done = new Set();
     const relevant = new Set();
     for (const id of relIds) {
       const st = instrStatuses[id];
       if (st === "mastery") { relevant.add(id); done.add(id); }
       else if (st === "revision" || st === "not_submitted") { relevant.add(id); }
-      else { const dd = dueDates[id]?.date; if (dd && new Date(dd + 'T23:59:59') <= today) relevant.add(id); }
+      // blank: invisible — not a blocker until the instructor evaluates it
     }
-    const relArr = [...relevant];
+    const rel = (id) => relevant.has(id);
     const blockers = [];
-    t.req.filter(id => relIds.includes(id) && !done.has(id)).forEach(id => blockers.push(id));
+    t.req.filter(id => rel(id) && !done.has(id)).forEach(id => blockers.push(id));
     (t.pick || []).forEach(p => {
-      const avail = p.from.filter(id => relIds.includes(id));
+      const avail = p.from.filter(id => rel(id));
       const need = p.need - avail.filter(id => done.has(id)).length;
       if (need > 0) avail.filter(id => !done.has(id)).slice(0, need).forEach(id => { if (!blockers.includes(id)) blockers.push(id); });
     });
     (t.pickGroup || []).forEach(pg => {
       let completed = 0;
-      for (const gr of pg.from) { if (gr.filter(id => relIds.includes(id)).length > 0 && gr.filter(id => relIds.includes(id)).every(id => done.has(id))) completed++; }
+      for (const gr of pg.from) { if (gr.filter(id => rel(id)).length > 0 && gr.filter(id => rel(id)).every(id => done.has(id))) completed++; }
       const need = pg.need - completed;
-      if (need > 0) { for (const gr of pg.from) { const grAvail = gr.filter(id => relIds.includes(id)); if (!grAvail.every(id => done.has(id))) { grAvail.filter(id => !done.has(id)).forEach(id => { if (!blockers.includes(id)) blockers.push(id); }); break; } } }
+      if (need > 0) { for (const gr of pg.from) { const grAvail = gr.filter(id => rel(id)); if (grAvail.length > 0 && !grAvail.every(id => done.has(id))) { grAvail.filter(id => !done.has(id)).forEach(id => { if (!blockers.includes(id)) blockers.push(id); }); break; } } }
     });
     return blockers;
   };
