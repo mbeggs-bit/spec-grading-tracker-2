@@ -985,10 +985,22 @@ export default function App() {
                   <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#333" }}>{g} Track</span>
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-                  {t.req.map(id => { const a = c.assignments.find(x => x.id === id); const ch = !!myChecks[id];
+                  {(t.req || []).map(id => { const a = c.assignments.find(x => x.id === id); const ch = !!myChecks[id];
                     return <span key={id} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: ch ? "#D4EDDA" : "#fff", border: `1px solid ${ch ? "#B7DFBF" : "#E8E6E1"}`, color: ch ? "#2D6A4F" : "#555" }}>{ch ? "✓ " : ""}{a?.name || id}</span>;
                   })}
                 </div>
+                {(t.pick || []).map((p, pi) => {
+                  const doneCount = p.from.filter(id => !!myChecks[id]).length;
+                  const needN = Math.min(p.need, p.from.length);
+                  return <div key={pi} style={{ marginTop: 4 }}>
+                    <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 2 }}>Any {needN} of {p.label || "the following"} ({doneCount}/{needN} done):</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+                      {p.from.map(id => { const a = c.assignments.find(x => x.id === id); const ch = !!myChecks[id];
+                        return <span key={id} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: ch ? "#D4EDDA" : "#fff", border: `1px solid ${ch ? "#B7DFBF" : "#E8E6E1"}`, color: ch ? "#2D6A4F" : "#555" }}>{ch ? "✓ " : ""}{a?.name || id}</span>;
+                      })}
+                    </div>
+                  </div>;
+                })}
               </div>;
             })}
           </div>}
@@ -1136,15 +1148,15 @@ export default function App() {
     const relArr = [...relevant];
     for (const g of ["A", "B", "C", "D"]) {
       const t = c.tracks[g]; if (!t) continue;
-      const hasReq = t.req.some(id => relArr.includes(id));
+      const hasReq = (t.req || []).some(id => relArr.includes(id));
       const hasPick = (t.pick || []).some(p => p.from.some(id => relArr.includes(id)));
       const hasPickGroup = (t.pickGroup || []).some(pg => pg.from.some(gr => gr.some(id => relArr.includes(id))));
       if (!hasReq && !hasPick && !hasPickGroup) continue;
-      const reqMet = t.req.filter(id => relArr.includes(id)).every(id => done.has(id));
+      const reqMet = (t.req || []).filter(id => relArr.includes(id)).every(id => done.has(id));
       const pickMet = (t.pick || []).every(p => {
         const avail = p.from.filter(id => relArr.includes(id));
         if (avail.length === 0) return true;
-        return avail.filter(id => done.has(id)).length >= p.need;
+        return avail.filter(id => done.has(id)).length >= Math.min(p.need, avail.length);
       });
       const pickGroupMet = (t.pickGroup || []).every(pg => {
         const anyAvail = pg.from.some(gr => gr.some(id => relArr.includes(id)));
@@ -1154,9 +1166,9 @@ export default function App() {
         return completed >= pg.need;
       });
       if (g === "D" && t.isOr) {
-        const mOk = t.req.filter(id => relArr.includes(id)).every(id => done.has(id));
+        const mOk = (t.req || []).filter(id => relArr.includes(id)).every(id => done.has(id));
         const aOk = (t.alt || []).filter(id => relArr.includes(id)).every(id => done.has(id));
-        if ((t.req.some(id => relArr.includes(id)) && mOk) || (t.alt && t.alt.some(id => relArr.includes(id)) && aOk)) return g;
+        if (((t.req || []).some(id => relArr.includes(id)) && mOk) || (t.alt && t.alt.some(id => relArr.includes(id)) && aOk)) return g;
       } else {
         if (reqMet && pickMet && pickGroupMet) return g;
       }
@@ -1183,7 +1195,7 @@ export default function App() {
     }
     const rel = (id) => relevant.has(id);
     const blockers = [];
-    t.req.filter(id => rel(id) && !done.has(id)).forEach(id => blockers.push(id));
+    (t.req || []).filter(id => rel(id) && !done.has(id)).forEach(id => blockers.push(id));
     (t.pick || []).forEach(p => {
       const avail = p.from.filter(id => rel(id));
       const need = p.need - avail.filter(id => done.has(id)).length;
@@ -1979,7 +1991,7 @@ export default function App() {
             return <div key={g} style={{ marginBottom: 12, background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
               <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid #F0EEEA" }}>
                 <div style={{ width: 28, height: 28, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 14, fontWeight: 700, color: m.c }}>{g}</div>
-                <div style={{ flex: 1 }}><div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600 }}>{g} Track — {on.length}</div><div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{t.req.map(id => c.assignments.find(a => a.id === id)?.name).join(", ")}</div></div>
+                <div style={{ flex: 1 }}><div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600 }}>{g} Track — {on.length}</div><div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{[...(t.req || []).map(id => c.assignments.find(a => a.id === id)?.name), ...((t.pick || []).map(p => `any ${Math.min(p.need, p.from.length)} of ${p.label || p.from.map(id => c.assignments.find(a => a.id === id)?.name).join("/")}`))].filter(Boolean).join(", ")}</div></div>
               </div>
               <div style={{ padding: "6px 16px 10px" }}>{on.length === 0 ? <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>None</div> :
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>{on.map(s => <span key={s.id} style={{ padding: "2px 8px", background: m.bg, borderRadius: 4, fontFamily: F.b, fontSize: 11, fontWeight: 500, color: m.c }}>{s.name}</span>)}</div>}</div>
