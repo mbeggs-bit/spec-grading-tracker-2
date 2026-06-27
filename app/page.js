@@ -705,10 +705,10 @@ export default function App() {
               <GradeRing grade={grade} size={54} />
               <div style={{ flex: 1, minWidth: 180 }}>
                 <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "#6B6B6B", marginBottom: 2 }}>
-                  {grade === "early" ? "Status" : grade === "F" ? "Current Track" : "On Track For"}
+                  {grade === "early" ? "Status" : "Based on what's been assigned so far"}
                 </div>
                 <div style={{ fontFamily: F.d, fontSize: 22, fontWeight: 700, color: (TM[grade] || TM.F).c }}>
-                  {grade === "early" ? "Getting Started" : grade === "F" ? "Check off assignments to build your track" : `${grade} Track`}
+                  {grade === "early" ? "Getting Started" : grade === "F" ? "You're on F track" : `You're on ${grade} track`}
                 </div>
                 <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{relAssignments.filter(id => myChecks[id]).length} of {relAssignments.length} checked off</div>
               </div>
@@ -722,7 +722,13 @@ export default function App() {
             {target && blockers.length > 0 && <div style={{ marginTop: 14, padding: "10px 14px", background: "#FFFCF5", borderRadius: 8, borderLeft: `3px solid ${(TM[target] || TM.F).c}` }}>
               <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: (TM[target] || TM.F).c, marginBottom: 3 }}>To reach {target} track:</div>
               <div style={{ fontFamily: F.b, fontSize: 12, color: "#666", lineHeight: 1.6 }}>
-                {blockers.map((id, i) => { const a = c.assignments.find(x => x.id === id); return <span key={id}>{i > 0 ? " · " : ""}<strong>{a?.name || id}</strong>{a?.eval === "mastery" ? <span style={{ fontSize: 11, color: "#C0392B", marginLeft: 2 }}>(mastery)</span> : <span style={{ fontSize: 11, color: "#1565C0", marginLeft: 2 }}>(completion)</span>}</span>; })}
+                {blockers.map((id, i) => {
+                  const a = c.assignments.find(x => x.id === id);
+                  const isMastery = a?.eval === "mastery";
+                  const verb = (isMastery && myInstrStatuses[id] === "revision") ? "Revise"
+                    : (!isMastery ? "Submit late" : "Complete");
+                  return <span key={id}>{i > 0 ? " · " : ""}<span style={{ color: "#555", fontWeight: 600 }}>{verb}</span> <strong>{a?.name || id}</strong></span>;
+                })}
               </div>
             </div>}
             {grade === "early" && <div style={{ marginTop: 12, padding: "10px 14px", background: "#F3F4F6", borderRadius: 8, fontFamily: F.b, fontSize: 12, color: "#6B7280" }}>Check off your first assignment to see your grade track!</div>}
@@ -816,19 +822,27 @@ export default function App() {
                   const isNS = instrStatus === 'not_submitted';
 
                   // Locked mastery item — not yet evaluated, or marked NS
-                  if (isLocked) return <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", borderBottom: i < grpA.length - 1 ? "1px solid #F5F3EF" : "none" }}>
-                    <div aria-hidden="true" style={{ width: 22, height: 22, borderRadius: 6, border: "2px solid #E0DDD8", background: "#F5F4F0", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      <span style={{ fontSize: 10, color: "#B0ADA8" }}>🔒</span>
+                  if (isLocked) return <div key={a.id} style={{ borderBottom: i < grpA.length - 1 ? "1px solid #F5F3EF" : "none" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px" }}>
+                      <div aria-hidden="true" style={{ width: 22, height: 22, borderRadius: 6, border: "2px solid #E0DDD8", background: "#F5F4F0", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        <span style={{ fontSize: 10, color: "#B0ADA8" }}>🔒</span>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <span style={{ fontFamily: F.b, fontSize: 13, color: "#555" }}>{a.name}</span>
+                        {(dueDates[a.id]?.date || dueDates[a.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{dueDates[a.id].date ? new Date(dueDates[a.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[a.id].date && dueDates[a.id].label ? ' · ' : ''}{dueDates[a.id].label || ''}</div>}
+                        {isNS
+                          ? <div style={{ fontFamily: F.b, fontSize: 11, color: "#C0392B", marginTop: 2, fontStyle: "italic" }}>No submission recorded. If you believe this is an error, contact Dr. Beggs.</div>
+                          : <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 2, fontStyle: "italic" }}>Awaiting review from Dr. Beggs</div>
+                        }
+                      </div>
+                      <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />
                     </div>
-                    <div style={{ flex: 1 }}>
-                      <span style={{ fontFamily: F.b, fontSize: 13, color: "#555" }}>{a.name}</span>
-                      {(dueDates[a.id]?.date || dueDates[a.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{dueDates[a.id].date ? new Date(dueDates[a.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[a.id].date && dueDates[a.id].label ? ' · ' : ''}{dueDates[a.id].label || ''}</div>}
-                      {isNS
-                        ? <div style={{ fontFamily: F.b, fontSize: 11, color: "#C0392B", marginTop: 2, fontStyle: "italic" }}>No submission recorded. If you believe this is an error, contact Dr. Beggs.</div>
-                        : <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 2, fontStyle: "italic" }}>Awaiting review from Dr. Beggs</div>
-                      }
-                    </div>
-                    <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />
+                    {showTokenBtn(a) && isFirstInGroup(a) && <div style={{ padding: "0 16px 10px 48px" }}>
+                      <button onClick={(e) => { e.stopPropagation(); const tt = getTokenTarget(a.id, ck); setModal(tt); setTfType("late"); setTfNote(""); setTfLink(""); setTfExtra(""); }}
+                        style={{ padding: "4px 12px", background: "#FFFCF5", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>
+                        Submit a token{a.tokenGroup ? " (entire project)" : ""}
+                      </button>
+                    </div>}
                   </div>;
 
                   // Unlocked item — either completion, or mastery with instructor evaluation
@@ -2019,10 +2033,10 @@ export default function App() {
                     <GradeRing grade={pvGrade} size={50} label={`${ps.name}'s grade track: ${pvGrade}`} />
                     <div style={{ flex: 1, minWidth: 160 }}>
                       <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "#6B6B6B", marginBottom: 2 }}>
-                        {pvGrade === "early" ? "Status" : pvGrade === "F" ? "Current Track" : "On Track For"}
+                        {pvGrade === "early" ? "Status" : "Based on what's been assigned so far"}
                       </div>
                       <div style={{ fontFamily: F.d, fontSize: 20, fontWeight: 700, color: (TM[pvGrade] || TM.F).c }}>
-                        {pvGrade === "early" ? "Getting Started" : pvGrade === "F" ? "Check off assignments to build your track" : `${pvGrade} Track`}
+                        {pvGrade === "early" ? "Getting Started" : pvGrade === "F" ? "You're on F track" : `You're on ${pvGrade} track`}
                       </div>
                       <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{relAssignments.filter(id => pvChecks[id]).length} of {relAssignments.length} checked off</div>
                     </div>
@@ -2036,7 +2050,13 @@ export default function App() {
                   {pvTarget && pvBlockers.length > 0 && <div style={{ marginTop: 12, padding: "10px 14px", background: "#FFFCF5", borderRadius: 8, borderLeft: `3px solid ${(TM[pvTarget] || TM.F).c}` }}>
                     <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: (TM[pvTarget] || TM.F).c, marginBottom: 3 }}>To reach {pvTarget} track:</div>
                     <div style={{ fontFamily: F.b, fontSize: 12, color: "#666", lineHeight: 1.6 }}>
-                      {pvBlockers.map((id, i) => { const a = c.assignments.find(x => x.id === id); return <span key={id}>{i > 0 ? " · " : ""}<strong>{a?.name || id}</strong>{a?.eval === "mastery" ? <span style={{ fontSize: 11, color: "#C0392B", marginLeft: 2 }}>(mastery)</span> : <span style={{ fontSize: 11, color: "#1565C0", marginLeft: 2 }}>(completion)</span>}</span>; })}
+                      {pvBlockers.map((id, i) => {
+                        const a = c.assignments.find(x => x.id === id);
+                        const isMastery = a?.eval === "mastery";
+                        const verb = (isMastery && pvInstrSt[id] === "revision") ? "Revise"
+                          : (!isMastery ? "Submit late" : "Complete");
+                        return <span key={id}>{i > 0 ? " · " : ""}<span style={{ color: "#555", fontWeight: 600 }}>{verb}</span> <strong>{a?.name || id}</strong></span>;
+                      })}
                     </div>
                   </div>}
                   {pvGrade === "early" && <div style={{ marginTop: 10, padding: "10px 14px", background: "#F3F4F6", borderRadius: 8, fontFamily: F.b, fontSize: 12, color: "#6B7280" }}>Check off your first assignment to see your grade track!</div>}
