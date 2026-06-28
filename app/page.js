@@ -725,8 +725,11 @@ export default function App() {
                 {blockers.map((id, i) => {
                   const a = c.assignments.find(x => x.id === id);
                   const isMastery = a?.eval === "mastery";
-                  const verb = (isMastery && myInstrStatuses[id] === "revision") ? "Revise"
-                    : (!isMastery ? "Submit late" : "Complete");
+                  const st = myInstrStatuses[id];
+                  const verb = !isMastery ? "Submit late"
+                    : st === "revision" ? "Revise"
+                    : st === "not_submitted" ? "Submit late"
+                    : "Complete";
                   return <span key={id}>{i > 0 ? " · " : ""}<span style={{ color: "#555", fontWeight: 600 }}>{verb}</span> <strong>{a?.name || id}</strong></span>;
                 })}
               </div>
@@ -2065,8 +2068,11 @@ export default function App() {
                       {pvBlockers.map((id, i) => {
                         const a = c.assignments.find(x => x.id === id);
                         const isMastery = a?.eval === "mastery";
-                        const verb = (isMastery && pvInstrSt[id] === "revision") ? "Revise"
-                          : (!isMastery ? "Submit late" : "Complete");
+                        const st = pvInstrSt[id];
+                        const verb = !isMastery ? "Submit late"
+                          : st === "revision" ? "Revise"
+                          : st === "not_submitted" ? "Submit late"
+                          : "Complete";
                         return <span key={id}>{i > 0 ? " · " : ""}<span style={{ color: "#555", fontWeight: 600 }}>{verb}</span> <strong>{a?.name || id}</strong></span>;
                       })}
                     </div>
