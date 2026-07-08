@@ -15,8 +15,8 @@ async function loadUserProfile(email) {
 }
 
 async function loadEnrollments(profileId) {
-  const { data } = await supabase.from('enrollments').select('course_key').eq('profile_id', profileId);
-  return (data || []).map(e => e.course_key);
+  const { data } = await supabase.from('enrollments').select('course_key, active').eq('profile_id', profileId);
+  return (data || []).map(e => ({ key: e.course_key, active: e.active !== false }));
 }
 
 async function loadReleasedAssignments(courseKey) {
@@ -358,7 +358,7 @@ export default function App() {
       if (profile) {
         const courses = await loadEnrollments(profile.id);
         setUser({ profile, courses });
-        if (courses.length === 1) setCk(courses[0]);
+        if (courses.length === 1) setCk(courses[0].key);
       }
     }
     setLoading(false);
@@ -445,8 +445,11 @@ export default function App() {
         // Sign-in succeeded — fall through to enrollment logic below
         const authId = signInData.user.id;
         const existingEnrollments = await loadEnrollments(authId);
-        if (!existingEnrollments.includes(courseCode.course_key)) {
+        const entry = existingEnrollments.find(e => e.key === courseCode.course_key);
+        if (!entry) {
           await supabase.from('enrollments').insert({ profile_id: authId, course_key: courseCode.course_key, section: courseCode.section || null });
+        } else if (!entry.active) {
+          await supabase.from('enrollments').update({ active: true, section: courseCode.section || null }).eq('profile_id', authId).eq('course_key', courseCode.course_key);
         }
         await checkAuth();
         return;
@@ -472,8 +475,12 @@ export default function App() {
     } else if (existingProfile.id === authId) {
       // Returning student from another course — add enrollment for this course if not already enrolled
       const existingEnrollments = await loadEnrollments(authId);
-      if (!existingEnrollments.includes(courseCode.course_key)) {
+      const entry = existingEnrollments.find(e => e.key === courseCode.course_key);
+      if (!entry) {
         await supabase.from('enrollments').insert({ profile_id: authId, course_key: courseCode.course_key, section: courseCode.section || null });
+      } else if (!entry.active) {
+        // Re-joining a course she was previously dropped from — reactivate rather than duplicate-insert
+        await supabase.from('enrollments').update({ active: true, section: courseCode.section || null }).eq('profile_id', authId).eq('course_key', courseCode.course_key);
       }
     } else {
       // Profile exists but with wrong ID — this shouldn't happen with new flow but just in case
@@ -511,14 +518,21 @@ export default function App() {
 
     // Check not already enrolled
     const existing = await loadEnrollments(user.profile.id);
-    if (existing.includes(courseCode.course_key)) {
+    const existingEntry = existing.find(e => e.key === courseCode.course_key);
+    if (existingEntry && existingEntry.active) {
       setJoinErr("You're already enrolled in that course.");
       return;
     }
 
-    // Add enrollment
-    const { error } = await supabase.from('enrollments').insert({ profile_id: user.profile.id, course_key: courseCode.course_key, section: courseCode.section || null });
-    if (error) { setJoinErr('Something went wrong — please try again or contact Dr. Beggs.'); return; }
+    if (existingEntry && !existingEntry.active) {
+      // Re-joining a course she was previously dropped from — reactivate rather than duplicate-insert
+      const { error } = await supabase.from('enrollments').update({ active: true, section: courseCode.section || null }).eq('profile_id', user.profile.id).eq('course_key', courseCode.course_key);
+      if (error) { setJoinErr('Something went wrong — please try again or contact Dr. Beggs.'); return; }
+    } else {
+      // Add enrollment
+      const { error } = await supabase.from('enrollments').insert({ profile_id: user.profile.id, course_key: courseCode.course_key, section: courseCode.section || null });
+      if (error) { setJoinErr('Something went wrong — please try again or contact Dr. Beggs.'); return; }
+    }
 
     setJoinCode('');
     setJoinErr({ ok: true, msg: 'Course added! Select it below.' });
@@ -620,8 +634,14 @@ export default function App() {
         </header>
         <main id="main-content" style={{ maxWidth: 600, margin: "0 auto", padding: "40px 20px" }}>
           <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>Select Course</h1>
-          {user.courses.map(k => {
+          {user.courses.map(({ key: k, active }) => {
             const co = COURSES[k]; if (!co) return null;
+            if (!active) return (
+              <div key={k} aria-label={`${co.title} - no longer enrolled`} style={{ display: "block", width: "100%", padding: "16px 20px", marginBottom: 8, background: "#F5F4F0", border: "2px solid #E8E6E1", borderRadius: 10, textAlign: "left", position: "relative", overflow: "hidden", opacity: 0.7 }}>
+                <div style={{ fontFamily: F.d, fontSize: 16, fontWeight: 600, color: "#767676" }}>{co.title}</div>
+                <div style={{ fontFamily: F.b, fontSize: 11, color: "#C0392B", marginTop: 2 }}>You're no longer enrolled</div>
+              </div>
+            );
             return <button key={k} onClick={() => setCk(k)} aria-label={`${co.title} - ${co.assignments.length} assignments`} style={{ display: "block", width: "100%", padding: "16px 20px", marginBottom: 8, background: "#fff", border: "2px solid #E8E6E1", borderRadius: 10, cursor: "pointer", textAlign: "left", position: "relative", overflow: "hidden" }}
               onMouseEnter={e => e.currentTarget.style.borderColor = co.color} onMouseLeave={e => e.currentTarget.style.borderColor = "#E8E6E1"}>
               <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 4, background: co.color }} aria-hidden="true" />
@@ -672,6 +692,27 @@ export default function App() {
 
   // ---- STUDENT VIEW ----
   if (!isInstr) {
+    const myEnrollment = user.courses.find(co => co.key === ck);
+    if (myEnrollment && myEnrollment.active === false) {
+      return (
+        <div>
+          <a href="#main-content" className="skip-link">Skip to main content</a>
+          <header style={{ borderBottom: "1px solid #E8E6E1", background: "#fff" }}>
+            <div style={{ maxWidth: 600, margin: "0 auto", padding: "10px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{user.profile.first_name} {user.profile.last_name}</span>
+              <button onClick={handleLogout} aria-label="Sign out" style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", background: "none", border: "1px solid #E0DDD8", borderRadius: 4, padding: "3px 8px", cursor: "pointer" }}>Sign out</button>
+            </div>
+          </header>
+          <main id="main-content" style={{ maxWidth: 600, margin: "0 auto", padding: "60px 20px", textAlign: "center" }}>
+            <h1 style={{ fontFamily: F.d, fontSize: 22, fontWeight: 700, marginBottom: 10 }}>You're no longer enrolled in {c.short}</h1>
+            <div style={{ fontFamily: F.b, fontSize: 13, color: "#6B6B6B", lineHeight: 1.6, marginBottom: 24 }}>
+              If you believe this is a mistake, please contact Dr. Beggs.
+            </div>
+            <button onClick={() => setCk(null)} style={{ padding: "8px 16px", background: c.color, color: "#fff", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>← Back to course list</button>
+          </main>
+        </div>
+      );
+    }
     const myId = user.profile.id;
     const myChecks = sC[myId] || {};
     const myPrep = cP[myId] || {};
@@ -1462,7 +1503,7 @@ export default function App() {
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button onClick={handleLogout} aria-label="Sign out" style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>← Sign out</button>
             <div style={{ width: 1, height: 14, background: "#E0DDD8" }} aria-hidden="true" />
-            <select aria-label="Select course" value={ck} onChange={e => { setCk(e.target.value); setSectionFilter('all'); }} style={{ fontFamily: F.d, fontSize: 14, fontWeight: 600, border: "none", background: "none", cursor: "pointer", outline: "none" }}>{user.courses.map(k => <option key={k} value={k}>{COURSES[k]?.short || k}</option>)}</select>
+            <select aria-label="Select course" value={ck} onChange={e => { setCk(e.target.value); setSectionFilter('all'); }} style={{ fontFamily: F.d, fontSize: 14, fontWeight: 600, border: "none", background: "none", cursor: "pointer", outline: "none" }}>{user.courses.filter(co => co.active).map(({ key: k }) => <option key={k} value={k}>{COURSES[k]?.short || k}</option>)}</select>
             {hasSections && <select aria-label="Filter by section" value={sectionFilter} onChange={e => setSectionFilter(e.target.value)} style={{ fontFamily: F.b, fontSize: 11, border: "1px solid #E0DDD8", borderRadius: 5, padding: "3px 8px", background: "#fff", cursor: "pointer", color: sectionFilter === 'all' ? "#6B6B6B" : c.color, fontWeight: sectionFilter === 'all' ? 400 : 600 }}>
               <option value="all">All sections</option>
               {sectionKeys.map(s => <option key={s} value={s}>{courseSections?.[s]?.name || s}</option>)}
