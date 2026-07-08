@@ -43,8 +43,34 @@ async function upsertDueDate(courseKey, assignmentId, dueLabel, dueDate) {
 }
 
 async function loadStudentsForCourse(courseKey) {
-  const { data } = await supabase.from('enrollments').select('profile_id, section, profiles(id, email, first_name, last_name, role)').eq('course_key', courseKey);
+  const { data } = await supabase.from('enrollments').select('profile_id, section, profiles(id, email, first_name, last_name, role)').eq('course_key', courseKey).eq('active', true);
   return (data || []).filter(e => e.profiles?.role === 'student').map(e => ({ id: e.profiles.id, first: e.profiles.first_name, last: e.profiles.last_name, email: e.profiles.email, name: `${e.profiles.first_name} ${e.profiles.last_name}`, section: e.section || null }));
+}
+
+// Dropped students — for the "Dropped students" restore list in Settings.
+// Loaded on demand only (not part of the main data load), since it's rarely needed.
+async function loadInactiveStudentsForCourse(courseKey) {
+  const { data } = await supabase.from('enrollments').select('profile_id, section, profiles(id, email, first_name, last_name, role)').eq('course_key', courseKey).eq('active', false);
+  return (data || []).filter(e => e.profiles?.role === 'student').map(e => ({ id: e.profiles.id, first: e.profiles.first_name, last: e.profiles.last_name, email: e.profiles.email, name: `${e.profiles.first_name} ${e.profiles.last_name}`, section: e.section || null }));
+}
+
+// Soft-remove: hides the student from the active roster (grid, CSV, batch grading,
+// grade calcs) but keeps every row in student_checks/instructor_statuses/tokens/
+// feedback_queue untouched, so restoring her later restores her full history.
+async function removeStudentFromCourse(profileId, courseKey) {
+  const { error } = await supabase.from('enrollments').update({ active: false }).eq('profile_id', profileId).eq('course_key', courseKey);
+  return { error };
+}
+
+async function restoreStudentToCourse(profileId, courseKey) {
+  const { error } = await supabase.from('enrollments').update({ active: true }).eq('profile_id', profileId).eq('course_key', courseKey);
+  return { error };
+}
+
+// Name correction — profiles table only, no grade/enrollment logic involved.
+async function updateStudentName(profileId, firstName, lastName) {
+  const { error } = await supabase.from('profiles').update({ first_name: firstName, last_name: lastName }).eq('id', profileId);
+  return { error };
 }
 
 async function loadInstrStatuses(courseKey) {
@@ -306,6 +332,14 @@ export default function App() {
   const [expTeach, setExpTeach] = useState(true);
   const [toast, setToast] = useState(null); // { msg, type }
   const [previewStudent, setPreviewStudent] = useState(null); // { id, name } — instructor preview of student view
+  const [editStudentId, setEditStudentId] = useState(null); // profile id of student whose name is being edited
+  const [editFirstName, setEditFirstName] = useState('');
+  const [editLastName, setEditLastName] = useState('');
+  const [removeConfirm, setRemoveConfirm] = useState(null); // { id, name } — student pending removal confirmation
+  const [showDropped, setShowDropped] = useState(false);
+  const [droppedStudents, setDroppedStudents] = useState([]);
+  const [droppedLoading, setDroppedLoading] = useState(false);
+  const [studentMgmtSearch, setStudentMgmtSearch] = useState('');
 
   const showToast = (msg, type = 'error') => {
     setToast({ msg, type });
@@ -1833,7 +1867,126 @@ export default function App() {
 
         {/* SETTINGS — Due dates for assignments and class prep */}
         {tab === "settings" && <div>
-          <Lbl>Assignment Due Dates</Lbl>
+          <Lbl>Manage Students</Lbl>
+          <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12, lineHeight: 1.5, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
+            Fix a misspelled name, or remove a student who dropped the course. Removing a student hides her from your roster and grade views — her records are kept, and you can restore her later if needed.
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <input value={studentMgmtSearch} onChange={e => setStudentMgmtSearch(e.target.value)} placeholder="Filter students..." aria-label="Filter students to manage" style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none", width: 160 }} />
+          </div>
+          <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+            {(() => {
+              const q = studentMgmtSearch.trim().toLowerCase();
+              const list = [...students]
+                .filter(s => !q || `${s.first} ${s.last}`.toLowerCase().includes(q) || `${s.last} ${s.first}`.toLowerCase().includes(q) || (s.email || '').toLowerCase().includes(q))
+                .sort((a, b) => (a.last || "").localeCompare(b.last || ""));
+              if (list.length === 0) return <div style={{ padding: "12px 16px", fontFamily: F.b, fontSize: 11, color: "#767676" }}>No students found.</div>;
+              return list.map((s, i) => {
+                const isEditing = editStudentId === s.id;
+                return <div key={s.id} style={{ borderBottom: i < list.length - 1 ? "1px solid #F5F3EF" : "none" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px" }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      {!isEditing && <>
+                        <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{s.first} {s.last}{s.section ? ` · ${s.section}` : ''}</div>
+                        <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{s.email}</div>
+                      </>}
+                      {isEditing && <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        <input value={editFirstName} onChange={e => setEditFirstName(e.target.value)} placeholder="First name" aria-label={`First name for ${s.first} ${s.last}`} autoFocus style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none", width: 110 }} />
+                        <input value={editLastName} onChange={e => setEditLastName(e.target.value)} placeholder="Last name" aria-label={`Last name for ${s.first} ${s.last}`} style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none", width: 110 }}
+                          onKeyDown={async e => { if (e.key === "Enter") { document.getElementById(`save-name-${s.id}`)?.click(); } }} />
+                      </div>}
+                    </div>
+                    {!isEditing && <>
+                      <button onClick={() => { setEditStudentId(s.id); setEditFirstName(s.first || ''); setEditLastName(s.last || ''); }} aria-label={`Edit name for ${s.first} ${s.last}`} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#856404", cursor: "pointer", background: "#fff", flexShrink: 0 }}>✎ Edit name</button>
+                      <button onClick={() => setRemoveConfirm({ id: s.id, name: `${s.first} ${s.last}` })} aria-label={`Remove ${s.first} ${s.last} from course`} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#C0392B", cursor: "pointer", background: "#fff", flexShrink: 0 }}>Remove</button>
+                    </>}
+                    {isEditing && <>
+                      <button id={`save-name-${s.id}`} onClick={async () => {
+                        const first = editFirstName.trim(), last = editLastName.trim();
+                        if (!first || !last) { showToast('First and last name are required', 'error'); return; }
+                        const prevFirst = s.first, prevLast = s.last;
+                        setCourseData(prev => ({ ...prev, students: prev.students.map(st => st.id === s.id ? { ...st, first, last, name: `${first} ${last}` } : st) }));
+                        setEditStudentId(null);
+                        const { error } = await updateStudentName(s.id, first, last);
+                        if (error) {
+                          setCourseData(prev => ({ ...prev, students: prev.students.map(st => st.id === s.id ? { ...st, first: prevFirst, last: prevLast, name: `${prevFirst} ${prevLast}` } : st) }));
+                          showToast('Save failed — please try again', 'error');
+                        } else {
+                          showToast('Name updated ✓', 'success');
+                        }
+                      }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
+                      <button onClick={() => setEditStudentId(null)} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Cancel</button>
+                    </>}
+                  </div>
+                </div>;
+              });
+            })()}
+          </div>
+
+          <div style={{ marginTop: 10 }}>
+            <button onClick={async () => {
+              const next = !showDropped;
+              setShowDropped(next);
+              if (next && droppedStudents.length === 0) {
+                setDroppedLoading(true);
+                const d = await loadInactiveStudentsForCourse(ck);
+                setDroppedStudents(d);
+                setDroppedLoading(false);
+              }
+            }} aria-expanded={showDropped} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#666", background: "#fff", cursor: "pointer" }}>
+              {showDropped ? "▾" : "▸"} Dropped students
+            </button>
+            {showDropped && <div style={{ marginTop: 8, background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+              {droppedLoading && <div style={{ padding: "12px 16px", fontFamily: F.b, fontSize: 11, color: "#767676" }}>Loading...</div>}
+              {!droppedLoading && droppedStudents.length === 0 && <div style={{ padding: "12px 16px", fontFamily: F.b, fontSize: 11, color: "#767676" }}>No dropped students.</div>}
+              {!droppedLoading && droppedStudents.map((s, i) => <div key={s.id} style={{ borderBottom: i < droppedStudents.length - 1 ? "1px solid #F5F3EF" : "none", display: "flex", alignItems: "center", gap: 10, padding: "10px 16px" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{s.first} {s.last}</div>
+                  <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{s.email}</div>
+                </div>
+                <button onClick={async () => {
+                  setDroppedStudents(prev => prev.filter(x => x.id !== s.id));
+                  setCourseData(prev => ({ ...prev, students: [...prev.students, s] }));
+                  const { error } = await restoreStudentToCourse(s.id, ck);
+                  if (error) {
+                    setCourseData(prev => ({ ...prev, students: prev.students.filter(x => x.id !== s.id) }));
+                    setDroppedStudents(prev => [...prev, s]);
+                    showToast('Restore failed — please try again', 'error');
+                  } else {
+                    showToast(`${s.first} ${s.last} restored ✓`, 'success');
+                  }
+                }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Restore</button>
+              </div>)}
+            </div>}
+          </div>
+
+          {removeConfirm && <div role="dialog" aria-modal="true" aria-label={`Remove ${removeConfirm.name}`} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.3)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }} onClick={() => setRemoveConfirm(null)}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, padding: 20, maxWidth: 340, width: "90%" }}>
+              <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Remove {removeConfirm.name}?</div>
+              <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", lineHeight: 1.5, marginBottom: 16 }}>
+                She'll be hidden from your roster, grade grid, and CSV export. Her records are kept — you can restore her from "Dropped students" below if needed.
+              </div>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button onClick={() => setRemoveConfirm(null)} style={{ padding: "6px 12px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 12, cursor: "pointer" }}>Cancel</button>
+                <button onClick={async () => {
+                  const target = removeConfirm;
+                  setRemoveConfirm(null);
+                  const removedStudent = students.find(s => s.id === target.id);
+                  setCourseData(prev => ({ ...prev, students: prev.students.filter(s => s.id !== target.id) }));
+                  const { error } = await removeStudentFromCourse(target.id, ck);
+                  if (error) {
+                    setCourseData(prev => ({ ...prev, students: removedStudent ? [...prev.students, removedStudent] : prev.students }));
+                    showToast('Remove failed — please try again', 'error');
+                  } else {
+                    if (removedStudent) setDroppedStudents(prev => [...prev, removedStudent]);
+                    showToast(`${target.name} removed from course`, 'success');
+                  }
+                }} style={{ padding: "6px 12px", background: "#C0392B", color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Remove</button>
+              </div>
+            </div>
+          </div>}
+
+          <Lbl s={{ marginTop: 20 }}>Assignment Due Dates</Lbl>
           <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12, lineHeight: 1.5, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
             Set due dates and notes for each assignment. Students see these on their checklist and in the "Due This Week" feed.
           </div>
