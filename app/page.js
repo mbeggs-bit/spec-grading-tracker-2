@@ -257,23 +257,29 @@ async function removeTeachingSelection(profileId, courseKey, assignmentId) {
   await supabase.from('teaching_selections').delete().match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId });
 }
 
-async function addTeachingDate(courseKey, assignmentId, teachDate) {
-  const { error } = await supabase.from('teaching_dates').insert({ course_key: courseKey, assignment_id: assignmentId, teach_date: teachDate });
+async function addTeachingDate(courseKey, assignmentId, teachDate, section = null) {
+  const { error } = await supabase.from('teaching_dates').insert({ course_key: courseKey, assignment_id: assignmentId, teach_date: teachDate, section: section || null });
   return !error;
 }
 
-// NOTE (Fall 2026): Dates are stored per section code (MATH4850LS / MATH4850WB) and entered
-// separately for each section. If dates never differ between sections, consider storing them
-// under the parent course key ('ECEL 4850') and loading by parent key instead — that would
-// eliminate the need to enter dates twice. Revisit after Fall 2026.
-async function updateTeachingDate(courseKey, assignmentId, oldDate, newDate) {
+// Fall 2026: a teaching date's `section` says who it's offered to.
+//   null = both sections (the common case), 'LS'/'WB' = that section only.
+// A given calendar date can therefore exist as more than one row for one assignment,
+// so edit/delete key off the row's own `id`, not the (course, assignment, date) triple.
+async function updateTeachingDate(id, courseKey, assignmentId, oldDate, newDate) {
   const planDue = new Date(newDate);
   planDue.setDate(planDue.getDate() - 3);
   const planDueStr = planDue.toISOString().slice(0, 10);
-  // Update the teaching_dates row
-  await supabase.from('teaching_dates').update({ teach_date: newDate }).match({ course_key: courseKey, assignment_id: assignmentId, teach_date: oldDate });
-  // Cascade update to any student selections using the old date so their plan due date stays correct
+  // Update the specific teaching_dates row by id
+  await supabase.from('teaching_dates').update({ teach_date: newDate }).eq('id', id);
+  // Cascade to student selections that used the old date for this assignment so their
+  // plan due date stays correct. (Selections reference the date, not the row id.)
   await supabase.from('teaching_selections').update({ teach_date: newDate, plan_due_date: planDueStr }).match({ course_key: courseKey, assignment_id: assignmentId, teach_date: oldDate });
+}
+
+async function deleteTeachingDate(id) {
+  const { error } = await supabase.from('teaching_dates').delete().eq('id', id);
+  return !error;
 }
 
 /* ================================================================
@@ -348,9 +354,10 @@ export default function App() {
   const [teachSearch, setTeachSearch] = useState('');
   const [sectionFilter, setSectionFilter] = useState('all');
   const [editDueDate, setEditDueDate] = useState('');
-  const [editTeachDate, setEditTeachDate] = useState(null); // { aid, date } — which date row is being edited
+  const [editTeachDate, setEditTeachDate] = useState(null); // { id } — which date row is being edited (keyed by row id, since a date can exist per section)
   const [editTeachDateVal, setEditTeachDateVal] = useState('');
   const [newTeachDate, setNewTeachDate] = useState({}); // { [aid]: 'YYYY-MM-DD' } — add-date inputs per lesson
+  const [newTeachSection, setNewTeachSection] = useState({}); // { [aid]: '' | 'LS' | 'WB' } — which section a new date is offered to ('' = both)
   const [expScheduled, setExpScheduled] = useState(false);
   const [expStudents, setExpStudents] = useState(true);
   const [expStruggles, setExpStruggles] = useState(true);
@@ -1151,9 +1158,16 @@ export default function App() {
             <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12, lineHeight: 1.5 }}>Select your teaching dates below. Your planning document is due 3 days before your teaching day.</div>
             {(() => {
               const assignmentIds = [...new Set(teachDates.map(td => td.assignment_id))];
+              const mySection = myEnrollment?.section || null;
+              // A student sees dates offered to both sections (section null) plus any
+              // dates specific to their own section. Section-specific dates for the OTHER
+              // section are hidden. (If the student has no section — e.g. legacy single-
+              // section enrollment — they see every date, preserving old behavior.)
+              const visibleForMe = (td) => !td.section || !mySection || td.section === mySection;
               return assignmentIds.map(aid => {
                 const a = c.assignments.find(x => x.id === aid);
-                const dates = teachDates.filter(td => td.assignment_id === aid);
+                const dates = teachDates.filter(td => td.assignment_id === aid && visibleForMe(td));
+                if (dates.length === 0) return null;
                 const allClosed = dates.every(d => d.closed);
                 const mySel = teachSel.find(ts => ts.assignment_id === aid);
                 const formatDate = (d) => { const dt = new Date(d + 'T12:00:00'); return dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }); };
@@ -1178,7 +1192,7 @@ export default function App() {
                   </div> : !allClosed ? <div>
                     <div style={{ fontFamily: F.b, fontSize: 11, color: "#555", marginBottom: 6 }}>Pick your teaching date:</div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                      {dates.filter(d => !d.closed).map(d => <button key={d.teach_date} aria-label={`Pick teaching date: ${formatDate(d.teach_date)}`} onClick={async () => { await pickTeachingDate(myId, ck, aid, d.teach_date); refresh(); }}
+                      {dates.filter(d => !d.closed).map(d => <button key={d.id || d.teach_date} aria-label={`Pick teaching date: ${formatDate(d.teach_date)}`} onClick={async () => { await pickTeachingDate(myId, ck, aid, d.teach_date); refresh(); }}
                         style={{ padding: "5px 10px", background: "#fff", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer", position: "relative" }}
                         onMouseEnter={e => { e.currentTarget.style.background = "#DCEEFB"; e.currentTarget.style.borderColor = "#1565C0"; }}
                         onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#E0DDD8"; }}>
@@ -2243,7 +2257,7 @@ export default function App() {
           {c.assignments.some(a => a.id === 'les1') && <>
           <Lbl s={{ marginTop: 20 }}>Teaching Dates</Lbl>
           <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12, lineHeight: 1.5, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
-            Dates when TCs may teach their lesson. Students pick from these dates; their lesson plan is due 3 days before their chosen date. Enter dates for this section — if both sections always share the same dates, this could be simplified in a future update.
+            Dates when TCs may teach their lesson. Students pick from these dates; their lesson plan is due 3 days before their chosen date. Dates default to both sections — use the selector to add a date for just one section when they differ.
           </div>
           {['les1', 'les2'].map(aid => {
             const a = c.assignments.find(x => x.id === aid);
@@ -2254,17 +2268,26 @@ export default function App() {
               <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
                 {dates.length === 0 && <div style={{ padding: "12px 16px", fontFamily: F.b, fontSize: 11, color: "#767676" }}>No dates added yet.</div>}
                 {dates.map((td, i) => {
-                  const isEditing = editTeachDate?.aid === aid && editTeachDate?.date === td.teach_date;
-                  return <div key={td.teach_date} style={{ borderBottom: "1px solid #F5F3EF" }}>
+                  const isEditing = editTeachDate?.id === td.id;
+                  const secName = td.section ? (courseSections?.[td.section]?.name || td.section) : null;
+                  return <div key={td.id || td.teach_date} style={{ borderBottom: "1px solid #F5F3EF" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px" }}
                       onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                      <div style={{ flex: 1, fontFamily: F.b, fontSize: 12 }}>
+                      <div style={{ flex: 1, fontFamily: F.b, fontSize: 12, display: "flex", alignItems: "center", gap: 8 }}>
                         {new Date(td.teach_date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                        {courseSections && (secName
+                          ? <Pill t={secName} bg="#FFF0F0" c={c.color} />
+                          : <Pill t="Both sections" bg="#F0F8FF" c="#1565C0" />)}
                       </div>
-                      <button onClick={() => { setEditTeachDate(isEditing ? null : { aid, date: td.teach_date }); setEditTeachDateVal(td.teach_date); }}
+                      <button onClick={() => { setEditTeachDate(isEditing ? null : { id: td.id }); setEditTeachDateVal(td.teach_date); }}
                         aria-label={`Edit teaching date ${td.teach_date} for ${a.name}`}
                         style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#856404", cursor: "pointer", background: "#fff", flexShrink: 0 }}>
                         ✎ Edit
+                      </button>
+                      <button onClick={async () => { const ok = await deleteTeachingDate(td.id); if (ok) { showToast('Teaching date removed', 'success'); refresh(); } else { showToast('Remove failed — please try again', 'error'); } }}
+                        aria-label={`Remove teaching date ${td.teach_date} for ${a.name}`}
+                        style={{ padding: "2px 8px", border: "1px solid #F5B7B7", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#C0392B", cursor: "pointer", background: "#fff", flexShrink: 0 }}>
+                        Remove
                       </button>
                     </div>
                     {isEditing && <div style={{ padding: "4px 16px 10px 16px", display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
@@ -2274,7 +2297,7 @@ export default function App() {
                         style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
                       <button onClick={async () => {
                         if (!editTeachDateVal) return;
-                        await updateTeachingDate(ck, aid, td.teach_date, editTeachDateVal);
+                        await updateTeachingDate(td.id, ck, aid, td.teach_date, editTeachDateVal);
                         setEditTeachDate(null);
                         showToast('Teaching date saved ✓', 'success');
                         refresh();
@@ -2284,15 +2307,21 @@ export default function App() {
                     </div>}
                   </div>;
                 })}
-                <div style={{ padding: "10px 16px", borderTop: dates.length > 0 ? "1px solid #F5F3EF" : "none", display: "flex", gap: 6, alignItems: "center" }}>
+                <div style={{ padding: "10px 16px", borderTop: dates.length > 0 ? "1px solid #F5F3EF" : "none", display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                   <input type="date" value={newTeachDate[aid] || ''} onChange={e => setNewTeachDate(prev => ({ ...prev, [aid]: e.target.value }))}
                     aria-label={`New teaching date to add for ${a.name}`}
                     style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
+                  {courseSections && <select value={newTeachSection[aid] || ''} onChange={e => setNewTeachSection(prev => ({ ...prev, [aid]: e.target.value }))}
+                    aria-label={`Which section this date is for, for ${a.name}`}
+                    style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: "#fff", cursor: "pointer" }}>
+                    <option value="">Both sections</option>
+                    {Object.keys(courseSections).map(sk => <option key={sk} value={sk}>{courseSections[sk]?.name || sk} only</option>)}
+                  </select>}
                   <button onClick={async () => {
                     const d = newTeachDate[aid];
                     if (!d) return;
-                    const ok = await addTeachingDate(ck, aid, d);
-                    if (ok) { setNewTeachDate(prev => ({ ...prev, [aid]: '' })); refresh(); }
+                    const ok = await addTeachingDate(ck, aid, d, newTeachSection[aid] || null);
+                    if (ok) { setNewTeachDate(prev => ({ ...prev, [aid]: '' })); setNewTeachSection(prev => ({ ...prev, [aid]: '' })); refresh(); }
                   }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>+ Add Date</button>
                 </div>
               </div>
