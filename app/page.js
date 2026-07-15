@@ -15,8 +15,8 @@ async function loadUserProfile(email) {
 }
 
 async function loadEnrollments(profileId) {
-  const { data } = await supabase.from('enrollments').select('course_key, active').eq('profile_id', profileId);
-  return (data || []).map(e => ({ key: e.course_key, active: e.active !== false }));
+  const { data } = await supabase.from('enrollments').select('course_key, active, section').eq('profile_id', profileId);
+  return (data || []).map(e => ({ key: e.course_key, active: e.active !== false, section: e.section || null }));
 }
 
 async function loadReleasedAssignments(courseKey) {
@@ -25,19 +25,46 @@ async function loadReleasedAssignments(courseKey) {
   return ids;
 }
 
-async function loadDueDates(courseKey) {
-  const { data } = await supabase.from('assignment_due_dates').select('assignment_id, due_label, due_date').eq('course_key', courseKey);
+// Section-aware due-date loader.
+//   `viewerSection` = the section to resolve the flat `dueDates` map for
+//     (a student's own section, or an instructor's active section filter).
+//     null = resolve to the "all sections" row.
+// Returns { dueDates, dueDatesAll }:
+//   - dueDates: flat { [assignmentId]: { label, date } }, resolved for viewerSection
+//       (section-specific row wins; falls back to the null "all sections" row).
+//       This preserves the exact shape every existing consumer (grade calc, feed,
+//       checklist, grid, preview) already expects — they never learn sections exist.
+//   - dueDatesAll: full per-section detail { [assignmentId]: { all, LS, WB, ... } }
+//       where each value is { label, date }. Only the Settings editor reads this.
+async function loadDueDates(courseKey, viewerSection = null) {
+  const { data } = await supabase.from('assignment_due_dates').select('assignment_id, due_label, due_date, section').eq('course_key', courseKey);
+  const bySection = {}; // { [assignmentId]: { [sectionKeyOrAll]: { label, date } } }
+  (data || []).forEach(r => {
+    const aid = r.assignment_id;
+    const sec = r.section || 'all';
+    if (!bySection[aid]) bySection[aid] = {};
+    bySection[aid][sec] = { label: r.due_label || null, date: r.due_date || null };
+  });
   const map = {};
-  (data || []).forEach(r => { map[r.assignment_id] = { label: r.due_label, date: r.due_date || null }; });
-  return map;
+  Object.keys(bySection).forEach(aid => {
+    // Section-specific override wins; otherwise fall back to the "all sections" row.
+    const override = viewerSection ? bySection[aid][viewerSection] : null;
+    const resolved = override || bySection[aid].all;
+    if (resolved) map[aid] = resolved;
+  });
+  return { dueDates: map, dueDatesAll: bySection };
 }
 
-async function upsertDueDate(courseKey, assignmentId, dueLabel, dueDate) {
+// section = null writes the "all sections" row; 'LS'/'WB' writes that section's override.
+// The 3-column unique constraint (course_key, assignment_id, section) with NULLS NOT
+// DISTINCT makes the null "all sections" row a single upsert target.
+async function upsertDueDate(courseKey, assignmentId, dueLabel, dueDate, section = null) {
   if (!dueLabel && !dueDate) {
-    const { error } = await supabase.from('assignment_due_dates').delete().match({ course_key: courseKey, assignment_id: assignmentId });
+    const q = supabase.from('assignment_due_dates').delete().eq('course_key', courseKey).eq('assignment_id', assignmentId);
+    const { error } = section ? await q.eq('section', section) : await q.is('section', null);
     return { error };
   } else {
-    const { error } = await supabase.from('assignment_due_dates').upsert({ course_key: courseKey, assignment_id: assignmentId, due_label: dueLabel || null, due_date: dueDate || null, updated_at: new Date().toISOString() }, { onConflict: 'course_key,assignment_id' });
+    const { error } = await supabase.from('assignment_due_dates').upsert({ course_key: courseKey, assignment_id: assignmentId, due_label: dueLabel || null, due_date: dueDate || null, section: section || null, updated_at: new Date().toISOString() }, { onConflict: 'course_key,assignment_id,section' });
     return { error };
   }
 }
@@ -284,9 +311,9 @@ export default function App() {
 
   // Course data
   // Course data — single object to prevent multiple re-renders
-  const [courseData, setCourseData] = useState({ rel: [], dueDates: {}, students: [], iS: {}, iN: {}, sC: {}, cP: {}, toks: {}, fq: [], teachDates: [], teachSel: [], myInstrSt: {} });
+  const [courseData, setCourseData] = useState({ rel: [], dueDates: {}, dueDatesAll: {}, students: [], iS: {}, iN: {}, sC: {}, cP: {}, toks: {}, fq: [], teachDates: [], teachSel: [], myInstrSt: {} });
   const [dataLoading, setDataLoading] = useState(false);
-  const { rel, dueDates, students, iS, iN, sC, cP, toks, fq, teachDates, teachSel, myInstrSt } = courseData;
+  const { rel, dueDates, dueDatesAll, students, iS, iN, sC, cP, toks, fq, teachDates, teachSel, myInstrSt } = courseData;
 
   // UI state
   const [tab, setTab] = useState('overview');
@@ -306,6 +333,11 @@ export default function App() {
   const [noteVal, setNoteVal] = useState('');
   const [editDue, setEditDue] = useState(null);
   const [editDueVal, setEditDueVal] = useState('');
+  // Per-section due-date editing (4850 only). editDueSectioned toggles the LS/WB fields
+  // open for the row currently being edited. editDueSecVals holds the per-section field
+  // values while editing: { [sectionKey]: { date, label } }.
+  const [editDueSectioned, setEditDueSectioned] = useState(false);
+  const [editDueSecVals, setEditDueSecVals] = useState({});
   const [queueFilter, setQueueFilter] = useState('pending');
   const [tokExpand, setTokExpand] = useState(null);
   const [tokSearch, setTokSearch] = useState('');
@@ -372,9 +404,13 @@ export default function App() {
   async function loadCourseData(isInitial = true) {
     if (isInitial) setDataLoading(true);
     const isStudent = user.profile.role === 'student';
+    // A student resolves due dates to their own section; the instructor loads the
+    // "all sections" view (null) — the Settings editor works off dueDatesAll, and the
+    // feed/grid correctly show the all-sections row as the default.
+    const mySection = isStudent ? (user.courses.find(co => co.key === ck)?.section || null) : null;
     const [r, dd, s, is, inn, sc, cp, t, f, td, ts, mis] = await Promise.all([
       loadReleasedAssignments(ck),
-      loadDueDates(ck),
+      loadDueDates(ck, mySection),
       !isStudent ? loadStudentsForCourse(ck) : Promise.resolve([]),
       !isStudent ? loadInstrStatuses(ck) : Promise.resolve({}),
       !isStudent ? loadInstrNotes(ck) : Promise.resolve({}),
@@ -386,11 +422,144 @@ export default function App() {
       loadTeachingSelections(ck, isStudent ? user.profile.id : null),
       isStudent ? loadMyInstrStatuses(ck, user.profile.id) : Promise.resolve({}),
     ]);
-    setCourseData({ rel: r, dueDates: dd, students: s, iS: is, iN: inn, sC: sc, cP: cp, toks: t, fq: f, teachDates: td, teachSel: ts, myInstrSt: mis });
+    setCourseData({ rel: r, dueDates: dd.dueDates, dueDatesAll: dd.dueDatesAll, students: s, iS: is, iN: inn, sC: sc, cP: cp, toks: t, fq: f, teachDates: td, teachSel: ts, myInstrSt: mis });
     if (isInitial) setDataLoading(false);
   }
 
   const refresh = () => loadCourseData(false);
+
+  // Save an item's due dates: always writes the "all sections" row, and (when the
+  // per-section editor is open) writes/clears each section's override row.
+  // Optimistic: updates dueDates (flat, resolved for the instructor's null default =
+  // all-sections row) and dueDatesAll immediately, then persists in the background.
+  // Rolls back with a toast on failure. No refresh() — matches the optimistic pattern.
+  async function saveDueDatesForItem(itemId, allVals, secVals) {
+    const prevData = courseData;
+    const secKeys = Object.keys(secVals || {});
+    // Build the new dueDatesAll entry for this item.
+    const newAllEntry = {};
+    if (allVals.date || allVals.label) newAllEntry.all = { date: allVals.date || null, label: allVals.label || null };
+    secKeys.forEach(sk => {
+      const v = secVals[sk];
+      if (v && (v.date || v.label)) newAllEntry[sk] = { date: v.date || null, label: v.label || null };
+    });
+    // Optimistic UI: flat map (instructor default) shows the all-sections row.
+    setCourseData(prev => {
+      const nextAll = { ...prev.dueDatesAll };
+      if (Object.keys(newAllEntry).length) nextAll[itemId] = newAllEntry; else delete nextAll[itemId];
+      const nextFlat = { ...prev.dueDates };
+      if (newAllEntry.all) nextFlat[itemId] = newAllEntry.all; else delete nextFlat[itemId];
+      return { ...prev, dueDates: nextFlat, dueDatesAll: nextAll };
+    });
+    // Persist: all-sections row first, then each section override.
+    const results = [];
+    results.push(await upsertDueDate(ck, itemId, allVals.label, allVals.date, null));
+    for (const sk of secKeys) {
+      const v = secVals[sk] || {};
+      results.push(await upsertDueDate(ck, itemId, v.label, v.date, sk));
+    }
+    const failed = results.find(r => r && r.error);
+    if (failed) {
+      setCourseData(prevData); // rollback
+      showToast('Save failed — please try again', 'error');
+      return false;
+    }
+    showToast('Due date saved ✓', 'success');
+    return true;
+  }
+
+  // Clear all due-date rows (all sections + every override) for an item. Optimistic.
+  async function clearDueDatesForItem(itemId, sectionKeys) {
+    const prevData = courseData;
+    setCourseData(prev => {
+      const nextAll = { ...prev.dueDatesAll }; delete nextAll[itemId];
+      const nextFlat = { ...prev.dueDates }; delete nextFlat[itemId];
+      return { ...prev, dueDates: nextFlat, dueDatesAll: nextAll };
+    });
+    const results = [await upsertDueDate(ck, itemId, '', '', null)];
+    for (const sk of (sectionKeys || [])) results.push(await upsertDueDate(ck, itemId, '', '', sk));
+    if (results.find(r => r && r.error)) {
+      setCourseData(prevData);
+      showToast('Clear failed — please try again', 'error');
+      return false;
+    }
+    showToast('Due date cleared', 'success');
+    return true;
+  }
+
+  // Compact one-line summary of an item's due dates for the collapsed row.
+  // Shows "All: <date>" plus any section overrides, e.g. "All: Aug 26 · LS: Aug 28".
+  function dueSummary(itemId, secObj) {
+    const entry = dueDatesAll?.[itemId];
+    if (!entry) return null;
+    const fmt = (v) => {
+      if (!v) return '';
+      const d = v.date ? new Date(v.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '';
+      return `${d}${v.date && v.label ? ' · ' : ''}${v.label || ''}`;
+    };
+    const parts = [];
+    if (entry.all) parts.push(`All: ${fmt(entry.all)}`);
+    Object.keys(secObj || {}).forEach(sk => { if (entry[sk]) parts.push(`${sk}: ${fmt(entry[sk])}`); });
+    return parts.length ? parts.join('  ·  ') : null;
+  }
+
+  // Open the editor for an item, pre-filling the all-sections fields and any existing
+  // per-section overrides (so the toggle opens showing what's already set).
+  function openDueEditor(itemId, sectionsObj) {
+    const entry = dueDatesAll?.[itemId] || {};
+    setEditDue(itemId);
+    setEditDueVal(entry.all?.label || '');
+    setEditDueDate(entry.all?.date || '');
+    const secKeys = sectionsObj ? Object.keys(sectionsObj) : [];
+    const hasOverride = secKeys.some(sk => entry[sk]);
+    setEditDueSectioned(hasOverride);
+    const secVals = {};
+    secKeys.forEach(sk => { secVals[sk] = { date: entry[sk]?.date || '', label: entry[sk]?.label || '' }; });
+    setEditDueSecVals(secVals);
+  }
+
+  // Renders the expanded due-date editor for one item (assignment or class prep).
+  // `sectionsObj` = the course's sections ({} or null when the course has no sections).
+  // When sections exist, a "Set different dates per section" switch reveals per-section
+  // fields. Shared by both the assignment and class-prep editors.
+  function renderDueEditor(itemId, itemName, sectionsObj, accent) {
+    const secKeys = sectionsObj ? Object.keys(sectionsObj) : [];
+    const hasSecs = secKeys.length > 0;
+    const saveAndClose = async () => {
+      const ok = await saveDueDatesForItem(itemId, { date: editDueDate, label: editDueVal }, editDueSectioned ? editDueSecVals : {});
+      if (ok) { setEditDue(null); setEditDueSectioned(false); setEditDueSecVals({}); }
+    };
+    return <div style={{ padding: "4px 16px 12px 16px" }}>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+        <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label={`${hasSecs ? 'All sections due date' : 'Due date'} for ${itemName}`} autoFocus style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
+        <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class, By end of day" aria-label={`${hasSecs ? 'All sections due date note' : 'Due date note'} for ${itemName}`} onKeyDown={e => { if (e.key === "Enter") saveAndClose(); }} style={{ flex: 2, minWidth: 140, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
+        <button onClick={saveAndClose} style={{ padding: "5px 10px", background: accent, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
+        <button onClick={async () => { const ok = await clearDueDatesForItem(itemId, secKeys); if (ok) { setEditDue(null); setEditDueSectioned(false); setEditDueSecVals({}); } }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
+      </div>
+      {hasSecs && <div style={{ marginTop: 8 }}>
+        <button role="switch" aria-checked={editDueSectioned} aria-label={`Set different due dates per section for ${itemName}`}
+          onClick={() => setEditDueSectioned(v => !v)}
+          style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 4px", background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>
+          <span style={{ width: 30, height: 16, borderRadius: 8, background: editDueSectioned ? accent : "#D5D2CC", position: "relative", transition: "background .2s", flexShrink: 0 }}>
+            <span style={{ position: "absolute", top: 2, left: editDueSectioned ? 16 : 2, width: 12, height: 12, borderRadius: "50%", background: "#fff", transition: "left .2s" }} />
+          </span>
+          Set different dates per section
+        </button>
+        {editDueSectioned && <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ fontFamily: F.b, fontSize: 10, color: "#767676" }}>Leave a section blank to use the all-sections date above.</div>
+          {secKeys.map(sk => {
+            const v = editDueSecVals[sk] || { date: '', label: '' };
+            const setV = (patch) => setEditDueSecVals(prev => ({ ...prev, [sk]: { ...(prev[sk] || { date: '', label: '' }), ...patch } }));
+            return <div key={sk} style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: accent, minWidth: 90 }}>{sectionsObj[sk]?.name || sk}</span>
+              <input type="date" value={v.date} onChange={e => setV({ date: e.target.value })} aria-label={`${sectionsObj[sk]?.name || sk} due date for ${itemName}`} style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
+              <input value={v.label} onChange={e => setV({ label: e.target.value })} placeholder="Note (optional)" aria-label={`${sectionsObj[sk]?.name || sk} due date note for ${itemName}`} onKeyDown={e => { if (e.key === "Enter") saveAndClose(); }} style={{ flex: 2, minWidth: 120, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
+            </div>;
+          })}
+        </div>}
+      </div>}
+    </div>;
+  }
 
   async function handleLogin() {
     setLoginErr('');
@@ -2034,25 +2203,18 @@ export default function App() {
           {c.groups.map((grp, gi) => <div key={gi} style={{ marginBottom: 14 }}>
             {grp.name && <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: c.color, marginBottom: 4 }}>{grp.name}</div>}
             <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-              {grp.ids.map((id, i) => { const a = c.assignments.find(x => x.id === id); if (!a) return null; const ddObj = dueDates[id]; const ddLabel = ddObj?.label; const ddDate = ddObj?.date; const isEditingDue = editDue === id;
+              {grp.ids.map((id, i) => { const a = c.assignments.find(x => x.id === id); if (!a) return null; const ddObj = dueDates[id]; const ddLabel = ddObj?.label; const ddDate = ddObj?.date; const isEditingDue = editDue === id; const summary = dueSummary(id, courseSections);
                 return <div key={id} style={{ borderBottom: i < grp.ids.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px" }}
                     onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{a.name}</div>
-                      {(ddLabel || ddDate) && !isEditingDue && <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 1 }}>{ddDate ? new Date(ddDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{ddLabel && ddDate ? ' · ' : ''}{ddLabel || ''}</div>}
+                      {summary && !isEditingDue && <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 1 }}>{summary}</div>}
                     </div>
-                    <button onClick={(e) => { e.stopPropagation(); setEditDue(isEditingDue ? null : id); setEditDueVal(ddLabel || ''); setEditDueDate(ddDate || ''); }} aria-label={`${ddDate ? 'Edit' : 'Add'} due date for ${a.name}`} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: (ddLabel || ddDate) ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{ddDate ? "✎ Due" : ddLabel ? "✎ Note" : "+ Due date"}</button>
+                    <button onClick={(e) => { e.stopPropagation(); if (isEditingDue) { setEditDue(null); } else { openDueEditor(id, courseSections); } }} aria-label={`${(ddLabel || ddDate) ? 'Edit' : 'Add'} due date for ${a.name}`} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: (ddLabel || ddDate) ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{ddDate ? "✎ Due" : ddLabel ? "✎ Note" : "+ Due date"}</button>
                     {a.eval === "mastery" ? <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" /> : <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
                   </div>
-                  {isEditingDue && <div style={{ padding: "4px 16px 10px 16px", display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label={`Due date for ${a.name}`} autoFocus style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
-                    <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class, By end of day" aria-label={`Due date note for ${a.name}`}
-                      style={{ flex: 2, minWidth: 140, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }}
-                      onKeyDown={async e => { if (e.key === "Enter") { const { error } = await upsertDueDate(ck, id, editDueVal, editDueDate); if (error) { showToast('Save failed — please try again', 'error'); } else { setCourseData(prev => ({ ...prev, dueDates: { ...prev.dueDates, [id]: editDueVal || editDueDate ? { label: editDueVal || null, date: editDueDate || null } : undefined } })); setEditDue(null); showToast('Due date saved ✓', 'success'); } } }} />
-                    <button onClick={async () => { const { error } = await upsertDueDate(ck, id, editDueVal, editDueDate); if (error) { showToast('Save failed — please try again', 'error'); } else { setCourseData(prev => ({ ...prev, dueDates: { ...prev.dueDates, [id]: editDueVal || editDueDate ? { label: editDueVal || null, date: editDueDate || null } : undefined } })); setEditDue(null); showToast('Due date saved ✓', 'success'); } }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
-                    <button onClick={async () => { await upsertDueDate(ck, id, '', ''); setCourseData(prev => { const updated = { ...prev.dueDates }; delete updated[id]; return { ...prev, dueDates: updated }; }); setEditDue(null); showToast('Due date cleared', 'success'); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
-                  </div>}
+                  {isEditingDue && renderDueEditor(id, a.name, courseSections, c.color)}
                 </div>;
               })}
             </div>
@@ -2061,23 +2223,18 @@ export default function App() {
           {(c.classPrep && c.classPrep.length > 0) && <>
           <Lbl s={{ marginTop: 20 }}>Class Preparation Due Dates</Lbl>
           <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-            {c.classPrep.map((cp, i) => { const ddObj = dueDates[cp.id]; const ddLabel = ddObj?.label; const ddDate = ddObj?.date; const isEditingDue = editDue === cp.id;
+            {c.classPrep.map((cp, i) => { const ddObj = dueDates[cp.id]; const ddLabel = ddObj?.label; const ddDate = ddObj?.date; const isEditingDue = editDue === cp.id; const summary = dueSummary(cp.id, courseSections);
               return <div key={cp.id} style={{ borderBottom: i < c.classPrep.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px" }}
                   onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{cp.name}</div>
-                    {(ddLabel || ddDate) && !isEditingDue && <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 1 }}>{ddDate ? new Date(ddDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{ddLabel && ddDate ? ' · ' : ''}{ddLabel || ''}</div>}
+                    {summary && !isEditingDue && <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 1 }}>{summary}</div>}
                   </div>
-                  <button onClick={(e) => { e.stopPropagation(); setEditDue(isEditingDue ? null : cp.id); setEditDueVal(ddLabel || ''); setEditDueDate(ddDate || ''); }} aria-label={`${ddDate ? 'Edit' : 'Add'} due date for ${cp.name}`} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: (ddLabel || ddDate) ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{ddDate ? "✎ Due" : ddLabel ? "✎ Note" : "+ Due date"}</button>
+                  <button onClick={(e) => { e.stopPropagation(); if (isEditingDue) { setEditDue(null); } else { openDueEditor(cp.id, courseSections); } }} aria-label={`${(ddLabel || ddDate) ? 'Edit' : 'Add'} due date for ${cp.name}`} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: (ddLabel || ddDate) ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{ddDate ? "✎ Due" : ddLabel ? "✎ Note" : "+ Due date"}</button>
                   <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />
                 </div>
-                {isEditingDue && <div style={{ padding: "4px 16px 10px 16px", display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} aria-label={`Due date for ${cp.name}`} autoFocus style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} />
-                  <input value={editDueVal} onChange={e => setEditDueVal(e.target.value)} placeholder="e.g. Before class, By end of day" aria-label={`Due date note for ${cp.name}`} style={{ flex: 2, minWidth: 140, padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none" }} onKeyDown={async e => { if (e.key === "Enter") { const { error } = await upsertDueDate(ck, cp.id, editDueVal, editDueDate); if (error) { showToast('Save failed — please try again', 'error'); } else { setCourseData(prev => ({ ...prev, dueDates: { ...prev.dueDates, [cp.id]: editDueVal || editDueDate ? { label: editDueVal || null, date: editDueDate || null } : undefined } })); setEditDue(null); showToast('Due date saved ✓', 'success'); } } }} />
-                  <button onClick={async () => { const { error } = await upsertDueDate(ck, cp.id, editDueVal, editDueDate); if (error) { showToast('Save failed — please try again', 'error'); } else { setCourseData(prev => ({ ...prev, dueDates: { ...prev.dueDates, [cp.id]: editDueVal || editDueDate ? { label: editDueVal || null, date: editDueDate || null } : undefined } })); setEditDue(null); showToast('Due date saved ✓', 'success'); } }} style={{ padding: "5px 10px", background: c.color, color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save</button>
-                  <button onClick={async () => { await upsertDueDate(ck, cp.id, '', ''); setCourseData(prev => { const updated = { ...prev.dueDates }; delete updated[cp.id]; return { ...prev, dueDates: updated }; }); setEditDue(null); showToast('Due date cleared', 'success'); }} style={{ padding: "5px 8px", background: "#F5F4F0", color: "#6B6B6B", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer" }}>Clear</button>
-                </div>}
+                {isEditingDue && renderDueEditor(cp.id, cp.name, courseSections, c.color)}
               </div>;
             })}
           </div>
