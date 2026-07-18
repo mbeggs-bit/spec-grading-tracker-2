@@ -1086,7 +1086,7 @@ export default function App() {
                         {(dueDates[a.id]?.date || dueDates[a.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{dueDates[a.id].date ? new Date(dueDates[a.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[a.id].date && dueDates[a.id].label ? ' · ' : ''}{dueDates[a.id].label || ''}</div>}
                         {isNS
                           ? <div style={{ fontFamily: F.b, fontSize: 11, color: "#C0392B", marginTop: 2, fontStyle: "italic" }}>No submission recorded. If you believe this is an error, contact Dr. Beggs.</div>
-                          : <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 2, fontStyle: "italic" }}>Awaiting review from Dr. Beggs</div>
+                          : <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 2, fontStyle: "italic" }}>Locked until Dr. Beggs reviews your work</div>
                         }
                       </div>
                       <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />
@@ -2485,7 +2485,7 @@ export default function App() {
                             {(dueDates[a.id]?.date || dueDates[a.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{dueDates[a.id].date ? new Date(dueDates[a.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[a.id].date && dueDates[a.id].label ? ' · ' : ''}{dueDates[a.id].label || ''}</div>}
                             {isNS
                               ? <div style={{ fontFamily: F.b, fontSize: 11, color: "#C0392B", marginTop: 2, fontStyle: "italic" }}>No submission recorded. If you believe this is an error, contact Dr. Beggs.</div>
-                              : <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 2, fontStyle: "italic" }}>Awaiting review from Dr. Beggs</div>
+                              : <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 2, fontStyle: "italic" }}>Locked until Dr. Beggs reviews your work</div>
                             }
                           </div>
                           <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />
