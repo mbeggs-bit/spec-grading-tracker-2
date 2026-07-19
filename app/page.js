@@ -14,9 +14,19 @@ async function loadUserProfile(email) {
   return data;
 }
 
+// Term-scoped: only CURRENT_TERM enrollments are returned. A student whose only
+// enrollments are from a past term gets an empty list, which the app renders as
+// the "This course has ended" screen. Past-term data is never loaded.
 async function loadEnrollments(profileId) {
-  const { data } = await supabase.from('enrollments').select('course_key, active, section').eq('profile_id', profileId);
-  return (data || []).map(e => ({ key: e.course_key, active: e.active !== false, section: e.section || null }));
+  const { data } = await supabase.from('enrollments').select('course_key, active, section, term').eq('profile_id', profileId).eq('term', CURRENT_TERM);
+  return (data || []).map(e => ({ key: e.course_key, active: e.active !== false, section: e.section || null, term: e.term }));
+}
+
+// Unfiltered — used only to tell "she has past-term enrollments" (show the
+// course-ended screen) apart from "she has none at all" (show the join screen).
+async function loadAnyEnrollments(profileId) {
+  const { data } = await supabase.from('enrollments').select('course_key, term').eq('profile_id', profileId);
+  return data || [];
 }
 
 async function loadReleasedAssignments(courseKey) {
@@ -37,7 +47,7 @@ async function loadReleasedAssignments(courseKey) {
 //   - dueDatesAll: full per-section detail { [assignmentId]: { all, LS, WB, ... } }
 //       where each value is { label, date }. Only the Settings editor reads this.
 async function loadDueDates(courseKey, viewerSection = null) {
-  const { data } = await supabase.from('assignment_due_dates').select('assignment_id, due_label, due_date, section').eq('course_key', courseKey);
+  const { data } = await supabase.from('assignment_due_dates').select('assignment_id, due_label, due_date, section').eq('course_key', courseKey).eq('term', CURRENT_TERM);
   const bySection = {}; // { [assignmentId]: { [sectionKeyOrAll]: { label, date } } }
   (data || []).forEach(r => {
     const aid = r.assignment_id;
@@ -60,37 +70,37 @@ async function loadDueDates(courseKey, viewerSection = null) {
 // DISTINCT makes the null "all sections" row a single upsert target.
 async function upsertDueDate(courseKey, assignmentId, dueLabel, dueDate, section = null) {
   if (!dueLabel && !dueDate) {
-    const q = supabase.from('assignment_due_dates').delete().eq('course_key', courseKey).eq('assignment_id', assignmentId);
+    const q = supabase.from('assignment_due_dates').delete().eq('course_key', courseKey).eq('assignment_id', assignmentId).eq('term', CURRENT_TERM);
     const { error } = section ? await q.eq('section', section) : await q.is('section', null);
     return { error };
   } else {
-    const { error } = await supabase.from('assignment_due_dates').upsert({ course_key: courseKey, assignment_id: assignmentId, due_label: dueLabel || null, due_date: dueDate || null, section: section || null, term: CURRENT_TERM, updated_at: new Date().toISOString() }, { onConflict: 'course_key,assignment_id,section' });
+    const { error } = await supabase.from('assignment_due_dates').upsert({ course_key: courseKey, assignment_id: assignmentId, due_label: dueLabel || null, due_date: dueDate || null, section: section || null, term: CURRENT_TERM, updated_at: new Date().toISOString() }, { onConflict: 'course_key,assignment_id,section,term' });
     return { error };
   }
 }
 
 async function loadStudentsForCourse(courseKey) {
-  const { data } = await supabase.from('enrollments').select('profile_id, section, profiles(id, email, first_name, last_name, role)').eq('course_key', courseKey).eq('active', true);
-  return (data || []).filter(e => e.profiles?.role === 'student').map(e => ({ id: e.profiles.id, first: e.profiles.first_name, last: e.profiles.last_name, email: e.profiles.email, name: `${e.profiles.first_name} ${e.profiles.last_name}`, section: e.section || null }));
+  const { data } = await supabase.from('enrollments').select('profile_id, section, is_test, profiles(id, email, first_name, last_name, role)').eq('course_key', courseKey).eq('term', CURRENT_TERM).eq('active', true);
+  return (data || []).filter(e => e.profiles?.role === 'student').map(e => ({ id: e.profiles.id, first: e.profiles.first_name, last: e.profiles.last_name, email: e.profiles.email, name: `${e.profiles.first_name} ${e.profiles.last_name}`, section: e.section || null, isTest: e.is_test === true }));
 }
 
 // Dropped students — for the "Dropped students" restore list in Settings.
 // Loaded on demand only (not part of the main data load), since it's rarely needed.
 async function loadInactiveStudentsForCourse(courseKey) {
-  const { data } = await supabase.from('enrollments').select('profile_id, section, profiles(id, email, first_name, last_name, role)').eq('course_key', courseKey).eq('active', false);
-  return (data || []).filter(e => e.profiles?.role === 'student').map(e => ({ id: e.profiles.id, first: e.profiles.first_name, last: e.profiles.last_name, email: e.profiles.email, name: `${e.profiles.first_name} ${e.profiles.last_name}`, section: e.section || null }));
+  const { data } = await supabase.from('enrollments').select('profile_id, section, is_test, profiles(id, email, first_name, last_name, role)').eq('course_key', courseKey).eq('term', CURRENT_TERM).eq('active', false);
+  return (data || []).filter(e => e.profiles?.role === 'student').map(e => ({ id: e.profiles.id, first: e.profiles.first_name, last: e.profiles.last_name, email: e.profiles.email, name: `${e.profiles.first_name} ${e.profiles.last_name}`, section: e.section || null, isTest: e.is_test === true }));
 }
 
 // Soft-remove: hides the student from the active roster (grid, CSV, batch grading,
 // grade calcs) but keeps every row in student_checks/instructor_statuses/tokens/
 // feedback_queue untouched, so restoring her later restores her full history.
 async function removeStudentFromCourse(profileId, courseKey) {
-  const { error } = await supabase.from('enrollments').update({ active: false }).eq('profile_id', profileId).eq('course_key', courseKey);
+  const { error } = await supabase.from('enrollments').update({ active: false }).eq('profile_id', profileId).eq('course_key', courseKey).eq('term', CURRENT_TERM);
   return { error };
 }
 
 async function restoreStudentToCourse(profileId, courseKey) {
-  const { error } = await supabase.from('enrollments').update({ active: true }).eq('profile_id', profileId).eq('course_key', courseKey);
+  const { error } = await supabase.from('enrollments').update({ active: true }).eq('profile_id', profileId).eq('course_key', courseKey).eq('term', CURRENT_TERM);
   return { error };
 }
 
@@ -101,28 +111,28 @@ async function updateStudentName(profileId, firstName, lastName) {
 }
 
 async function loadInstrStatuses(courseKey) {
-  const { data } = await supabase.from('instructor_statuses').select('*').eq('course_key', courseKey);
+  const { data } = await supabase.from('instructor_statuses').select('*').eq('course_key', courseKey).eq('term', CURRENT_TERM);
   const map = {};
   (data || []).forEach(r => { if (!map[r.profile_id]) map[r.profile_id] = {}; map[r.profile_id][r.assignment_id] = r.status; });
   return map;
 }
 
 async function loadMyInstrStatuses(courseKey, profileId) {
-  const { data } = await supabase.from('instructor_statuses').select('assignment_id, status, updated_at').eq('course_key', courseKey).eq('profile_id', profileId);
+  const { data } = await supabase.from('instructor_statuses').select('assignment_id, status, updated_at').eq('course_key', courseKey).eq('profile_id', profileId).eq('term', CURRENT_TERM);
   const map = {};
   (data || []).forEach(r => { map[r.assignment_id] = { status: r.status, updated_at: r.updated_at }; });
   return map;
 }
 
 async function loadInstrNotes(courseKey) {
-  const { data } = await supabase.from('instructor_notes').select('*').eq('course_key', courseKey);
+  const { data } = await supabase.from('instructor_notes').select('*').eq('course_key', courseKey).eq('term', CURRENT_TERM);
   const map = {};
   (data || []).forEach(r => { if (!map[r.profile_id]) map[r.profile_id] = {}; map[r.profile_id][r.assignment_id] = r.note; });
   return map;
 }
 
 async function loadStudentChecks(courseKey, profileId) {
-  const q = supabase.from('student_checks').select('*').eq('course_key', courseKey);
+  const q = supabase.from('student_checks').select('*').eq('course_key', courseKey).eq('term', CURRENT_TERM);
   if (profileId) q.eq('profile_id', profileId);
   const { data } = await q;
   const map = {};
@@ -131,7 +141,7 @@ async function loadStudentChecks(courseKey, profileId) {
 }
 
 async function loadClassPrep(courseKey, profileId) {
-  const q = supabase.from('class_prep').select('*').eq('course_key', courseKey);
+  const q = supabase.from('class_prep').select('*').eq('course_key', courseKey).eq('term', CURRENT_TERM);
   if (profileId) q.eq('profile_id', profileId);
   const { data } = await q;
   const map = {};
@@ -140,7 +150,7 @@ async function loadClassPrep(courseKey, profileId) {
 }
 
 async function loadTokens(courseKey, profileId) {
-  const q = supabase.from('tokens').select('*').eq('course_key', courseKey);
+  const q = supabase.from('tokens').select('*').eq('course_key', courseKey).eq('term', CURRENT_TERM);
   if (profileId) q.eq('profile_id', profileId);
   const { data } = await q;
   const map = {};
@@ -149,25 +159,25 @@ async function loadTokens(courseKey, profileId) {
 }
 
 async function loadFeedbackQueue(courseKey) {
-  const { data } = await supabase.from('feedback_queue').select('*, profiles(first_name, last_name)').eq('course_key', courseKey).order('submitted_at', { ascending: false });
+  const { data } = await supabase.from('feedback_queue').select('*, profiles(first_name, last_name)').eq('course_key', courseKey).eq('term', CURRENT_TERM).order('submitted_at', { ascending: false });
   return (data || []).map(r => ({ ...r, sName: `${r.profiles?.first_name || ''} ${r.profiles?.last_name || ''}`.trim() }));
 }
 
 // WRITE OPERATIONS
 async function upsertInstrStatus(profileId, courseKey, assignmentId, status) {
   if (!status) {
-    return await supabase.from('instructor_statuses').delete().match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId });
+    return await supabase.from('instructor_statuses').delete().match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, term: CURRENT_TERM });
   } else {
-    return await supabase.from('instructor_statuses').upsert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, status, term: CURRENT_TERM, updated_at: new Date().toISOString() }, { onConflict: 'profile_id,course_key,assignment_id' });
+    return await supabase.from('instructor_statuses').upsert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, status, term: CURRENT_TERM, updated_at: new Date().toISOString() }, { onConflict: 'profile_id,course_key,assignment_id,term' });
   }
 }
 
 async function upsertInstrNote(profileId, courseKey, assignmentId, note) {
-  await supabase.from('instructor_notes').upsert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, note, term: CURRENT_TERM, updated_at: new Date().toISOString() }, { onConflict: 'profile_id,course_key,assignment_id' });
+  await supabase.from('instructor_notes').upsert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, note, term: CURRENT_TERM, updated_at: new Date().toISOString() }, { onConflict: 'profile_id,course_key,assignment_id,term' });
 }
 
 async function toggleStudentCheck(profileId, courseKey, assignmentId) {
-  const { data: existing } = await supabase.from('student_checks').select('id').match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId }).single();
+  const { data: existing } = await supabase.from('student_checks').select('id').match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, term: CURRENT_TERM }).single();
   if (existing) {
     await supabase.from('student_checks').delete().eq('id', existing.id);
     return false;
@@ -178,7 +188,7 @@ async function toggleStudentCheck(profileId, courseKey, assignmentId) {
 }
 
 async function toggleClassPrep(profileId, courseKey, prepId) {
-  const { data: existing } = await supabase.from('class_prep').select('id').match({ profile_id: profileId, course_key: courseKey, prep_id: prepId }).single();
+  const { data: existing } = await supabase.from('class_prep').select('id').match({ profile_id: profileId, course_key: courseKey, prep_id: prepId, term: CURRENT_TERM }).single();
   if (existing) {
     await supabase.from('class_prep').delete().eq('id', existing.id);
     return false;
@@ -214,7 +224,7 @@ async function resolveQueueItem(queueId, profileId, courseKey, assignmentId, res
 async function returnToken(queueId, profileId, courseKey, assignmentId) {
   await supabase.from('feedback_queue').delete().eq('id', queueId);
   // Delete the matching token (most recent one for this student/assignment)
-  const { data: tok } = await supabase.from('tokens').select('id').match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId }).order('submitted_at', { ascending: false }).limit(1).single();
+  const { data: tok } = await supabase.from('tokens').select('id').match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, term: CURRENT_TERM }).order('submitted_at', { ascending: false }).limit(1).single();
   if (tok) await supabase.from('tokens').delete().eq('id', tok.id);
 }
 
@@ -229,12 +239,12 @@ async function toggleReleased(courseKey, assignmentId) {
 
 // TEACHING SCHEDULE
 async function loadTeachingDates(courseKey) {
-  const { data } = await supabase.from('teaching_dates').select('*').eq('course_key', courseKey).order('teach_date');
+  const { data } = await supabase.from('teaching_dates').select('*').eq('course_key', courseKey).eq('term', CURRENT_TERM).order('teach_date');
   return data || [];
 }
 
 async function loadTeachingSelections(courseKey, profileId) {
-  const q = supabase.from('teaching_selections').select('*, profiles(first_name, last_name)').eq('course_key', courseKey);
+  const q = supabase.from('teaching_selections').select('*, profiles(first_name, last_name)').eq('course_key', courseKey).eq('term', CURRENT_TERM);
   if (profileId) q.eq('profile_id', profileId);
   const { data } = await q;
   return data || [];
@@ -245,7 +255,7 @@ async function pickTeachingDate(profileId, courseKey, assignmentId, teachDate) {
   planDue.setDate(planDue.getDate() - 3);
   const planDueStr = planDue.toISOString().slice(0, 10);
   // Upsert — if they already picked a date for this assignment, replace it
-  const { data: existing } = await supabase.from('teaching_selections').select('id').match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId }).single();
+  const { data: existing } = await supabase.from('teaching_selections').select('id').match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, term: CURRENT_TERM }).single();
   if (existing) {
     await supabase.from('teaching_selections').update({ teach_date: teachDate, plan_due_date: planDueStr }).eq('id', existing.id);
   } else {
@@ -254,7 +264,7 @@ async function pickTeachingDate(profileId, courseKey, assignmentId, teachDate) {
 }
 
 async function removeTeachingSelection(profileId, courseKey, assignmentId) {
-  await supabase.from('teaching_selections').delete().match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId });
+  await supabase.from('teaching_selections').delete().match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, term: CURRENT_TERM });
 }
 
 async function addTeachingDate(courseKey, assignmentId, teachDate, section = null) {
@@ -274,7 +284,7 @@ async function updateTeachingDate(id, courseKey, assignmentId, oldDate, newDate)
   await supabase.from('teaching_dates').update({ teach_date: newDate }).eq('id', id);
   // Cascade to student selections that used the old date for this assignment so their
   // plan due date stays correct. (Selections reference the date, not the row id.)
-  await supabase.from('teaching_selections').update({ teach_date: newDate, plan_due_date: planDueStr }).match({ course_key: courseKey, assignment_id: assignmentId, teach_date: oldDate });
+  await supabase.from('teaching_selections').update({ teach_date: newDate, plan_due_date: planDueStr }).match({ course_key: courseKey, assignment_id: assignmentId, teach_date: oldDate, term: CURRENT_TERM });
 }
 
 async function deleteTeachingDate(id) {
@@ -310,6 +320,7 @@ export default function App() {
   const [signupFirst, setSignupFirst] = useState('');
   const [signupLast, setSignupLast] = useState('');
   const [joinCode, setJoinCode] = useState('');
+  const [hasPastEnrollments, setHasPastEnrollments] = useState(false); // student had enrollments in a PRIOR term only
   const [joinErr, setJoinErr] = useState(''); // '' | error string | { ok: true, msg: string }
   const [forgotMode, setForgotMode] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
@@ -396,6 +407,14 @@ export default function App() {
       const profile = await loadUserProfile(session.user.email);
       if (profile) {
         const courses = await loadEnrollments(profile.id);
+        // No current-term enrollments? Find out whether she ever had any, so we can
+        // tell "your course has ended" apart from "you haven't joined anything."
+        if (courses.length === 0 && profile.role === 'student') {
+          const anyEnr = await loadAnyEnrollments(profile.id);
+          setHasPastEnrollments(anyEnr.length > 0);
+        } else {
+          setHasPastEnrollments(false);
+        }
         setUser({ profile, courses });
         if (courses.length === 1) setCk(courses[0].key);
       }
@@ -622,11 +641,14 @@ export default function App() {
         const authId = signInData.user.id;
         const existingEnrollments = await loadEnrollments(authId);
         const entry = existingEnrollments.find(e => e.key === courseCode.course_key);
+        // loadEnrollments only returns CURRENT_TERM rows, so `entry` missing means
+        // she has no enrollment THIS term — insert one. A prior-term enrollment is
+        // left untouched: it is her archived record, not something to reactivate.
         if (!entry) {
           await supabase.from('enrollments').insert({ profile_id: authId, course_key: courseCode.course_key, section: courseCode.section || null, term: CURRENT_TERM });
         } else if (!entry.active) {
-          // NOTE (Build 1b): rejoining in a LATER term needs a new row, not a reactivate.
-          await supabase.from('enrollments').update({ active: true, section: courseCode.section || null, term: CURRENT_TERM }).eq('profile_id', authId).eq('course_key', courseCode.course_key);
+          // Dropped and rejoining WITHIN the current term — reactivate in place.
+          await supabase.from('enrollments').update({ active: true, section: courseCode.section || null }).eq('profile_id', authId).eq('course_key', courseCode.course_key).eq('term', CURRENT_TERM);
         }
         await checkAuth();
         return;
@@ -653,14 +675,14 @@ export default function App() {
       // Returning student from another course — add enrollment for this course if not already enrolled
       const existingEnrollments = await loadEnrollments(authId);
       const entry = existingEnrollments.find(e => e.key === courseCode.course_key);
+      // See note above: `entry` is scoped to CURRENT_TERM, so absent means
+      // "not enrolled this term" and a fresh row is correct. A retaking student
+      // keeps her prior-term row intact alongside the new one.
       if (!entry) {
         await supabase.from('enrollments').insert({ profile_id: authId, course_key: courseCode.course_key, section: courseCode.section || null, term: CURRENT_TERM });
       } else if (!entry.active) {
-        // Re-joining a course she was previously dropped from — reactivate rather than duplicate-insert.
-        // NOTE (Build 1b): once enrollments are term-scoped, a student rejoining in a LATER term
-        // must get a NEW enrollment row, not a reactivation of the old one. This branch will need
-        // to compare entry.term against CURRENT_TERM and insert instead of update when they differ.
-        await supabase.from('enrollments').update({ active: true, section: courseCode.section || null, term: CURRENT_TERM }).eq('profile_id', authId).eq('course_key', courseCode.course_key);
+        // Dropped and rejoining WITHIN the current term — reactivate in place.
+        await supabase.from('enrollments').update({ active: true, section: courseCode.section || null }).eq('profile_id', authId).eq('course_key', courseCode.course_key).eq('term', CURRENT_TERM);
       }
     } else {
       // Profile exists but with wrong ID — this shouldn't happen with new flow but just in case
@@ -706,8 +728,9 @@ export default function App() {
 
     if (existingEntry && !existingEntry.active) {
       // Re-joining a course she was previously dropped from — reactivate rather than duplicate-insert
-      // NOTE (Build 1b): see handleSignup — rejoining in a LATER term needs a new row, not a reactivate.
-      const { error } = await supabase.from('enrollments').update({ active: true, section: courseCode.section || null, term: CURRENT_TERM }).eq('profile_id', user.profile.id).eq('course_key', courseCode.course_key);
+      // Dropped and rejoining WITHIN the current term — reactivate in place.
+      // (existingEntry comes from loadEnrollments, which is CURRENT_TERM-scoped.)
+      const { error } = await supabase.from('enrollments').update({ active: true, section: courseCode.section || null }).eq('profile_id', user.profile.id).eq('course_key', courseCode.course_key).eq('term', CURRENT_TERM);
       if (error) { setJoinErr('Something went wrong — please try again or contact Dr. Beggs.'); return; }
     } else {
       // Add enrollment
@@ -801,6 +824,61 @@ export default function App() {
       </div>
     </main>
   );
+
+  // ---- COURSE ENDED ----
+  // A student whose only enrollments belong to a past term. Her records are kept
+  // in the database; the app simply no longer loads them. Mirrors the existing
+  // "no longer enrolled" treatment rather than showing an empty course list.
+  if (user.profile.role === 'student' && user.courses.length === 0 && hasPastEnrollments) {
+    return (
+      <div>
+        <a href="#main-content" className="skip-link">Skip to main content</a>
+        <header style={{ borderBottom: "1px solid #E8E6E1", background: "#fff" }}>
+          <div style={{ maxWidth: 600, margin: "0 auto", padding: "10px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{user.profile.first_name} {user.profile.last_name}</span>
+            <button onClick={handleLogout} aria-label="Sign out" style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", background: "none", border: "1px solid #E0DDD8", borderRadius: 4, padding: "3px 8px", cursor: "pointer" }}>Sign out</button>
+          </div>
+        </header>
+        <main id="main-content" style={{ maxWidth: 600, margin: "0 auto", padding: "40px 20px" }}>
+          <div role="status" style={{ padding: "24px 20px", background: "#F5F4F0", border: "2px solid #E8E6E1", borderRadius: 10 }}>
+            <h1 style={{ fontFamily: F.d, fontSize: 20, fontWeight: 700, marginBottom: 8, color: "#1A1A1A" }}>This course has ended</h1>
+            <p style={{ fontFamily: F.b, fontSize: 13, color: "#555", lineHeight: 1.6, margin: 0 }}>
+              Your coursework is complete and this course is no longer active in Lumos. Your final grade is recorded in your official university record.
+            </p>
+            <p style={{ fontFamily: F.b, fontSize: 13, color: "#555", lineHeight: 1.6, marginTop: 12, marginBottom: 0 }}>
+              If you have a question about your grade, contact Dr. Beggs at <a href="mailto:mbeggs@ucmo.edu" style={{ color: "#1565C0" }}>mbeggs@ucmo.edu</a>.
+            </p>
+          </div>
+
+          {/* She may be starting a new course this term — let her join. */}
+          <div style={{ marginTop: 28, paddingTop: 24, borderTop: "1px solid #E8E6E1" }}>
+            <h2 style={{ fontFamily: F.b, fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: "#555", marginBottom: 12 }}>Starting a New Course?</h2>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                value={joinCode}
+                onChange={e => { setJoinCode(e.target.value); setJoinErr(''); }}
+                onKeyDown={e => { if (e.key === 'Enter') handleJoinCourse(); }}
+                placeholder="Course code (provided by Dr. Beggs)"
+                aria-label="Course code to join"
+                style={{ flex: 1, padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, boxSizing: "border-box", outline: "none" }}
+              />
+              <button
+                onClick={handleJoinCourse}
+                aria-label="Join course"
+                style={{ padding: "8px 16px", background: "#CF202E", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
+                Join
+              </button>
+            </div>
+            {joinErr && (
+              <div role="alert" aria-live="assertive" style={{ fontFamily: F.b, fontSize: 11, marginTop: 8, color: joinErr.ok ? "#2D6A4F" : "#C0392B" }}>
+                {joinErr.ok ? joinErr.msg : joinErr}
+              </div>
+            )}
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   // ---- COURSE SELECT ----
   if (!ck) {
