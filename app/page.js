@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
-import { COURSES, TM, CAL_LINK, BRAND, CURRENT_TERM, calcGrade, calcStudentGrade, getBlockers, tokBal, pastCutoff, getTokenCutoff, getTokenTarget, getCourseSections } from '../lib/courses';
+import { COURSES, TM, CAL_LINK, BRAND, CURRENT_TERM, calcGrade, calcStudentGrade, getBlockers, tokBal, getTokenTarget, getCourseSections } from '../lib/courses';
 
 const F = { d: "'Source Serif 4',Georgia,serif", b: "'DM Sans',sans-serif" };
 
@@ -99,6 +99,57 @@ async function copyDueDatesFromTerm(courseKey, fromTerm, toTerm) {
 
   const { error } = await supabase.from('assignment_due_dates').insert(rows);
   return { copied: error ? 0 : rows.length, error };
+}
+
+// ---------------------------------------------------------------------------
+// TOKEN CUTOFFS — per course, per term
+// The live cutoff lives in term_settings so it can be set from Settings each
+// semester. courses.js still carries tokenCutoff / tokenCutoffDate, which are
+// now DEFAULTS ONLY — used when term_settings has no row for this term.
+//
+// cutoffFor() / cutoffLabelFor() replace the imported pastCutoff() /
+// getTokenCutoff() everywhere in the student view.
+// ---------------------------------------------------------------------------
+let _cutoffs = {}; // { [course_key]: 'YYYY-MM-DD' } for the ACTIVE term only
+
+async function loadTermSettings(term) {
+  try {
+    const { data } = await supabase.from('term_settings').select('course_key, token_cutoff_date').eq('term', term);
+    const map = {};
+    (data || []).forEach(r => { if (r.token_cutoff_date) map[r.course_key] = r.token_cutoff_date; });
+    _cutoffs = map;
+  } catch {
+    _cutoffs = {}; // fall back to the courses.js defaults
+  }
+  return _cutoffs;
+}
+
+async function setTokenCutoff(courseKey, term, dateStr) {
+  const { error } = await supabase.from('term_settings')
+    .upsert({ course_key: courseKey, term, token_cutoff_date: dateStr || null, updated_at: new Date().toISOString() }, { onConflict: 'course_key,term' });
+  if (error) return { error };
+  if (dateStr) _cutoffs[courseKey] = dateStr; else delete _cutoffs[courseKey];
+  return { error: null };
+}
+
+function cutoffDateFor(ck) {
+  const override = _cutoffs[ck];
+  if (override) return new Date(override + 'T23:59:59');
+  return COURSES[ck]?.tokenCutoffDate || null; // courses.js default
+}
+
+// True when the token period has ended for this course in the active term.
+function cutoffFor(ck) {
+  const d = cutoffDateFor(ck);
+  if (!d) return false;
+  return new Date() > d;
+}
+
+// Display string, e.g. "July 9, 2026".
+function cutoffLabelFor(ck) {
+  const override = _cutoffs[ck];
+  if (override) return new Date(override + 'T12:00:00').toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  return COURSES[ck]?.tokenCutoff || "";
 }
 
 // Course codes — listed and toggled from Settings so deactivating a code (e.g.
@@ -485,6 +536,13 @@ export default function App() {
   const [courseCodes, setCourseCodes] = useState([]);
   const [codesLoading, setCodesLoading] = useState(false);
   const [copyBusy, setCopyBusy] = useState(false);
+  const [cutoffDraft, setCutoffDraft] = useState(''); // yyyy-mm-dd in the cutoff picker
+  const [cutoffBusy, setCutoffBusy] = useState(false);
+  // Settings section collapse state — Settings has grown, so each block folds.
+  const [expSemester, setExpSemester] = useState(false);
+  const [expSetup, setExpSetup] = useState(false);
+  const [expCodes, setExpCodes] = useState(false);
+  const [expManageStudents, setExpManageStudents] = useState(true);
   const [joinErr, setJoinErr] = useState(''); // '' | error string | { ok: true, msg: string }
   const [forgotMode, setForgotMode] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
@@ -570,6 +628,7 @@ export default function App() {
     // Resolve the active term FIRST — every enrollment/course read below filters
     // on it. Loading it after would filter the first render on the stale fallback.
     await loadActiveTerm();
+    await loadTermSettings(activeTerm());
     setTermNow(activeTerm());
     if (session?.user) {
       const profile = await loadUserProfile(session.user.email);
@@ -637,6 +696,8 @@ export default function App() {
       const { error: enrErr } = await ensureInstructorEnrollments(user.profile.id, target);
       if (enrErr) showToast('Term changed, but your course enrollments may need attention.', 'error');
 
+      await loadTermSettings(target);
+      setCutoffDraft('');
       setTermNow(target);
       setTermPending(null);
       setCk(null);           // drop back to the course list; old course is gone
@@ -661,6 +722,20 @@ export default function App() {
       refresh();
     } finally {
       setCopyBusy(false);
+    }
+  }
+
+  // ---- TOKEN CUTOFF ------------------------------------------------------
+  async function handleSaveCutoff() {
+    if (cutoffBusy) return;
+    setCutoffBusy(true);
+    try {
+      const { error } = await setTokenCutoff(ck, activeTerm(), cutoffDraft);
+      if (error) { showToast('Could not save the token cutoff — please try again.'); return; }
+      showToast(cutoffDraft ? `Token cutoff set to ${cutoffLabelFor(ck)}.` : 'Token cutoff cleared — using the course default.', 'success');
+      refresh();
+    } finally {
+      setCutoffBusy(false);
     }
   }
 
@@ -1215,7 +1290,7 @@ export default function App() {
     const grade = calcStudentGrade(myChecks, myInstrStatuses, relAssignments, ck, dueDates);
     const { target, blockers, msg: bMsg } = getBlockers(myChecks, relAssignments, ck, myInstrStatuses, dueDates);
     const tok = tokBal(myToks.length, 0);
-    const cutoff = pastCutoff(ck);
+    const cutoff = cutoffFor(ck);
 
     const handleCheck = async (aid) => {
       await toggleStudentCheck(myId, ck, aid);
@@ -1594,7 +1669,7 @@ export default function App() {
             <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 6 }}>3 per course · {tok.used} used · {tok.avail} available</div>
             <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", lineHeight: 1.5 }}>
               Use tokens to <strong style={{ color: "#555" }}>revise</strong> or <strong style={{ color: "#555" }}>submit late work</strong>.
-              {cutoff ? <><br /><strong style={{ color: "#C0392B" }}>Token period has ended ({getTokenCutoff(ck)}).</strong></> : <><br /><span style={{ color: "#6B6B6B" }}>Cutoff: {getTokenCutoff(ck)}</span></>}
+              {cutoff ? <><br /><strong style={{ color: "#C0392B" }}>Token period has ended ({cutoffLabelFor(ck)}).</strong></> : <><br /><span style={{ color: "#6B6B6B" }}>Cutoff: {cutoffLabelFor(ck)}</span></>}
             </div>
             {myToks.length > 0 && <div style={{ marginTop: 10 }}>
               <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "#767676", marginBottom: 4 }}>History</div>
@@ -2449,7 +2524,8 @@ export default function App() {
         {/* SETTINGS — Due dates for assignments and class prep */}
         {tab === "settings" && <div>
           {/* ---- SEMESTER ---- */}
-          <Lbl>Semester</Lbl>
+          <Lbl onClick={() => setExpSemester(!expSemester)} expanded={expSemester}>Semester · {termNow}</Lbl>
+          {expSemester && <>
           <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12, lineHeight: 1.5, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
             Lumos shows one semester at a time. Changing this hides the previous semester's students and coursework from every view — nothing is deleted, and switching back brings it all straight back. Export your grades before you move on.
           </div>
@@ -2467,9 +2543,11 @@ export default function App() {
               <span style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>Showing {termNow}</span>
             </div>
           </div>
+          </>}
 
-          {/* ---- DUE DATES: COPY FROM A PREVIOUS SEMESTER ---- */}
-          <Lbl>Start-of-Semester Setup</Lbl>
+          {/* ---- START-OF-SEMESTER SETUP ---- */}
+          <Lbl onClick={() => setExpSetup(!expSetup)} expanded={expSetup}>Start-of-Semester Setup</Lbl>
+          {expSetup && <>
           <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12, lineHeight: 1.5, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
             Copy last semester's due dates into this one as a starting point, then adjust the dates below. Assignments that already have a date this semester are left alone.
           </div>
@@ -2491,9 +2569,30 @@ export default function App() {
             </div>
           </div>
 
+          {/* Token cutoff — per course, per semester. Stored in term_settings. */}
+          <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12, lineHeight: 1.5, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
+            After the token cutoff, students can no longer submit tokens for late work or revisions in this course. Leave it empty to use the course's built-in date.
+          </div>
+          <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", padding: "14px 16px", marginBottom: 18 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <label htmlFor="cutoff-date" style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555" }}>Token cutoff for {c.short}</label>
+              <input id="cutoff-date" type="date" aria-label={`Token cutoff date for ${c.short}`}
+                value={cutoffDraft} onChange={e => setCutoffDraft(e.target.value)}
+                style={{ padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, outline: "none" }} />
+              <button aria-label="Save token cutoff" disabled={cutoffBusy} onClick={handleSaveCutoff}
+                style={{ padding: "6px 14px", background: cutoffBusy ? "#F5F4F0" : "#fff", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", cursor: cutoffBusy ? "default" : "pointer" }}>
+                {cutoffBusy ? "Saving…" : "Save"}
+              </button>
+              <span role="status" style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>
+                Currently: {cutoffLabelFor(ck) || "not set"}
+              </span>
+            </div>
+          </div>
+          </>}
+
           {/* ---- COURSE CODES ---- */}
-          <Lbl onClick={() => { if (!courseCodes.length) openCourseCodes(); else setCourseCodes([]); }} expanded={courseCodes.length > 0}>Course Codes</Lbl>
-          {courseCodes.length > 0 && <div style={{ marginBottom: 18 }}>
+          <Lbl onClick={() => { const nx = !expCodes; setExpCodes(nx); if (nx && !courseCodes.length) openCourseCodes(); }} expanded={expCodes}>Course Codes</Lbl>
+          {expCodes && courseCodes.length > 0 && <div style={{ marginBottom: 18 }}>
             <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 10, lineHeight: 1.5, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
               Students use these codes to sign up. Turn a code off when you no longer want new students joining with it.
             </div>
@@ -2512,9 +2611,10 @@ export default function App() {
               </div>)}
             </div>
           </div>}
-          {codesLoading && <div role="status" style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginBottom: 18 }}>Loading course codes…</div>}
+          {expCodes && codesLoading && <div role="status" style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginBottom: 18 }}>Loading course codes…</div>}
 
-          <Lbl>Manage Students</Lbl>
+          <Lbl onClick={() => setExpManageStudents(!expManageStudents)} expanded={expManageStudents}>Manage Students</Lbl>
+          {expManageStudents && <>
           <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12, lineHeight: 1.5, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
             Fix a misspelled name, or remove a student who dropped the course. Removing a student hides her from your roster and grade views — her records are kept, and you can restore her later if needed. Mark an account as Test to keep it out of your grade distribution, counts, and exports (useful for colleague sign-ins you use to check the student view).
           </div>
@@ -2607,6 +2707,7 @@ export default function App() {
               </div>)}
             </div>}
           </div>
+          </>}
 
           {/* Term switch confirmation. Focus is moved to the dialog on open and the
               Escape key cancels; both handled by TermSwitchDialog below. */}
