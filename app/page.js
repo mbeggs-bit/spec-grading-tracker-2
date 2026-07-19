@@ -68,11 +68,14 @@ function termOptions() {
   return out;
 }
 
-// After a term switch: make sure the instructor is enrolled in every course in
-// the new term, otherwise her course list comes back empty. Idempotent — the
-// (profile_id, course_key, term) unique constraint makes a repeat a no-op.
-async function ensureInstructorEnrollments(profileId, term) {
-  const rows = Object.keys(COURSES).map(k => ({ profile_id: profileId, course_key: k, term, active: true }));
+// After a term switch: enroll the instructor in the courses she is actually
+// teaching that term. Not every course runs every semester — enrolling in all of
+// them would leave empty courses cluttering the switcher.
+// Idempotent: the (profile_id, course_key, term) unique constraint makes a
+// repeat a no-op.
+async function ensureInstructorEnrollments(profileId, term, courseKeys) {
+  const keys = (courseKeys && courseKeys.length) ? courseKeys : Object.keys(COURSES);
+  const rows = keys.map(k => ({ profile_id: profileId, course_key: k, term, active: true }));
   const { error } = await supabase.from('enrollments')
     .upsert(rows, { onConflict: 'profile_id,course_key,term', ignoreDuplicates: true });
   return { error };
@@ -315,6 +318,20 @@ async function loadTokens(courseKey, profileId) {
   return map;
 }
 
+// Student-scoped view of her own token submissions, so the checklist can show
+// "Token submitted [date] — awaiting review" / "reviewed". The instructor loader
+// below pulls the whole course; RLS lets a student read only her own rows, so
+// this is the same table filtered to her.
+async function loadMyQueue(courseKey, profileId) {
+  const { data } = await supabase.from('feedback_queue')
+    .select('assignment_id, token_type, submitted_at, resolved, resolution, resolved_at')
+    .eq('course_key', courseKey).eq('term', activeTerm()).eq('profile_id', profileId)
+    .order('submitted_at', { ascending: false });
+  const map = {};
+  (data || []).forEach(r => { if (!map[r.assignment_id]) map[r.assignment_id] = r; }); // newest per assignment
+  return map;
+}
+
 async function loadFeedbackQueue(courseKey) {
   const { data } = await supabase.from('feedback_queue').select('*, profiles(first_name, last_name)').eq('course_key', courseKey).eq('term', activeTerm()).order('submitted_at', { ascending: false });
   return (data || []).map(r => ({ ...r, sName: `${r.profiles?.first_name || ''} ${r.profiles?.last_name || ''}`.trim() }));
@@ -464,7 +481,7 @@ function GradeRing({ grade, size = 50, label = "" }) { const m = TM[grade] || TM
 // on open, returns it to whatever was focused before on close, traps Tab inside
 // while open, and cancels on Escape. role="dialog" + aria-modal so screen
 // readers treat the rest of the page as inert.
-function TermSwitchDialog({ from, to, busy, onCancel, onConfirm }) {
+function TermSwitchDialog({ from, to, busy, selected, onToggleCourse, onCancel, onConfirm }) {
   const boxRef = useRef(null);
   const cancelRef = useRef(null);
   const prevFocus = useRef(null);
@@ -499,11 +516,28 @@ function TermSwitchDialog({ from, to, busy, onCancel, onConfirm }) {
           <p style={{ margin: "0 0 8px" }}>Nothing is deleted. Switching back to {from} restores it exactly as it is now.</p>
           <p style={{ margin: 0 }}>Students enrolled only in {from} will see &ldquo;This course has ended&rdquo; when they sign in. Export your grades first if you haven&rsquo;t.</p>
         </div>
+
+        <fieldset style={{ border: "1px solid #E8E6E1", borderRadius: 8, padding: "10px 12px", marginBottom: 16 }}>
+          <legend style={{ fontFamily: F.b, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: "#555", padding: "0 6px" }}>Teaching in {to}</legend>
+          <p style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", margin: "0 0 8px", lineHeight: 1.5 }}>
+            Only the courses you check will appear in your course list. You can add others later by changing semester again.
+          </p>
+          {Object.keys(COURSES).map(k => {
+            const on = (selected || []).includes(k);
+            return (
+              <label key={k} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", cursor: "pointer" }}>
+                <input type="checkbox" checked={on} onChange={() => onToggleCourse(k)} disabled={busy}
+                  style={{ width: 16, height: 16, cursor: "pointer", accentColor: "#CF202E" }} />
+                <span style={{ fontFamily: F.b, fontSize: 12, color: "#1A1A1A" }}>{COURSES[k]?.short || k}</span>
+              </label>
+            );
+          })}
+        </fieldset>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button ref={cancelRef} onClick={onCancel} disabled={busy}
             style={{ padding: "7px 14px", background: "#F5F4F0", color: "#555", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 12, fontWeight: 600, cursor: busy ? "default" : "pointer" }}>Cancel</button>
-          <button onClick={onConfirm} disabled={busy}
-            style={{ padding: "7px 14px", background: busy ? "#B0ADA8" : "#CF202E", color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 12, fontWeight: 600, cursor: busy ? "default" : "pointer" }}>
+          <button onClick={onConfirm} disabled={busy || !(selected || []).length}
+            style={{ padding: "7px 14px", background: (busy || !(selected || []).length) ? "#B0ADA8" : "#CF202E", color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 12, fontWeight: 600, cursor: (busy || !(selected || []).length) ? "default" : "pointer" }}>
             {busy ? "Changing…" : `Change to ${to}`}
           </button>
         </div>
@@ -533,6 +567,7 @@ export default function App() {
   const [termNow, setTermNow] = useState(CURRENT_TERM); // active term, mirrored into state for rendering
   const [termPending, setTermPending] = useState(null); // term awaiting confirmation in the dialog
   const [termSwitching, setTermSwitching] = useState(false);
+  const [termCourses, setTermCourses] = useState(Object.keys(COURSES)); // courses being taught in the term you are switching TO
   const [courseCodes, setCourseCodes] = useState([]);
   const [codesLoading, setCodesLoading] = useState(false);
   const [copyBusy, setCopyBusy] = useState(false);
@@ -550,9 +585,9 @@ export default function App() {
 
   // Course data
   // Course data — single object to prevent multiple re-renders
-  const [courseData, setCourseData] = useState({ rel: [], dueDates: {}, dueDatesAll: {}, students: [], iS: {}, iN: {}, sC: {}, cP: {}, toks: {}, fq: [], teachDates: [], teachSel: [], myInstrSt: {} });
+  const [courseData, setCourseData] = useState({ rel: [], dueDates: {}, dueDatesAll: {}, students: [], iS: {}, iN: {}, sC: {}, cP: {}, toks: {}, fq: [], teachDates: [], teachSel: [], myInstrSt: {}, myQueue: {} });
   const [dataLoading, setDataLoading] = useState(false);
-  const { rel, dueDates, dueDatesAll, students, iS, iN, sC, cP, toks, fq, teachDates, teachSel, myInstrSt } = courseData;
+  const { rel, dueDates, dueDatesAll, students, iS, iN, sC, cP, toks, fq, teachDates, teachSel, myInstrSt, myQueue } = courseData;
 
   // UI state
   const [tab, setTab] = useState('overview');
@@ -657,11 +692,15 @@ export default function App() {
   async function loadCourseData(isInitial = true) {
     if (isInitial) setDataLoading(true);
     const isStudent = user.profile.role === 'student';
+    // Refresh token cutoffs on every course load, not just at sign-in. Otherwise a
+    // student already in a session keeps the cutoff that was live when she signed
+    // in, and would not see an extended deadline until she re-authenticated.
+    await loadTermSettings(activeTerm());
     // A student resolves due dates to their own section; the instructor loads the
     // "all sections" view (null) — the Settings editor works off dueDatesAll, and the
     // feed/grid correctly show the all-sections row as the default.
     const mySection = isStudent ? (user.courses.find(co => co.key === ck)?.section || null) : null;
-    const [r, dd, s, is, inn, sc, cp, t, f, td, ts, mis] = await Promise.all([
+    const [r, dd, s, is, inn, sc, cp, t, f, td, ts, mis, mq] = await Promise.all([
       loadReleasedAssignments(ck),
       loadDueDates(ck, mySection),
       !isStudent ? loadStudentsForCourse(ck) : Promise.resolve([]),
@@ -674,8 +713,9 @@ export default function App() {
       loadTeachingDates(ck),
       loadTeachingSelections(ck, isStudent ? user.profile.id : null),
       isStudent ? loadMyInstrStatuses(ck, user.profile.id) : Promise.resolve({}),
+      isStudent ? loadMyQueue(ck, user.profile.id) : Promise.resolve({}),
     ]);
-    setCourseData({ rel: r, dueDates: dd.dueDates, dueDatesAll: dd.dueDatesAll, students: s, iS: is, iN: inn, sC: sc, cP: cp, toks: t, fq: f, teachDates: td, teachSel: ts, myInstrSt: mis });
+    setCourseData({ rel: r, dueDates: dd.dueDates, dueDatesAll: dd.dueDatesAll, students: s, iS: is, iN: inn, sC: sc, cP: cp, toks: t, fq: f, teachDates: td, teachSel: ts, myInstrSt: mis, myQueue: mq });
     if (isInitial) setDataLoading(false);
   }
 
@@ -693,7 +733,7 @@ export default function App() {
       const { error } = await setActiveTerm(target);
       if (error) { showToast('Could not change the term — please try again.'); return; }
 
-      const { error: enrErr } = await ensureInstructorEnrollments(user.profile.id, target);
+      const { error: enrErr } = await ensureInstructorEnrollments(user.profile.id, target, termCourses);
       if (enrErr) showToast('Term changed, but your course enrollments may need attention.', 'error');
 
       await loadTermSettings(target);
@@ -1320,6 +1360,25 @@ export default function App() {
       if (!grp) return true;
       return grp.ids.find(id => relAssignments.includes(id) && !myChecks[id]) === a.id;
     };
+    // Token submission status for a row. Answers "did my token go through?" —
+    // the toast at submit time is gone by the next visit, so this persists it.
+    //
+    // DELIBERATELY does not reveal the OUTCOME. Whether the instructor marked M
+    // or R must be learned by reading her feedback, not by reading the interface
+    // (see Lumos-Grade-Calculation-Spec.md — the M-unchecked / R equivalence is
+    // the whole point of Option A). So there is ONE neutral style, and the
+    // resolved text says only that a review happened, never what it concluded.
+    const tokenStatusFor = (a) => {
+      const q = (myQueue || {})[a.id] || (a.tokenGroup ? (myQueue || {})[a.tokenGroup] : null);
+      if (!q) return null;
+      const when = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+      const kind = q.token_type === 'revision' ? 'Revision' : 'Late submission';
+      const text = q.resolved
+        ? `${kind} token submitted ${when(q.submitted_at)} — reviewed ${when(q.resolved_at)}`
+        : `${kind} token submitted ${when(q.submitted_at)} — awaiting review`;
+      return { text };
+    };
+
     const showTokenBtn = (a) => !cutoff && tok.avail > 0 && !myChecks[a.id] && relAssignments.includes(a.id) && !(a.tokenGroup && hasGroupToken(a.tokenGroup));
 
     return (
@@ -1482,6 +1541,7 @@ export default function App() {
                       </div>
                       <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />
                     </div>
+                    {(() => { const ts = tokenStatusFor(a); return ts ? <div role="status" style={{ margin: "0 16px 10px 48px", padding: "5px 10px", background: "#F9F8F5", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: "#555" }}>✦ {ts.text}</div> : null; })()}
                     {showTokenBtn(a) && isFirstInGroup(a) && <div style={{ padding: "0 16px 10px 48px" }}>
                       <button onClick={(e) => { e.stopPropagation(); const tt = getTokenTarget(a.id, ck); setModal(tt); setTfType("late"); setTfNote(""); setTfLink(""); setTfExtra(""); }}
                         style={{ padding: "4px 12px", background: "#FFFCF5", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>
@@ -1507,6 +1567,7 @@ export default function App() {
                       {isMastery && <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />}
                       {a.eval === "completion" && <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
                     </div>
+                    {(() => { const ts = tokenStatusFor(a); return ts ? <div role="status" style={{ margin: "0 16px 10px 48px", padding: "5px 10px", background: "#F9F8F5", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: "#555" }}>✦ {ts.text}</div> : null; })()}
                     {showTokenBtn(a) && isFirstInGroup(a) && <div style={{ padding: "0 16px 10px 48px" }}>
                       <button onClick={(e) => { e.stopPropagation(); const tt = getTokenTarget(a.id, ck); setModal(tt); setTfType("revision"); setTfNote(""); setTfLink(""); setTfExtra(""); }}
                         style={{ padding: "4px 12px", background: "#FFFCF5", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>
@@ -2536,7 +2597,7 @@ export default function App() {
                 id="term-select"
                 aria-label="Current semester"
                 value={termNow}
-                onChange={e => { const v = e.target.value; if (v !== termNow) setTermPending(v); }}
+                onChange={e => { const v = e.target.value; if (v !== termNow) { setTermCourses(Object.keys(COURSES)); setTermPending(v); } }}
                 style={{ padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, background: "#fff", cursor: "pointer", outline: "none" }}>
                 {termOptions().map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
@@ -2715,6 +2776,8 @@ export default function App() {
             from={termNow}
             to={termPending}
             busy={termSwitching}
+            selected={termCourses}
+            onToggleCourse={(k) => setTermCourses(cs => cs.includes(k) ? cs.filter(x => x !== k) : [...cs, k])}
             onCancel={() => setTermPending(null)}
             onConfirm={confirmTermSwitch}
           />}
