@@ -485,6 +485,13 @@ async function deleteTeachingDate(id) {
 
 const SR1_TZ = 'America/Chicago';
 
+// Courses whose rosters can be pulled into practicum supervision. Only affects
+// the Roster Setup picker — everything downstream (windows, bookings, the
+// student view) keys off profile_id and never looks at a course, so a
+// candidate keeps working normally no matter which course she came from.
+// Add a course key here when a new block starts using field supervision.
+const SR1_COURSES = ["ECEL 4850", "ECEL 3820"];
+
 // 12-hour, no leading zero: "9:20 AM", "1:30 PM". Times are absolute
 // instants in the database; this is the only place they become text.
 function fmtTime(ts) {
@@ -3892,11 +3899,11 @@ export default function App() {
             <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", padding: "14px 16px", marginBottom: 18 }}>
               <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 4 }}>Supervised candidates</div>
               <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 10 }}>
-                {ck === "ECEL 4850"
-                  ? "Check the candidates you supervise in the field, then set each one's building and cooperating teacher."
-                  : "Switch the course selector at the top to ECEL 4850 to see the roster."}
+                {SR1_COURSES.includes(ck)
+                  ? "Check the candidates you supervise in the field, then set each one's building and cooperating teacher. Candidates from any course appear together in the list above."
+                  : `Switch the course selector at the top to ${SR1_COURSES.filter(k => COURSES[k]).join(" or ")} to see a roster.`}
               </div>
-              {ck === "ECEL 4850" && (filteredStudents.length === 0
+              {SR1_COURSES.includes(ck) && (filteredStudents.length === 0
                 ? <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>No students enrolled.</div>
                 : filteredStudents.slice().sort((a, b) => (a.last || '').localeCompare(b.last || '')).map(s => {
                     const sup = sr1.roster.find(r => r.profile_id === s.id);
@@ -3922,6 +3929,45 @@ export default function App() {
                       </>}
                     </div>;
                   }))}
+
+              {/* Candidates supervised from a course other than the one
+                  currently selected. Without this, a 3820 candidate would be
+                  invisible (and so un-editable) while the selector sits on
+                  4850 — supervision spans courses, but this picker cannot. */}
+              {SR1_COURSES.includes(ck) && (() => {
+                const shownIds = new Set(filteredStudents.map(s => s.id));
+                const elsewhere = sr1.roster.filter(r => !shownIds.has(r.profile_id));
+                if (elsewhere.length === 0) return null;
+                return <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #F0EEEA" }}>
+                  <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", marginBottom: 6 }}>
+                    Also supervised, from another course
+                  </div>
+                  {elsewhere
+                    .slice()
+                    .sort((a, b) => (a.profiles?.last_name || '').localeCompare(b.profiles?.last_name || ''))
+                    .map(r => {
+                      const first = r.profiles?.first_name || '';
+                      const last = r.profiles?.last_name || '';
+                      const nm = `${last}, ${first}`.replace(/^, |, $/, '') || 'Unknown';
+                      return <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: "1px solid #F5F4F0", flexWrap: "wrap" }}>
+                        <span style={{ fontFamily: F.b, fontSize: 12, minWidth: 190, color: "#555" }}>{nm}</span>
+                        <select aria-label={`Placement building for ${first} ${last}`} value={r.building_id || ''}
+                          onChange={e => handleSetSr1Field(r.profile_id, 'building_id', e.target.value || null)}
+                          style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: "#fff" }}>
+                          <option value="">Choose building…</option>
+                          {sr1.buildings.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                        </select>
+                        <input type="text" defaultValue={r.ct_name || ''} placeholder="Cooperating teacher"
+                          aria-label={`Cooperating teacher for ${first} ${last}`}
+                          onBlur={e => { if (e.target.value !== (r.ct_name || '')) handleSetSr1Field(r.profile_id, 'ct_name', e.target.value); }}
+                          style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, width: 170 }} />
+                        <button onClick={() => handleToggleSr1Supervision({ id: r.profile_id, first, last }, true)}
+                          aria-label={`Remove ${first} ${last} from practicum supervision`}
+                          style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, background: "#fff", color: "#C0392B", cursor: "pointer" }}>Remove</button>
+                      </div>;
+                    })}
+                </div>;
+              })()}
             </div>
           </>}
         </div>}
