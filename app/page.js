@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { COURSES, TM, CAL_LINK, BRAND, CURRENT_TERM, calcGrade, calcStudentGrade, getBlockers, tokBal, pastCutoff, getTokenCutoff, getTokenTarget, getCourseSections } from '../lib/courses';
 
@@ -14,11 +14,117 @@ async function loadUserProfile(email) {
   return data;
 }
 
-// Term-scoped: only CURRENT_TERM enrollments are returned. A student whose only
+// Term-scoped: only activeTerm() enrollments are returned. A student whose only
 // enrollments are from a past term gets an empty list, which the app renders as
 // the "This course has ended" screen. Past-term data is never loaded.
+// ============================================================================
+// CURRENT TERM — resolution layer
+// ----------------------------------------------------------------------------
+// The active term lives in app_settings.current_term so it can be changed from
+// the Settings tab instead of by editing courses.js. CURRENT_TERM (courses.js)
+// remains as a fallback for the window before the setting has loaded, and for
+// the case where app_settings is unreachable.
+//
+// activeTerm() is the single source every read filter and every write stamp
+// uses. Never read CURRENT_TERM directly outside this block.
+// ============================================================================
+let _activeTerm = CURRENT_TERM;
+
+function activeTerm() { return _activeTerm || CURRENT_TERM; }
+
+async function loadActiveTerm() {
+  try {
+    const { data } = await supabase.from('app_settings').select('value').eq('key', 'current_term').single();
+    if (data?.value) _activeTerm = data.value;
+  } catch {
+    // Table missing or unreachable — keep the courses.js fallback.
+  }
+  return activeTerm();
+}
+
+async function setActiveTerm(term) {
+  const { error } = await supabase.from('app_settings')
+    .upsert({ key: 'current_term', value: term, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+  if (error) return { error };
+  _activeTerm = term;
+  return { error: null };
+}
+
+// Generated term list — no table to maintain. Covers a few years either side of
+// the active term so the dropdown always includes where you are and where you
+// are going.
+function termOptions() {
+  const seasons = [['SP', 'Spring'], ['SU', 'Summer'], ['FA', 'Fall']];
+  const cur = activeTerm();
+  const curYear = parseInt((cur || '').slice(2), 10);
+  const base = Number.isFinite(curYear) ? curYear : (new Date().getFullYear() % 100);
+  const out = [];
+  for (let y = base - 1; y <= base + 3; y++) {
+    for (const [code, name] of seasons) {
+      const yy = String(y).padStart(2, '0');
+      out.push({ value: `${code}${yy}`, label: `${name} 20${yy}` });
+    }
+  }
+  return out;
+}
+
+// After a term switch: make sure the instructor is enrolled in every course in
+// the new term, otherwise her course list comes back empty. Idempotent — the
+// (profile_id, course_key, term) unique constraint makes a repeat a no-op.
+async function ensureInstructorEnrollments(profileId, term) {
+  const rows = Object.keys(COURSES).map(k => ({ profile_id: profileId, course_key: k, term, active: true }));
+  const { error } = await supabase.from('enrollments')
+    .upsert(rows, { onConflict: 'profile_id,course_key,term', ignoreDuplicates: true });
+  return { error };
+}
+
+// Copy the previous term's due dates into the current term. Section structure
+// and text notes are preserved; dates come across as-is for the instructor to
+// adjust. Items already set in the current term are left alone.
+async function copyDueDatesFromTerm(courseKey, fromTerm, toTerm) {
+  const { data: src } = await supabase.from('assignment_due_dates')
+    .select('assignment_id, due_label, due_date, section')
+    .eq('course_key', courseKey).eq('term', fromTerm);
+  if (!src || src.length === 0) return { copied: 0, error: null };
+
+  const { data: existing } = await supabase.from('assignment_due_dates')
+    .select('assignment_id, section')
+    .eq('course_key', courseKey).eq('term', toTerm);
+  const taken = new Set((existing || []).map(r => `${r.assignment_id}|${r.section || ''}`));
+
+  const rows = src
+    .filter(r => !taken.has(`${r.assignment_id}|${r.section || ''}`))
+    .map(r => ({ course_key: courseKey, assignment_id: r.assignment_id, due_label: r.due_label, due_date: r.due_date, section: r.section, term: toTerm, updated_at: new Date().toISOString() }));
+  if (rows.length === 0) return { copied: 0, error: null };
+
+  const { error } = await supabase.from('assignment_due_dates').insert(rows);
+  return { copied: error ? 0 : rows.length, error };
+}
+
+// Course codes — listed and toggled from Settings so deactivating a code (e.g.
+// the generic MATH4850 before Fall sections open) is a click, not SQL.
+async function loadCourseCodes() {
+  const { data } = await supabase.from('course_codes').select('code, course_key, label, section, active').order('course_key');
+  return data || [];
+}
+
+async function setCourseCodeActive(code, active) {
+  const { error } = await supabase.from('course_codes').update({ active }).eq('code', code);
+  return { error };
+}
+
+// Mark/unmark an enrollment as a test account (colleague sign-ins used to check
+// the student view). Test enrollments are excluded from grade distribution,
+// counts, CSV export, and the Tracks tab.
+async function setEnrollmentTest(profileId, courseKey, isTest) {
+  const { error } = await supabase.from('enrollments')
+    .update({ is_test: isTest })
+    .eq('profile_id', profileId).eq('course_key', courseKey).eq('term', activeTerm());
+  return { error };
+}
+
 async function loadEnrollments(profileId) {
-  const { data } = await supabase.from('enrollments').select('course_key, active, section, term').eq('profile_id', profileId).eq('term', CURRENT_TERM);
+  const { data } = await supabase.from('enrollments').select('course_key, active, section, term').eq('profile_id', profileId).eq('term', activeTerm());
   return (data || []).map(e => ({ key: e.course_key, active: e.active !== false, section: e.section || null, term: e.term }));
 }
 
@@ -47,7 +153,7 @@ async function loadReleasedAssignments(courseKey) {
 //   - dueDatesAll: full per-section detail { [assignmentId]: { all, LS, WB, ... } }
 //       where each value is { label, date }. Only the Settings editor reads this.
 async function loadDueDates(courseKey, viewerSection = null) {
-  const { data } = await supabase.from('assignment_due_dates').select('assignment_id, due_label, due_date, section').eq('course_key', courseKey).eq('term', CURRENT_TERM);
+  const { data } = await supabase.from('assignment_due_dates').select('assignment_id, due_label, due_date, section').eq('course_key', courseKey).eq('term', activeTerm());
   const bySection = {}; // { [assignmentId]: { [sectionKeyOrAll]: { label, date } } }
   (data || []).forEach(r => {
     const aid = r.assignment_id;
@@ -70,24 +176,24 @@ async function loadDueDates(courseKey, viewerSection = null) {
 // DISTINCT makes the null "all sections" row a single upsert target.
 async function upsertDueDate(courseKey, assignmentId, dueLabel, dueDate, section = null) {
   if (!dueLabel && !dueDate) {
-    const q = supabase.from('assignment_due_dates').delete().eq('course_key', courseKey).eq('assignment_id', assignmentId).eq('term', CURRENT_TERM);
+    const q = supabase.from('assignment_due_dates').delete().eq('course_key', courseKey).eq('assignment_id', assignmentId).eq('term', activeTerm());
     const { error } = section ? await q.eq('section', section) : await q.is('section', null);
     return { error };
   } else {
-    const { error } = await supabase.from('assignment_due_dates').upsert({ course_key: courseKey, assignment_id: assignmentId, due_label: dueLabel || null, due_date: dueDate || null, section: section || null, term: CURRENT_TERM, updated_at: new Date().toISOString() }, { onConflict: 'course_key,assignment_id,section,term' });
+    const { error } = await supabase.from('assignment_due_dates').upsert({ course_key: courseKey, assignment_id: assignmentId, due_label: dueLabel || null, due_date: dueDate || null, section: section || null, term: activeTerm(), updated_at: new Date().toISOString() }, { onConflict: 'course_key,assignment_id,section,term' });
     return { error };
   }
 }
 
 async function loadStudentsForCourse(courseKey) {
-  const { data } = await supabase.from('enrollments').select('profile_id, section, is_test, profiles(id, email, first_name, last_name, role)').eq('course_key', courseKey).eq('term', CURRENT_TERM).eq('active', true);
+  const { data } = await supabase.from('enrollments').select('profile_id, section, is_test, profiles(id, email, first_name, last_name, role)').eq('course_key', courseKey).eq('term', activeTerm()).eq('active', true);
   return (data || []).filter(e => e.profiles?.role === 'student').map(e => ({ id: e.profiles.id, first: e.profiles.first_name, last: e.profiles.last_name, email: e.profiles.email, name: `${e.profiles.first_name} ${e.profiles.last_name}`, section: e.section || null, isTest: e.is_test === true }));
 }
 
 // Dropped students — for the "Dropped students" restore list in Settings.
 // Loaded on demand only (not part of the main data load), since it's rarely needed.
 async function loadInactiveStudentsForCourse(courseKey) {
-  const { data } = await supabase.from('enrollments').select('profile_id, section, is_test, profiles(id, email, first_name, last_name, role)').eq('course_key', courseKey).eq('term', CURRENT_TERM).eq('active', false);
+  const { data } = await supabase.from('enrollments').select('profile_id, section, is_test, profiles(id, email, first_name, last_name, role)').eq('course_key', courseKey).eq('term', activeTerm()).eq('active', false);
   return (data || []).filter(e => e.profiles?.role === 'student').map(e => ({ id: e.profiles.id, first: e.profiles.first_name, last: e.profiles.last_name, email: e.profiles.email, name: `${e.profiles.first_name} ${e.profiles.last_name}`, section: e.section || null, isTest: e.is_test === true }));
 }
 
@@ -95,12 +201,12 @@ async function loadInactiveStudentsForCourse(courseKey) {
 // grade calcs) but keeps every row in student_checks/instructor_statuses/tokens/
 // feedback_queue untouched, so restoring her later restores her full history.
 async function removeStudentFromCourse(profileId, courseKey) {
-  const { error } = await supabase.from('enrollments').update({ active: false }).eq('profile_id', profileId).eq('course_key', courseKey).eq('term', CURRENT_TERM);
+  const { error } = await supabase.from('enrollments').update({ active: false }).eq('profile_id', profileId).eq('course_key', courseKey).eq('term', activeTerm());
   return { error };
 }
 
 async function restoreStudentToCourse(profileId, courseKey) {
-  const { error } = await supabase.from('enrollments').update({ active: true }).eq('profile_id', profileId).eq('course_key', courseKey).eq('term', CURRENT_TERM);
+  const { error } = await supabase.from('enrollments').update({ active: true }).eq('profile_id', profileId).eq('course_key', courseKey).eq('term', activeTerm());
   return { error };
 }
 
@@ -111,28 +217,28 @@ async function updateStudentName(profileId, firstName, lastName) {
 }
 
 async function loadInstrStatuses(courseKey) {
-  const { data } = await supabase.from('instructor_statuses').select('*').eq('course_key', courseKey).eq('term', CURRENT_TERM);
+  const { data } = await supabase.from('instructor_statuses').select('*').eq('course_key', courseKey).eq('term', activeTerm());
   const map = {};
   (data || []).forEach(r => { if (!map[r.profile_id]) map[r.profile_id] = {}; map[r.profile_id][r.assignment_id] = r.status; });
   return map;
 }
 
 async function loadMyInstrStatuses(courseKey, profileId) {
-  const { data } = await supabase.from('instructor_statuses').select('assignment_id, status, updated_at').eq('course_key', courseKey).eq('profile_id', profileId).eq('term', CURRENT_TERM);
+  const { data } = await supabase.from('instructor_statuses').select('assignment_id, status, updated_at').eq('course_key', courseKey).eq('profile_id', profileId).eq('term', activeTerm());
   const map = {};
   (data || []).forEach(r => { map[r.assignment_id] = { status: r.status, updated_at: r.updated_at }; });
   return map;
 }
 
 async function loadInstrNotes(courseKey) {
-  const { data } = await supabase.from('instructor_notes').select('*').eq('course_key', courseKey).eq('term', CURRENT_TERM);
+  const { data } = await supabase.from('instructor_notes').select('*').eq('course_key', courseKey).eq('term', activeTerm());
   const map = {};
   (data || []).forEach(r => { if (!map[r.profile_id]) map[r.profile_id] = {}; map[r.profile_id][r.assignment_id] = r.note; });
   return map;
 }
 
 async function loadStudentChecks(courseKey, profileId) {
-  const q = supabase.from('student_checks').select('*').eq('course_key', courseKey).eq('term', CURRENT_TERM);
+  const q = supabase.from('student_checks').select('*').eq('course_key', courseKey).eq('term', activeTerm());
   if (profileId) q.eq('profile_id', profileId);
   const { data } = await q;
   const map = {};
@@ -141,7 +247,7 @@ async function loadStudentChecks(courseKey, profileId) {
 }
 
 async function loadClassPrep(courseKey, profileId) {
-  const q = supabase.from('class_prep').select('*').eq('course_key', courseKey).eq('term', CURRENT_TERM);
+  const q = supabase.from('class_prep').select('*').eq('course_key', courseKey).eq('term', activeTerm());
   if (profileId) q.eq('profile_id', profileId);
   const { data } = await q;
   const map = {};
@@ -150,7 +256,7 @@ async function loadClassPrep(courseKey, profileId) {
 }
 
 async function loadTokens(courseKey, profileId) {
-  const q = supabase.from('tokens').select('*').eq('course_key', courseKey).eq('term', CURRENT_TERM);
+  const q = supabase.from('tokens').select('*').eq('course_key', courseKey).eq('term', activeTerm());
   if (profileId) q.eq('profile_id', profileId);
   const { data } = await q;
   const map = {};
@@ -159,48 +265,48 @@ async function loadTokens(courseKey, profileId) {
 }
 
 async function loadFeedbackQueue(courseKey) {
-  const { data } = await supabase.from('feedback_queue').select('*, profiles(first_name, last_name)').eq('course_key', courseKey).eq('term', CURRENT_TERM).order('submitted_at', { ascending: false });
+  const { data } = await supabase.from('feedback_queue').select('*, profiles(first_name, last_name)').eq('course_key', courseKey).eq('term', activeTerm()).order('submitted_at', { ascending: false });
   return (data || []).map(r => ({ ...r, sName: `${r.profiles?.first_name || ''} ${r.profiles?.last_name || ''}`.trim() }));
 }
 
 // WRITE OPERATIONS
 async function upsertInstrStatus(profileId, courseKey, assignmentId, status) {
   if (!status) {
-    return await supabase.from('instructor_statuses').delete().match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, term: CURRENT_TERM });
+    return await supabase.from('instructor_statuses').delete().match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, term: activeTerm() });
   } else {
-    return await supabase.from('instructor_statuses').upsert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, status, term: CURRENT_TERM, updated_at: new Date().toISOString() }, { onConflict: 'profile_id,course_key,assignment_id,term' });
+    return await supabase.from('instructor_statuses').upsert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, status, term: activeTerm(), updated_at: new Date().toISOString() }, { onConflict: 'profile_id,course_key,assignment_id,term' });
   }
 }
 
 async function upsertInstrNote(profileId, courseKey, assignmentId, note) {
-  await supabase.from('instructor_notes').upsert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, note, term: CURRENT_TERM, updated_at: new Date().toISOString() }, { onConflict: 'profile_id,course_key,assignment_id,term' });
+  await supabase.from('instructor_notes').upsert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, note, term: activeTerm(), updated_at: new Date().toISOString() }, { onConflict: 'profile_id,course_key,assignment_id,term' });
 }
 
 async function toggleStudentCheck(profileId, courseKey, assignmentId) {
-  const { data: existing } = await supabase.from('student_checks').select('id').match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, term: CURRENT_TERM }).single();
+  const { data: existing } = await supabase.from('student_checks').select('id').match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, term: activeTerm() }).single();
   if (existing) {
     await supabase.from('student_checks').delete().eq('id', existing.id);
     return false;
   } else {
-    await supabase.from('student_checks').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, checked: true, term: CURRENT_TERM });
+    await supabase.from('student_checks').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, checked: true, term: activeTerm() });
     return true;
   }
 }
 
 async function toggleClassPrep(profileId, courseKey, prepId) {
-  const { data: existing } = await supabase.from('class_prep').select('id').match({ profile_id: profileId, course_key: courseKey, prep_id: prepId, term: CURRENT_TERM }).single();
+  const { data: existing } = await supabase.from('class_prep').select('id').match({ profile_id: profileId, course_key: courseKey, prep_id: prepId, term: activeTerm() }).single();
   if (existing) {
     await supabase.from('class_prep').delete().eq('id', existing.id);
     return false;
   } else {
-    await supabase.from('class_prep').insert({ profile_id: profileId, course_key: courseKey, prep_id: prepId, checked: true, term: CURRENT_TERM });
+    await supabase.from('class_prep').insert({ profile_id: profileId, course_key: courseKey, prep_id: prepId, checked: true, term: activeTerm() });
     return true;
   }
 }
 
 async function submitToken(profileId, courseKey, assignmentId, tokenType, note, link) {
-  await supabase.from('tokens').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, token_type: tokenType, note, link, term: CURRENT_TERM });
-  await supabase.from('feedback_queue').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, token_type: tokenType, note, link, term: CURRENT_TERM });
+  await supabase.from('tokens').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, token_type: tokenType, note, link, term: activeTerm() });
+  await supabase.from('feedback_queue').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, token_type: tokenType, note, link, term: activeTerm() });
 }
 
 async function resolveQueueItem(queueId, profileId, courseKey, assignmentId, resolution) {
@@ -224,7 +330,7 @@ async function resolveQueueItem(queueId, profileId, courseKey, assignmentId, res
 async function returnToken(queueId, profileId, courseKey, assignmentId) {
   await supabase.from('feedback_queue').delete().eq('id', queueId);
   // Delete the matching token (most recent one for this student/assignment)
-  const { data: tok } = await supabase.from('tokens').select('id').match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, term: CURRENT_TERM }).order('submitted_at', { ascending: false }).limit(1).single();
+  const { data: tok } = await supabase.from('tokens').select('id').match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, term: activeTerm() }).order('submitted_at', { ascending: false }).limit(1).single();
   if (tok) await supabase.from('tokens').delete().eq('id', tok.id);
 }
 
@@ -239,12 +345,12 @@ async function toggleReleased(courseKey, assignmentId) {
 
 // TEACHING SCHEDULE
 async function loadTeachingDates(courseKey) {
-  const { data } = await supabase.from('teaching_dates').select('*').eq('course_key', courseKey).eq('term', CURRENT_TERM).order('teach_date');
+  const { data } = await supabase.from('teaching_dates').select('*').eq('course_key', courseKey).eq('term', activeTerm()).order('teach_date');
   return data || [];
 }
 
 async function loadTeachingSelections(courseKey, profileId) {
-  const q = supabase.from('teaching_selections').select('*, profiles(first_name, last_name)').eq('course_key', courseKey).eq('term', CURRENT_TERM);
+  const q = supabase.from('teaching_selections').select('*, profiles(first_name, last_name)').eq('course_key', courseKey).eq('term', activeTerm());
   if (profileId) q.eq('profile_id', profileId);
   const { data } = await q;
   return data || [];
@@ -255,20 +361,20 @@ async function pickTeachingDate(profileId, courseKey, assignmentId, teachDate) {
   planDue.setDate(planDue.getDate() - 3);
   const planDueStr = planDue.toISOString().slice(0, 10);
   // Upsert — if they already picked a date for this assignment, replace it
-  const { data: existing } = await supabase.from('teaching_selections').select('id').match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, term: CURRENT_TERM }).single();
+  const { data: existing } = await supabase.from('teaching_selections').select('id').match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, term: activeTerm() }).single();
   if (existing) {
     await supabase.from('teaching_selections').update({ teach_date: teachDate, plan_due_date: planDueStr }).eq('id', existing.id);
   } else {
-    await supabase.from('teaching_selections').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, teach_date: teachDate, plan_due_date: planDueStr, term: CURRENT_TERM });
+    await supabase.from('teaching_selections').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, teach_date: teachDate, plan_due_date: planDueStr, term: activeTerm() });
   }
 }
 
 async function removeTeachingSelection(profileId, courseKey, assignmentId) {
-  await supabase.from('teaching_selections').delete().match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, term: CURRENT_TERM });
+  await supabase.from('teaching_selections').delete().match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, term: activeTerm() });
 }
 
 async function addTeachingDate(courseKey, assignmentId, teachDate, section = null) {
-  const { error } = await supabase.from('teaching_dates').insert({ course_key: courseKey, assignment_id: assignmentId, teach_date: teachDate, section: section || null, term: CURRENT_TERM });
+  const { error } = await supabase.from('teaching_dates').insert({ course_key: courseKey, assignment_id: assignmentId, teach_date: teachDate, section: section || null, term: activeTerm() });
   return !error;
 }
 
@@ -284,7 +390,7 @@ async function updateTeachingDate(id, courseKey, assignmentId, oldDate, newDate)
   await supabase.from('teaching_dates').update({ teach_date: newDate }).eq('id', id);
   // Cascade to student selections that used the old date for this assignment so their
   // plan due date stays correct. (Selections reference the date, not the row id.)
-  await supabase.from('teaching_selections').update({ teach_date: newDate, plan_due_date: planDueStr }).match({ course_key: courseKey, assignment_id: assignmentId, teach_date: oldDate, term: CURRENT_TERM });
+  await supabase.from('teaching_selections').update({ teach_date: newDate, plan_due_date: planDueStr }).match({ course_key: courseKey, assignment_id: assignmentId, teach_date: oldDate, term: activeTerm() });
 }
 
 async function deleteTeachingDate(id) {
@@ -303,6 +409,58 @@ function Lbl({ children, s = {}, onClick, expanded }) {
   return <h2 style={{ fontFamily: F.b, fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".07em", color: "#555", marginBottom: 10, padding: "8px 0", borderBottom: "1px solid #E8E6E1", ...s }}>{children}</h2>; 
 }
 function GradeRing({ grade, size = 50, label = "" }) { const m = TM[grade] || TM.F; const on = grade !== "F" && grade !== "early"; return <div role="img" aria-label={label || `Grade track: ${grade}`} style={{ width: size, height: size, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: on ? m.c : "#F0EEEA", border: `3px solid ${on ? m.c : "#E0DDD8"}`, transition: "all .4s" }}><span style={{ fontSize: size * .38, fontWeight: 700, fontFamily: F.d, color: on ? "#fff" : "#767676", lineHeight: 1 }}>{grade === "early" ? "—" : grade}</span></div>; }
+// Accessible confirmation for switching semesters. Moves focus into the dialog
+// on open, returns it to whatever was focused before on close, traps Tab inside
+// while open, and cancels on Escape. role="dialog" + aria-modal so screen
+// readers treat the rest of the page as inert.
+function TermSwitchDialog({ from, to, busy, onCancel, onConfirm }) {
+  const boxRef = useRef(null);
+  const cancelRef = useRef(null);
+  const prevFocus = useRef(null);
+
+  useEffect(() => {
+    prevFocus.current = document.activeElement;
+    if (cancelRef.current) cancelRef.current.focus();
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); onCancel(); return; }
+      if (e.key !== 'Tab' || !boxRef.current) return;
+      const f = boxRef.current.querySelectorAll('button, [href], select, input, [tabindex]:not([tabindex="-1"])');
+      if (!f.length) return;
+      const first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      if (prevFocus.current && prevFocus.current.focus) prevFocus.current.focus();
+    };
+  }, [onCancel]);
+
+  return (
+    <div role="dialog" aria-modal="true" aria-labelledby="term-dlg-title" aria-describedby="term-dlg-desc"
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 120 }}
+      onClick={() => { if (!busy) onCancel(); }}>
+      <div ref={boxRef} onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, padding: 22, maxWidth: 400, width: "90%" }}>
+        <h2 id="term-dlg-title" style={{ fontFamily: F.d, fontSize: 16, fontWeight: 700, margin: "0 0 10px", color: "#1A1A1A" }}>Change semester to {to}?</h2>
+        <div id="term-dlg-desc" style={{ fontFamily: F.b, fontSize: 12, color: "#555", lineHeight: 1.6, marginBottom: 16 }}>
+          <p style={{ margin: "0 0 8px" }}>Everything from {from} — students, grades, checkoffs, due dates, tokens — will be hidden from every view in Lumos.</p>
+          <p style={{ margin: "0 0 8px" }}>Nothing is deleted. Switching back to {from} restores it exactly as it is now.</p>
+          <p style={{ margin: 0 }}>Students enrolled only in {from} will see &ldquo;This course has ended&rdquo; when they sign in. Export your grades first if you haven&rsquo;t.</p>
+        </div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button ref={cancelRef} onClick={onCancel} disabled={busy}
+            style={{ padding: "7px 14px", background: "#F5F4F0", color: "#555", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 12, fontWeight: 600, cursor: busy ? "default" : "pointer" }}>Cancel</button>
+          <button onClick={onConfirm} disabled={busy}
+            style={{ padding: "7px 14px", background: busy ? "#B0ADA8" : "#CF202E", color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 12, fontWeight: 600, cursor: busy ? "default" : "pointer" }}>
+            {busy ? "Changing…" : `Change to ${to}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Loading() { return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}><div style={{ fontFamily: F.b, color: "#6B6B6B", fontSize: 14 }}>Loading...</div></div>; }
 
 /* ================================================================
@@ -321,6 +479,12 @@ export default function App() {
   const [signupLast, setSignupLast] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [hasPastEnrollments, setHasPastEnrollments] = useState(false); // student had enrollments in a PRIOR term only
+  const [termNow, setTermNow] = useState(CURRENT_TERM); // active term, mirrored into state for rendering
+  const [termPending, setTermPending] = useState(null); // term awaiting confirmation in the dialog
+  const [termSwitching, setTermSwitching] = useState(false);
+  const [courseCodes, setCourseCodes] = useState([]);
+  const [codesLoading, setCodesLoading] = useState(false);
+  const [copyBusy, setCopyBusy] = useState(false);
   const [joinErr, setJoinErr] = useState(''); // '' | error string | { ok: true, msg: string }
   const [forgotMode, setForgotMode] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
@@ -403,6 +567,10 @@ export default function App() {
 
   async function checkAuth() {
     const { data: { session } } = await supabase.auth.getSession();
+    // Resolve the active term FIRST — every enrollment/course read below filters
+    // on it. Loading it after would filter the first render on the stale fallback.
+    await loadActiveTerm();
+    setTermNow(activeTerm());
     if (session?.user) {
       const profile = await loadUserProfile(session.user.email);
       if (profile) {
@@ -453,6 +621,71 @@ export default function App() {
   }
 
   const refresh = () => loadCourseData(false);
+
+  // ---- TERM SWITCHING ----------------------------------------------------
+  // Confirmed via dialog. On confirm: persist the new term, make sure the
+  // instructor has an enrollment in every course for it (otherwise her course
+  // list comes back empty), then reload from scratch.
+  async function confirmTermSwitch() {
+    if (!termPending || termSwitching) return;
+    setTermSwitching(true);
+    const target = termPending;
+    try {
+      const { error } = await setActiveTerm(target);
+      if (error) { showToast('Could not change the term — please try again.'); return; }
+
+      const { error: enrErr } = await ensureInstructorEnrollments(user.profile.id, target);
+      if (enrErr) showToast('Term changed, but your course enrollments may need attention.', 'error');
+
+      setTermNow(target);
+      setTermPending(null);
+      setCk(null);           // drop back to the course list; old course is gone
+      setCourseCodes([]);
+      const courses = await loadEnrollments(user.profile.id);
+      setUser(u => ({ ...u, courses }));
+      showToast(`Now showing ${target}.`, 'success');
+    } finally {
+      setTermSwitching(false);
+    }
+  }
+
+  // ---- COPY DUE DATES ----------------------------------------------------
+  async function handleCopyDueDates(fromTerm) {
+    if (copyBusy || !fromTerm) return;
+    setCopyBusy(true);
+    try {
+      const { copied, error } = await copyDueDatesFromTerm(ck, fromTerm, activeTerm());
+      if (error) { showToast('Could not copy due dates — please try again.'); return; }
+      if (copied === 0) { showToast('Nothing to copy — those items already have dates this term.', 'success'); return; }
+      showToast(`${copied} due date${copied === 1 ? '' : 's'} copied. Adjust them below.`, 'success');
+      refresh();
+    } finally {
+      setCopyBusy(false);
+    }
+  }
+
+  // ---- COURSE CODES ------------------------------------------------------
+  async function openCourseCodes() {
+    setCodesLoading(true);
+    setCourseCodes(await loadCourseCodes());
+    setCodesLoading(false);
+  }
+
+  async function toggleCourseCode(code, next) {
+    const prev = courseCodes;
+    setCourseCodes(cs => cs.map(c2 => c2.code === code ? { ...c2, active: next } : c2)); // optimistic
+    const { error } = await setCourseCodeActive(code, next);
+    if (error) { setCourseCodes(prev); showToast('Could not update that course code.'); }
+  }
+
+  // ---- TEST ACCOUNTS -----------------------------------------------------
+  async function toggleTestAccount(profileId, next) {
+    const prevData = courseData;
+    setCourseData(d => ({ ...d, students: d.students.map(st => st.id === profileId ? { ...st, isTest: next } : st) })); // optimistic
+    const { error } = await setEnrollmentTest(profileId, ck, next);
+    if (error) { setCourseData(prevData); showToast('Could not update that account.'); }
+  }
+
 
   // Save an item's due dates: always writes the "all sections" row, and (when the
   // per-section editor is open) writes/clears each section's override row.
@@ -641,14 +874,14 @@ export default function App() {
         const authId = signInData.user.id;
         const existingEnrollments = await loadEnrollments(authId);
         const entry = existingEnrollments.find(e => e.key === courseCode.course_key);
-        // loadEnrollments only returns CURRENT_TERM rows, so `entry` missing means
+        // loadEnrollments only returns activeTerm() rows, so `entry` missing means
         // she has no enrollment THIS term — insert one. A prior-term enrollment is
         // left untouched: it is her archived record, not something to reactivate.
         if (!entry) {
-          await supabase.from('enrollments').insert({ profile_id: authId, course_key: courseCode.course_key, section: courseCode.section || null, term: CURRENT_TERM });
+          await supabase.from('enrollments').insert({ profile_id: authId, course_key: courseCode.course_key, section: courseCode.section || null, term: activeTerm() });
         } else if (!entry.active) {
           // Dropped and rejoining WITHIN the current term — reactivate in place.
-          await supabase.from('enrollments').update({ active: true, section: courseCode.section || null }).eq('profile_id', authId).eq('course_key', courseCode.course_key).eq('term', CURRENT_TERM);
+          await supabase.from('enrollments').update({ active: true, section: courseCode.section || null }).eq('profile_id', authId).eq('course_key', courseCode.course_key).eq('term', activeTerm());
         }
         await checkAuth();
         return;
@@ -670,19 +903,19 @@ export default function App() {
       // Create new profile with the auth ID
       await supabase.from('profiles').insert({ id: authId, email, first_name: signupFirst.trim(), last_name: signupLast.trim(), role: 'student' });
       // Create enrollment with section if course code has one
-      await supabase.from('enrollments').insert({ profile_id: authId, course_key: courseCode.course_key, section: courseCode.section || null, term: CURRENT_TERM });
+      await supabase.from('enrollments').insert({ profile_id: authId, course_key: courseCode.course_key, section: courseCode.section || null, term: activeTerm() });
     } else if (existingProfile.id === authId) {
       // Returning student from another course — add enrollment for this course if not already enrolled
       const existingEnrollments = await loadEnrollments(authId);
       const entry = existingEnrollments.find(e => e.key === courseCode.course_key);
-      // See note above: `entry` is scoped to CURRENT_TERM, so absent means
+      // See note above: `entry` is scoped to activeTerm(), so absent means
       // "not enrolled this term" and a fresh row is correct. A retaking student
       // keeps her prior-term row intact alongside the new one.
       if (!entry) {
-        await supabase.from('enrollments').insert({ profile_id: authId, course_key: courseCode.course_key, section: courseCode.section || null, term: CURRENT_TERM });
+        await supabase.from('enrollments').insert({ profile_id: authId, course_key: courseCode.course_key, section: courseCode.section || null, term: activeTerm() });
       } else if (!entry.active) {
         // Dropped and rejoining WITHIN the current term — reactivate in place.
-        await supabase.from('enrollments').update({ active: true, section: courseCode.section || null }).eq('profile_id', authId).eq('course_key', courseCode.course_key).eq('term', CURRENT_TERM);
+        await supabase.from('enrollments').update({ active: true, section: courseCode.section || null }).eq('profile_id', authId).eq('course_key', courseCode.course_key).eq('term', activeTerm());
       }
     } else {
       // Profile exists but with wrong ID — this shouldn't happen with new flow but just in case
@@ -729,12 +962,12 @@ export default function App() {
     if (existingEntry && !existingEntry.active) {
       // Re-joining a course she was previously dropped from — reactivate rather than duplicate-insert
       // Dropped and rejoining WITHIN the current term — reactivate in place.
-      // (existingEntry comes from loadEnrollments, which is CURRENT_TERM-scoped.)
-      const { error } = await supabase.from('enrollments').update({ active: true, section: courseCode.section || null }).eq('profile_id', user.profile.id).eq('course_key', courseCode.course_key).eq('term', CURRENT_TERM);
+      // (existingEntry comes from loadEnrollments, which is activeTerm()-scoped.)
+      const { error } = await supabase.from('enrollments').update({ active: true, section: courseCode.section || null }).eq('profile_id', user.profile.id).eq('course_key', courseCode.course_key).eq('term', activeTerm());
       if (error) { setJoinErr('Something went wrong — please try again or contact Dr. Beggs.'); return; }
     } else {
       // Add enrollment
-      const { error } = await supabase.from('enrollments').insert({ profile_id: user.profile.id, course_key: courseCode.course_key, section: courseCode.section || null, term: CURRENT_TERM });
+      const { error } = await supabase.from('enrollments').insert({ profile_id: user.profile.id, course_key: courseCode.course_key, section: courseCode.section || null, term: activeTerm() });
       if (error) { setJoinErr('Something went wrong — please try again or contact Dr. Beggs.'); return; }
     }
 
@@ -1459,7 +1692,13 @@ export default function App() {
   const courseSections = getCourseSections(ck);
   const hasSections = students.some(s => s.section);
   const sectionKeys = hasSections ? [...new Set(students.map(s => s.section).filter(Boolean))] : [];
-  const filteredStudents = sectionFilter === 'all' ? students : students.filter(s => s.section === sectionFilter);
+  // Test accounts (colleague sign-ins used to check the student view) are excluded
+  // from grade distribution, the student grid, counts, Tracks, and CSV export so
+  // they never skew what the instructor is looking at. They remain in `students`
+  // and are managed from the Settings tab.
+  const realStudents = students.filter(s => !s.isTest);
+  const testCount = students.length - realStudents.length;
+  const filteredStudents = sectionFilter === 'all' ? realStudents : realStudents.filter(s => s.section === sectionFilter);
 
   // ── Instructor grade helper ──────────────────────────────────────
   // Rules (per assignment, regardless of eval type):
@@ -1614,18 +1853,52 @@ export default function App() {
   const cpSum = (c.classPrep || []).map(cp => ({ ...cp, done: filteredStudents.filter(s => (cP[s.id] || {})[cp.id]).length }));
 
   const exportCSV = () => {
-    const filteredStudents = sectionFilter === 'all' ? students : students.filter(s => s.section === sectionFilter);
+    const exportable = students.filter(s => !s.isTest);
+    const filteredStudents = sectionFilter === 'all' ? exportable : exportable.filter(s => s.section === sectionFilter);
     const allA = c.assignments.filter(x => relAssignments.includes(x.id)); const cpI = c.classPrep || [];
     const hasSections = students.some(s => s.section);
-    const header = ["Last", "First", "Email", ...(hasSections ? ["Section"] : []), ...allA.map(x => x.name + " (Instr)"), ...allA.map(x => x.name + " (Student)"), ...cpI.map(x => x.name + " (Prep)"), "Tokens Used", "Tokens Avail", "Instr Track", "Student Track"].join(",");
+    const header = ["Term", "Last", "First", "Email", ...(hasSections ? ["Section"] : []), ...allA.map(x => x.name + " (Instr)"), ...allA.map(x => x.name + " (Student)"), ...cpI.map(x => x.name + " (Prep)"), "Tokens Used", "Tokens Avail", "Instr Track", "Student Track"].join(",");
     const rows = filteredStudents.map(st => {
       const si = iS[st.id] || {}; const sc = sC[st.id] || {}; const cp2 = cP[st.id] || {}; const tk = (toks[st.id] || []).length;
       const ig = calcInstrGrade(si, relAssignments); const sg = calcStudentGrade(sc, si, relAssignments, ck, dueDates); const tok = tokBal(tk, 0);
-      return [st.last, st.first, st.email, ...(hasSections ? [st.section || ''] : []), ...allA.map(x => si[x.id] === "mastery" ? "M" : si[x.id] === "revision" ? "R" : si[x.id] === "not_submitted" ? "NS" : ""), ...allA.map(x => sc[x.id] ? "Y" : ""), ...cpI.map(x => cp2[x.id] ? "Y" : ""), tok.used, tok.avail, ig === "early" ? "" : ig, sg === "early" ? "" : sg].map(v => `"${v}"`).join(",");
+      return [activeTerm(), st.last, st.first, st.email, ...(hasSections ? [st.section || ''] : []), ...allA.map(x => si[x.id] === "mastery" ? "M" : si[x.id] === "revision" ? "R" : si[x.id] === "not_submitted" ? "NS" : ""), ...allA.map(x => sc[x.id] ? "Y" : ""), ...cpI.map(x => cp2[x.id] ? "Y" : ""), tok.used, tok.avail, ig === "early" ? "" : ig, sg === "early" ? "" : sg].map(v => `"${v}"`).join(",");
     });
     const csvContent = header + "\n" + rows.join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" }); const url = URL.createObjectURL(blob);
-    const link = document.createElement("a"); link.href = url; link.download = `${ck.replace(/\s/g, "_")}_${new Date().toISOString().slice(0, 10)}.csv`; link.click(); URL.revokeObjectURL(url);
+    const link = document.createElement("a"); link.href = url; link.download = `${ck.replace(/\s/g, "_")}_${activeTerm()}_${new Date().toISOString().slice(0, 10)}.csv`; link.click(); URL.revokeObjectURL(url);
+  };
+
+  // Token history — one row per submission. This is the record that exists ONLY
+  // in Lumos: Brightspace has submission dates and feedback, but nothing there
+  // records that a student spent a token to submit late, or how it was resolved.
+  // Kept as a separate file rather than a column, because a student may have
+  // several submissions or none, which does not fit the one-row-per-student grid.
+  const exportTokensCSV = () => {
+    const exportable = students.filter(s => !s.isTest);
+    const roster = sectionFilter === 'all' ? exportable : exportable.filter(s => s.section === sectionFilter);
+    const byId = {}; roster.forEach(s => { byId[s.id] = s; });
+    const nameOf = id => byId[id] ? `${byId[id].last}, ${byId[id].first}` : '';
+    const asgName = aid => (c.assignments.find(a => a.id === aid) || {}).name || aid;
+    const fmt = d => d ? new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '';
+
+    const rows = (fq || [])
+      .filter(q => byId[q.profile_id])
+      .sort((a, b) => new Date(a.submitted_at || 0) - new Date(b.submitted_at || 0))
+      .map(q => [
+        activeTerm(), nameOf(q.profile_id), byId[q.profile_id]?.email || '',
+        asgName(q.assignment_id), q.token_type || '', fmt(q.submitted_at),
+        q.resolved ? (q.resolution || '') : 'pending', fmt(q.resolved_at),
+        (q.note || '').replace(/"/g, "'"), q.link || ''
+      ].map(v => `"${v}"`).join(","));
+
+    if (rows.length === 0) { showToast('No token submissions to export for this course.', 'success'); return; }
+
+    const header = ["Term", "Student", "Email", "Assignment", "Type", "Submitted", "Resolution", "Resolved", "Note", "Link"].join(",");
+    const blob = new Blob([header + "\n" + rows.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url; link.download = `${ck.replace(/\s/g, "_")}_${activeTerm()}_tokens_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click(); URL.revokeObjectURL(url);
   };
 
   // BATCH GRADING VIEW
@@ -2055,7 +2328,8 @@ export default function App() {
             {expStudents && <div style={{ display: "flex", gap: 4 }}>
               <input value={gridSearch} onChange={e => setGridSearch(e.target.value)} placeholder="Filter..." aria-label="Filter students" style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#666", background: "#fff", width: 80, outline: "none" }} />
               <select aria-label="Sort order" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: "2px 6px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#666", background: "#fff", cursor: "pointer" }}><option value="first">First</option><option value="last">Last</option><option value="grade">Track</option></select>
-              <button aria-label="Export CSV" onClick={exportCSV} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#666", background: "#fff", cursor: "pointer" }}>📥 CSV</button>
+              <button aria-label="Export grades CSV" onClick={exportCSV} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#666", background: "#fff", cursor: "pointer" }}>📥 CSV</button>
+              <button aria-label="Export token history CSV" onClick={exportTokensCSV} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#666", background: "#fff", cursor: "pointer", marginLeft: 6 }}>📥 Tokens</button>
               <button aria-label="Refresh data" onClick={refresh} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#666", background: "#fff", cursor: "pointer" }}>↻ Refresh</button>
             </div>}
           </div>
@@ -2095,7 +2369,7 @@ export default function App() {
             }); })()}
             </div>{/* end minWidth scroll inner */}
           </div>
-          <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 8 }}>"Self" = student self-reported track. ⚠ = mismatch.{gridSearch && ` Showing ${gridSearch} filter.`}</div>
+          <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 8 }}>"Self" = student self-reported track. ⚠ = mismatch.{gridSearch && ` Showing ${gridSearch} filter.`}{testCount > 0 ? ` ${testCount} test account${testCount === 1 ? '' : 's'} hidden.` : ''}</div>
           </>}
 
           <div style={{ marginTop: 20 }}>
@@ -2174,9 +2448,75 @@ export default function App() {
 
         {/* SETTINGS — Due dates for assignments and class prep */}
         {tab === "settings" && <div>
+          {/* ---- SEMESTER ---- */}
+          <Lbl>Semester</Lbl>
+          <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12, lineHeight: 1.5, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
+            Lumos shows one semester at a time. Changing this hides the previous semester's students and coursework from every view — nothing is deleted, and switching back brings it all straight back. Export your grades before you move on.
+          </div>
+          <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", padding: "14px 16px", marginBottom: 18 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <label htmlFor="term-select" style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555" }}>Current semester</label>
+              <select
+                id="term-select"
+                aria-label="Current semester"
+                value={termNow}
+                onChange={e => { const v = e.target.value; if (v !== termNow) setTermPending(v); }}
+                style={{ padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, background: "#fff", cursor: "pointer", outline: "none" }}>
+                {termOptions().map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+              <span style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>Showing {termNow}</span>
+            </div>
+          </div>
+
+          {/* ---- DUE DATES: COPY FROM A PREVIOUS SEMESTER ---- */}
+          <Lbl>Start-of-Semester Setup</Lbl>
+          <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12, lineHeight: 1.5, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
+            Copy last semester's due dates into this one as a starting point, then adjust the dates below. Assignments that already have a date this semester are left alone.
+          </div>
+          <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", padding: "14px 16px", marginBottom: 18 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <label htmlFor="copy-from-term" style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555" }}>Copy due dates from</label>
+              <select id="copy-from-term" aria-label="Copy due dates from semester" defaultValue=""
+                style={{ padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, background: "#fff", cursor: "pointer", outline: "none" }}>
+                <option value="">Choose a semester…</option>
+                {termOptions().filter(o => o.value !== termNow).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+              <button
+                aria-label="Copy due dates from the selected semester"
+                disabled={copyBusy}
+                onClick={() => { const el = document.getElementById('copy-from-term'); if (el && el.value) handleCopyDueDates(el.value); else showToast('Choose a semester to copy from first.'); }}
+                style={{ padding: "6px 14px", background: copyBusy ? "#F5F4F0" : "#fff", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", cursor: copyBusy ? "default" : "pointer" }}>
+                {copyBusy ? "Copying…" : "Copy"}
+              </button>
+            </div>
+          </div>
+
+          {/* ---- COURSE CODES ---- */}
+          <Lbl onClick={() => { if (!courseCodes.length) openCourseCodes(); else setCourseCodes([]); }} expanded={courseCodes.length > 0}>Course Codes</Lbl>
+          {courseCodes.length > 0 && <div style={{ marginBottom: 18 }}>
+            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 10, lineHeight: 1.5, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
+              Students use these codes to sign up. Turn a code off when you no longer want new students joining with it.
+            </div>
+            <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+              {courseCodes.map((cc, i) => <div key={cc.code} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderBottom: i < courseCodes.length - 1 ? "1px solid #F5F3EF" : "none" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600 }}>{cc.code}</div>
+                  <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 1 }}>{cc.label || cc.course_key}{cc.section ? ` · ${cc.section}` : ''}</div>
+                </div>
+                <span style={{ fontFamily: F.b, fontSize: 11, color: cc.active ? "#2D6A4F" : "#767676", minWidth: 52, textAlign: "right" }}>{cc.active ? "Active" : "Off"}</span>
+                <button role="switch" aria-checked={!!cc.active} aria-label={`${cc.code} sign-ups ${cc.active ? 'active' : 'off'}`}
+                  onClick={() => toggleCourseCode(cc.code, !cc.active)}
+                  style={{ width: 40, height: 22, borderRadius: 11, border: cc.active ? "none" : "1px solid #D0CEC9", background: cc.active ? "#2D6A4F" : "#F0EEEA", cursor: "pointer", padding: 0, position: "relative", flexShrink: 0 }}>
+                  <span aria-hidden="true" style={{ position: "absolute", top: 2, left: cc.active ? 20 : 2, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left .15s", boxShadow: "0 1px 2px rgba(0,0,0,.2)" }} />
+                </button>
+              </div>)}
+            </div>
+          </div>}
+          {codesLoading && <div role="status" style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginBottom: 18 }}>Loading course codes…</div>}
+
           <Lbl>Manage Students</Lbl>
           <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12, lineHeight: 1.5, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
-            Fix a misspelled name, or remove a student who dropped the course. Removing a student hides her from your roster and grade views — her records are kept, and you can restore her later if needed.
+            Fix a misspelled name, or remove a student who dropped the course. Removing a student hides her from your roster and grade views — her records are kept, and you can restore her later if needed. Mark an account as Test to keep it out of your grade distribution, counts, and exports (useful for colleague sign-ins you use to check the student view).
           </div>
           <div style={{ marginBottom: 8 }}>
             <input value={studentMgmtSearch} onChange={e => setStudentMgmtSearch(e.target.value)} placeholder="Filter students..." aria-label="Filter students to manage" style={{ padding: "5px 9px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, outline: "none", width: 160 }} />
@@ -2205,6 +2545,7 @@ export default function App() {
                     </div>
                     {!isEditing && <>
                       <button onClick={() => { setEditStudentId(s.id); setEditFirstName(s.first || ''); setEditLastName(s.last || ''); }} aria-label={`Edit name for ${s.first} ${s.last}`} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#856404", cursor: "pointer", background: "#fff", flexShrink: 0 }}>✎ Edit name</button>
+                      <button role="switch" aria-checked={!!s.isTest} aria-label={`${s.first} ${s.last} is ${s.isTest ? '' : 'not '}a test account`} onClick={() => toggleTestAccount(s.id, !s.isTest)} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: s.isTest ? "#856404" : "#767676", background: s.isTest ? "#FFFCF5" : "#fff", cursor: "pointer", flexShrink: 0, marginRight: 6 }}>{s.isTest ? "Test ✓" : "Test"}</button>
                       <button onClick={() => setRemoveConfirm({ id: s.id, name: `${s.first} ${s.last}` })} aria-label={`Remove ${s.first} ${s.last} from course`} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#C0392B", cursor: "pointer", background: "#fff", flexShrink: 0 }}>Remove</button>
                     </>}
                     {isEditing && <>
@@ -2266,6 +2607,16 @@ export default function App() {
               </div>)}
             </div>}
           </div>
+
+          {/* Term switch confirmation. Focus is moved to the dialog on open and the
+              Escape key cancels; both handled by TermSwitchDialog below. */}
+          {termPending && <TermSwitchDialog
+            from={termNow}
+            to={termPending}
+            busy={termSwitching}
+            onCancel={() => setTermPending(null)}
+            onConfirm={confirmTermSwitch}
+          />}
 
           {removeConfirm && <div role="dialog" aria-modal="true" aria-label={`Remove ${removeConfirm.name}`} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.3)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }} onClick={() => setRemoveConfirm(null)}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, padding: 20, maxWidth: 340, width: "90%" }}>
