@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { COURSES, TM, CAL_LINK, BRAND, calcGrade, calcStudentGrade, getBlockers, tokBal, pastCutoff, getTokenCutoff, getTokenTarget, getCourseSections } from '../lib/courses';
+import { COURSES, TM, CAL_LINK, BRAND, CURRENT_TERM, calcGrade, calcStudentGrade, getBlockers, tokBal, pastCutoff, getTokenCutoff, getTokenTarget, getCourseSections } from '../lib/courses';
 
 const F = { d: "'Source Serif 4',Georgia,serif", b: "'DM Sans',sans-serif" };
 
@@ -64,7 +64,7 @@ async function upsertDueDate(courseKey, assignmentId, dueLabel, dueDate, section
     const { error } = section ? await q.eq('section', section) : await q.is('section', null);
     return { error };
   } else {
-    const { error } = await supabase.from('assignment_due_dates').upsert({ course_key: courseKey, assignment_id: assignmentId, due_label: dueLabel || null, due_date: dueDate || null, section: section || null, updated_at: new Date().toISOString() }, { onConflict: 'course_key,assignment_id,section' });
+    const { error } = await supabase.from('assignment_due_dates').upsert({ course_key: courseKey, assignment_id: assignmentId, due_label: dueLabel || null, due_date: dueDate || null, section: section || null, term: CURRENT_TERM, updated_at: new Date().toISOString() }, { onConflict: 'course_key,assignment_id,section' });
     return { error };
   }
 }
@@ -158,12 +158,12 @@ async function upsertInstrStatus(profileId, courseKey, assignmentId, status) {
   if (!status) {
     return await supabase.from('instructor_statuses').delete().match({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId });
   } else {
-    return await supabase.from('instructor_statuses').upsert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, status, updated_at: new Date().toISOString() }, { onConflict: 'profile_id,course_key,assignment_id' });
+    return await supabase.from('instructor_statuses').upsert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, status, term: CURRENT_TERM, updated_at: new Date().toISOString() }, { onConflict: 'profile_id,course_key,assignment_id' });
   }
 }
 
 async function upsertInstrNote(profileId, courseKey, assignmentId, note) {
-  await supabase.from('instructor_notes').upsert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, note, updated_at: new Date().toISOString() }, { onConflict: 'profile_id,course_key,assignment_id' });
+  await supabase.from('instructor_notes').upsert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, note, term: CURRENT_TERM, updated_at: new Date().toISOString() }, { onConflict: 'profile_id,course_key,assignment_id' });
 }
 
 async function toggleStudentCheck(profileId, courseKey, assignmentId) {
@@ -172,7 +172,7 @@ async function toggleStudentCheck(profileId, courseKey, assignmentId) {
     await supabase.from('student_checks').delete().eq('id', existing.id);
     return false;
   } else {
-    await supabase.from('student_checks').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, checked: true });
+    await supabase.from('student_checks').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, checked: true, term: CURRENT_TERM });
     return true;
   }
 }
@@ -183,14 +183,14 @@ async function toggleClassPrep(profileId, courseKey, prepId) {
     await supabase.from('class_prep').delete().eq('id', existing.id);
     return false;
   } else {
-    await supabase.from('class_prep').insert({ profile_id: profileId, course_key: courseKey, prep_id: prepId, checked: true });
+    await supabase.from('class_prep').insert({ profile_id: profileId, course_key: courseKey, prep_id: prepId, checked: true, term: CURRENT_TERM });
     return true;
   }
 }
 
 async function submitToken(profileId, courseKey, assignmentId, tokenType, note, link) {
-  await supabase.from('tokens').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, token_type: tokenType, note, link });
-  await supabase.from('feedback_queue').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, token_type: tokenType, note, link });
+  await supabase.from('tokens').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, token_type: tokenType, note, link, term: CURRENT_TERM });
+  await supabase.from('feedback_queue').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, token_type: tokenType, note, link, term: CURRENT_TERM });
 }
 
 async function resolveQueueItem(queueId, profileId, courseKey, assignmentId, resolution) {
@@ -249,7 +249,7 @@ async function pickTeachingDate(profileId, courseKey, assignmentId, teachDate) {
   if (existing) {
     await supabase.from('teaching_selections').update({ teach_date: teachDate, plan_due_date: planDueStr }).eq('id', existing.id);
   } else {
-    await supabase.from('teaching_selections').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, teach_date: teachDate, plan_due_date: planDueStr });
+    await supabase.from('teaching_selections').insert({ profile_id: profileId, course_key: courseKey, assignment_id: assignmentId, teach_date: teachDate, plan_due_date: planDueStr, term: CURRENT_TERM });
   }
 }
 
@@ -258,7 +258,7 @@ async function removeTeachingSelection(profileId, courseKey, assignmentId) {
 }
 
 async function addTeachingDate(courseKey, assignmentId, teachDate, section = null) {
-  const { error } = await supabase.from('teaching_dates').insert({ course_key: courseKey, assignment_id: assignmentId, teach_date: teachDate, section: section || null });
+  const { error } = await supabase.from('teaching_dates').insert({ course_key: courseKey, assignment_id: assignmentId, teach_date: teachDate, section: section || null, term: CURRENT_TERM });
   return !error;
 }
 
@@ -623,9 +623,10 @@ export default function App() {
         const existingEnrollments = await loadEnrollments(authId);
         const entry = existingEnrollments.find(e => e.key === courseCode.course_key);
         if (!entry) {
-          await supabase.from('enrollments').insert({ profile_id: authId, course_key: courseCode.course_key, section: courseCode.section || null });
+          await supabase.from('enrollments').insert({ profile_id: authId, course_key: courseCode.course_key, section: courseCode.section || null, term: CURRENT_TERM });
         } else if (!entry.active) {
-          await supabase.from('enrollments').update({ active: true, section: courseCode.section || null }).eq('profile_id', authId).eq('course_key', courseCode.course_key);
+          // NOTE (Build 1b): rejoining in a LATER term needs a new row, not a reactivate.
+          await supabase.from('enrollments').update({ active: true, section: courseCode.section || null, term: CURRENT_TERM }).eq('profile_id', authId).eq('course_key', courseCode.course_key);
         }
         await checkAuth();
         return;
@@ -647,16 +648,19 @@ export default function App() {
       // Create new profile with the auth ID
       await supabase.from('profiles').insert({ id: authId, email, first_name: signupFirst.trim(), last_name: signupLast.trim(), role: 'student' });
       // Create enrollment with section if course code has one
-      await supabase.from('enrollments').insert({ profile_id: authId, course_key: courseCode.course_key, section: courseCode.section || null });
+      await supabase.from('enrollments').insert({ profile_id: authId, course_key: courseCode.course_key, section: courseCode.section || null, term: CURRENT_TERM });
     } else if (existingProfile.id === authId) {
       // Returning student from another course — add enrollment for this course if not already enrolled
       const existingEnrollments = await loadEnrollments(authId);
       const entry = existingEnrollments.find(e => e.key === courseCode.course_key);
       if (!entry) {
-        await supabase.from('enrollments').insert({ profile_id: authId, course_key: courseCode.course_key, section: courseCode.section || null });
+        await supabase.from('enrollments').insert({ profile_id: authId, course_key: courseCode.course_key, section: courseCode.section || null, term: CURRENT_TERM });
       } else if (!entry.active) {
-        // Re-joining a course she was previously dropped from — reactivate rather than duplicate-insert
-        await supabase.from('enrollments').update({ active: true, section: courseCode.section || null }).eq('profile_id', authId).eq('course_key', courseCode.course_key);
+        // Re-joining a course she was previously dropped from — reactivate rather than duplicate-insert.
+        // NOTE (Build 1b): once enrollments are term-scoped, a student rejoining in a LATER term
+        // must get a NEW enrollment row, not a reactivation of the old one. This branch will need
+        // to compare entry.term against CURRENT_TERM and insert instead of update when they differ.
+        await supabase.from('enrollments').update({ active: true, section: courseCode.section || null, term: CURRENT_TERM }).eq('profile_id', authId).eq('course_key', courseCode.course_key);
       }
     } else {
       // Profile exists but with wrong ID — this shouldn't happen with new flow but just in case
@@ -702,11 +706,12 @@ export default function App() {
 
     if (existingEntry && !existingEntry.active) {
       // Re-joining a course she was previously dropped from — reactivate rather than duplicate-insert
-      const { error } = await supabase.from('enrollments').update({ active: true, section: courseCode.section || null }).eq('profile_id', user.profile.id).eq('course_key', courseCode.course_key);
+      // NOTE (Build 1b): see handleSignup — rejoining in a LATER term needs a new row, not a reactivate.
+      const { error } = await supabase.from('enrollments').update({ active: true, section: courseCode.section || null, term: CURRENT_TERM }).eq('profile_id', user.profile.id).eq('course_key', courseCode.course_key);
       if (error) { setJoinErr('Something went wrong — please try again or contact Dr. Beggs.'); return; }
     } else {
       // Add enrollment
-      const { error } = await supabase.from('enrollments').insert({ profile_id: user.profile.id, course_key: courseCode.course_key, section: courseCode.section || null });
+      const { error } = await supabase.from('enrollments').insert({ profile_id: user.profile.id, course_key: courseCode.course_key, section: courseCode.section || null, term: CURRENT_TERM });
       if (error) { setJoinErr('Something went wrong — please try again or contact Dr. Beggs.'); return; }
     }
 
