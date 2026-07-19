@@ -467,6 +467,257 @@ async function deleteTeachingDate(id) {
 }
 
 /* ================================================================
+   PRACTICUM OBSERVATION SCHEDULING (SR1)
+   ----------------------------------------------------------------
+   Separate from the 4850 "Teaching Schedule" above. That one is
+   course-wide and lets several students pick the same date. This one
+   covers only the ~8 candidates Dr. Beggs supervises in the field,
+   is scoped to a building, and is exclusive — two candidates can
+   never hold overlapping times, because she cannot be in two places.
+
+   Exclusivity is enforced in Postgres (an exclusion constraint over
+   the booking's time span), not here. The client is a convenience;
+   book_sr1_observation() is the gate. See practicum-schema.sql.
+
+   All times are stored as timestamptz and displayed in Central. See
+   fmtTime / fmtTimeRange below — never render a raw timestamp.
+   ================================================================ */
+
+const SR1_TZ = 'America/Chicago';
+
+// 12-hour, no leading zero: "9:20 AM", "1:30 PM". Times are absolute
+// instants in the database; this is the only place they become text.
+function fmtTime(ts) {
+  if (!ts) return '';
+  return new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: SR1_TZ });
+}
+function fmtDay(ts) {
+  if (!ts) return '';
+  return new Date(ts).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: SR1_TZ });
+}
+// A date-only column (window_date) has no time part, so it must NOT be
+// shifted into Central — that would roll it back a day. Parse at noon.
+function fmtDateOnly(d) {
+  if (!d) return '';
+  return new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+// "9:20 AM – 10:05 AM"
+function fmtTimeRange(a, b) { return `${fmtTime(a)} – ${fmtTime(b)}`; }
+
+// Build a timestamptz string for a local Central wall-clock time on a given
+// date. The offset changes with DST, so it is derived rather than hardcoded.
+function centralISO(dateStr, timeStr) {
+  if (!dateStr || !timeStr) return null;
+  const [h, m] = timeStr.split(':').map(Number);
+  // Probe the offset for this specific date by comparing a UTC instant to how
+  // Central renders it.
+  const probe = new Date(`${dateStr}T12:00:00Z`);
+  const centralHour = Number(probe.toLocaleString('en-US', { hour: 'numeric', hour12: false, timeZone: SR1_TZ }));
+  const offset = 12 - centralHour; // 5 in CDT, 6 in CST
+  const utcH = h + offset;
+  const base = new Date(`${dateStr}T00:00:00Z`);
+  base.setUTCHours(utcH, m, 0, 0);
+  return base.toISOString();
+}
+
+async function loadSr1Buildings() {
+  const { data } = await supabase.from('sr1_buildings')
+    .select('id, name, active').eq('term', activeTerm()).order('name');
+  return data || [];
+}
+
+async function addSr1Building(name) {
+  const { error } = await supabase.from('sr1_buildings')
+    .insert({ term: activeTerm(), name: name.trim() });
+  return { error };
+}
+
+async function deleteSr1Building(id) {
+  const { error } = await supabase.from('sr1_buildings').delete().eq('id', id);
+  return { error };
+}
+
+// The supervision roster: who Dr. Beggs observes in the field this term.
+// Being enrolled in 4850 does not put a student here.
+async function loadSr1Supervision() {
+  const { data } = await supabase.from('sr1_supervision')
+    .select('id, profile_id, building_id, ct_name, profiles(id, first_name, last_name)')
+    .eq('term', activeTerm());
+  return data || [];
+}
+
+async function loadMySr1Supervision(profileId) {
+  const { data } = await supabase.from('sr1_supervision')
+    .select('id, building_id, ct_name').eq('profile_id', profileId).eq('term', activeTerm()).maybeSingle();
+  return data || null;
+}
+
+async function upsertSr1Supervision(profileId, buildingId, ctName) {
+  const { error } = await supabase.from('sr1_supervision').upsert({
+    profile_id: profileId, term: activeTerm(),
+    building_id: buildingId || null, ct_name: ctName || null,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'profile_id,term' });
+  return { error };
+}
+
+async function removeSr1Supervision(profileId) {
+  const { error } = await supabase.from('sr1_supervision')
+    .delete().match({ profile_id: profileId, term: activeTerm() });
+  return { error };
+}
+
+async function loadSr1Windows() {
+  const { data } = await supabase.from('sr1_windows')
+    .select('*').eq('term', activeTerm()).order('window_date');
+  return data || [];
+}
+
+async function createSr1Window(w) {
+  const { error } = await supabase.from('sr1_windows').insert({
+    term: activeTerm(), building_id: w.building_id, window_date: w.window_date,
+    start_time: w.start_time, end_time: w.end_time,
+    reflection_minutes: w.reflection_minutes, buffer_minutes: w.buffer_minutes,
+    note: w.note || null, published: w.published
+  });
+  return { error };
+}
+
+async function setSr1WindowPublished(id, published) {
+  const { error } = await supabase.from('sr1_windows').update({ published }).eq('id', id);
+  return { error };
+}
+
+// RESTRICT on the FK means this fails while bookings still reference the
+// window — deliberate, so a window can never silently take bookings with it.
+async function deleteSr1Window(id) {
+  const { error } = await supabase.from('sr1_windows').delete().eq('id', id);
+  return { error };
+}
+
+async function loadSr1Bookings() {
+  const { data } = await supabase.from('sr1_bookings')
+    .select('*, profiles(id, first_name, last_name)')
+    .eq('term', activeTerm()).order('lesson_start');
+  return data || [];
+}
+
+async function loadMySr1Bookings(profileId) {
+  const { data } = await supabase.from('sr1_bookings')
+    .select('*').eq('profile_id', profileId).eq('term', activeTerm()).order('lesson_start');
+  return data || [];
+}
+
+// Spans only — no names, no topics. This is how a candidate sees which times
+// are taken without learning who took them.
+async function loadSr1TakenTimes() {
+  const { data } = await supabase.from('sr1_taken_times')
+    .select('window_id, span_start, span_end').eq('term', activeTerm());
+  return data || [];
+}
+
+// Every booking rule lives in the database function, not here.
+async function bookSr1Observation(windowId, lessonStartISO, lessonEndISO, topic) {
+  const { data, error } = await supabase.rpc('book_sr1_observation', {
+    p_window_id: windowId, p_lesson_start: lessonStartISO,
+    p_lesson_end: lessonEndISO, p_topic: topic
+  });
+  return { data, error };
+}
+
+// Student self-cancel. The RLS policy allows this only outside the 24-hour
+// lockout, so inside it the update matches zero rows and we say so.
+async function cancelSr1Booking(id) {
+  const { data, error } = await supabase.from('sr1_bookings')
+    .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+    .eq('id', id).select('id');
+  if (error) return { error, blocked: false };
+  if (!data || data.length === 0) return { error: null, blocked: true };
+  return { error: null, blocked: false };
+}
+
+// Instructor edit. Recomputes the span so the overlap guarantee still holds,
+// and writes a notification whenever the candidate's times actually move.
+async function instrUpdateSr1Booking(booking, next, notify) {
+  const bufferMin = next.buffer_minutes ?? booking.buffer_minutes ?? 10;
+  const spanEnd = new Date(new Date(next.reflection_end).getTime() + bufferMin * 60000).toISOString();
+  const { error } = await supabase.from('sr1_bookings').update({
+    lesson_start: next.lesson_start, lesson_end: next.lesson_end,
+    reflection_start: next.reflection_start, reflection_end: next.reflection_end,
+    span: `[${next.lesson_start},${spanEnd})`,
+    topic: next.topic, reflection_minutes: next.reflection_minutes,
+    buffer_minutes: bufferMin, instructor_override: next.instructor_override,
+    override_note: next.override_note || null,
+    updated_at: new Date().toISOString()
+  }).eq('id', booking.id);
+  if (error) return { error };
+  if (notify) {
+    await supabase.from('sr1_notifications').insert({
+      profile_id: booking.profile_id, booking_id: booking.id, term: activeTerm(),
+      kind: 'time_changed',
+      message: `Your observation on ${fmtDay(next.lesson_start)} was changed to ${fmtTimeRange(next.lesson_start, next.lesson_end)}, with reflection until ${fmtTime(next.reflection_end)}. Please let your cooperating teacher know.`
+    });
+  }
+  return { error: null };
+}
+
+async function instrCancelSr1Booking(booking) {
+  const { error } = await supabase.from('sr1_bookings')
+    .update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', booking.id);
+  if (error) return { error };
+  await supabase.from('sr1_notifications').insert({
+    profile_id: booking.profile_id, booking_id: booking.id, term: activeTerm(),
+    kind: 'cancelled',
+    message: `Your observation on ${fmtDay(booking.lesson_start)} at ${fmtTime(booking.lesson_start)} was cancelled by Dr. Beggs. Please schedule a new time.`
+  });
+  return { error: null };
+}
+
+async function loadMySr1Notifications(profileId) {
+  const { data } = await supabase.from('sr1_notifications')
+    .select('id, kind, message, created_at')
+    .eq('profile_id', profileId).eq('term', activeTerm())
+    .is('read_at', null).order('created_at', { ascending: false });
+  return data || [];
+}
+
+async function dismissSr1Notification(id) {
+  await supabase.from('sr1_notifications').update({ read_at: new Date().toISOString() }).eq('id', id);
+}
+
+// Which slices of a window are still free, given everything already booked.
+// Used for the "Open: 10:40 AM – 12:00 PM" list a candidate reads before
+// choosing. Returns [] when the window is fully taken.
+function sr1OpenGaps(win, taken) {
+  const start = new Date(centralISO(win.window_date, win.start_time)).getTime();
+  const end = new Date(centralISO(win.window_date, win.end_time)).getTime();
+  const spans = taken.filter(t => t.window_id === win.id)
+    .map(t => [new Date(t.span_start).getTime(), new Date(t.span_end).getTime()])
+    .sort((a, b) => a[0] - b[0]);
+  const gaps = [];
+  let cursor = start;
+  for (const [s, e] of spans) {
+    if (s > cursor) gaps.push([cursor, Math.min(s, end)]);
+    cursor = Math.max(cursor, e);
+  }
+  if (cursor < end) gaps.push([cursor, end]);
+  // A gap shorter than the minimum lesson plus reflection cannot hold a
+  // booking, so showing it would only mislead.
+  const minMs = (20 + (win.reflection_minutes ?? 25)) * 60000;
+  return gaps.filter(([s, e]) => e - s >= minMs).map(([s, e]) => ({ start: new Date(s), end: new Date(e) }));
+}
+
+// Mirrors the 48-hour rule enforced in book_sr1_observation().
+function sr1TooSoon(iso) {
+  return new Date(iso).getTime() < Date.now() + 48 * 3600 * 1000;
+}
+// Mirrors the 24-hour self-cancel lockout in the RLS policy.
+function sr1CancelLocked(iso) {
+  return new Date(iso).getTime() < Date.now() + 24 * 3600 * 1000;
+}
+
+
+/* ================================================================
    TINY COMPONENTS
    ================================================================ */
 function Pill({ t, bg = "#F8F7F4", c = "#767676" }) { return <span role="status" aria-label={t} style={{ display: "inline-block", padding: "2px 7px", borderRadius: 4, fontFamily: F.b, fontSize: 11, fontWeight: 600, background: bg, color: c, whiteSpace: "nowrap" }}>{t}</span>; }
@@ -589,6 +840,19 @@ export default function App() {
   const [dataLoading, setDataLoading] = useState(false);
   const { rel, dueDates, dueDatesAll, students, iS, iN, sC, cP, toks, fq, teachDates, teachSel, myInstrSt, myQueue } = courseData;
 
+  // Practicum (SR1) — loaded separately from courseData because it is not
+  // course-scoped. The roster is the ~8 candidates supervised in the field
+  // this term, which is independent of which course is selected above.
+  const [sr1, setSr1] = useState({ buildings: [], roster: [], windows: [], bookings: [], taken: [], mySup: null, myBookings: [], myNotifs: [] });
+  const [sr1Loading, setSr1Loading] = useState(false);
+  const [expSr1Windows, setExpSr1Windows] = useState(false); // collapsed by default
+  const [expSr1Roster, setExpSr1Roster] = useState(false);
+  const [expSr1Student, setExpSr1Student] = useState(false);
+  const [sr1OpenCandidate, setSr1OpenCandidate] = useState(null); // accordion
+  const [sr1EditBooking, setSr1EditBooking] = useState(null);     // instructor edit modal
+  const [sr1BookWindow, setSr1BookWindow] = useState(null);       // student booking modal
+  const [sr1Busy, setSr1Busy] = useState(false);
+
   // UI state
   const [tab, setTab] = useState('overview');
   const [batch, setBatch] = useState(false);
@@ -689,6 +953,13 @@ export default function App() {
     if (ck && user) loadCourseData();
   }, [ck, user]);
 
+  // Practicum loads once per session on the user, NOT on ck — the roster spans
+  // the term rather than a course, so changing the course selector must not
+  // refetch it.
+  useEffect(() => {
+    if (user) loadSr1(true);
+  }, [user]);
+
   async function loadCourseData(isInitial = true) {
     if (isInitial) setDataLoading(true);
     const isStudent = user.profile.role === 'student';
@@ -720,6 +991,42 @@ export default function App() {
   }
 
   const refresh = () => loadCourseData(false);
+
+  // Practicum data. Deliberately NOT part of loadCourseData: it is term-scoped
+  // but not course-scoped, so switching courses must not re-fetch it, and an
+  // instructor who supervises nobody this term simply gets empty arrays.
+  async function loadSr1(isInitial = false) {
+    if (!user?.profile) return;
+    const instr = user.profile.role === 'instructor';
+    if (isInitial) setSr1Loading(true);
+    try {
+      if (instr) {
+        const [b, r, w, bk, tk] = await Promise.all([
+          loadSr1Buildings(), loadSr1Supervision(), loadSr1Windows(),
+          loadSr1Bookings(), loadSr1TakenTimes()
+        ]);
+        setSr1(s => ({ ...s, buildings: b, roster: r, windows: w, bookings: bk, taken: tk }));
+      } else {
+        const sup = await loadMySr1Supervision(user.profile.id);
+        if (!sup) {
+          // Not supervised this term — the section never renders.
+          setSr1(s => ({ ...s, mySup: null, myBookings: [], myNotifs: [], windows: [], taken: [], buildings: [] }));
+        } else {
+          const [b, w, mb, tk, nf] = await Promise.all([
+            loadSr1Buildings(), loadSr1Windows(),
+            loadMySr1Bookings(user.profile.id), loadSr1TakenTimes(),
+            loadMySr1Notifications(user.profile.id)
+          ]);
+          setSr1(s => ({ ...s, mySup: sup, buildings: b, windows: w, myBookings: mb, taken: tk, myNotifs: nf }));
+        }
+      }
+    } catch {
+      // Tables missing (migration not yet run) — leave the feature dormant
+      // rather than breaking the rest of the app.
+    }
+    if (isInitial) setSr1Loading(false);
+  }
+  const refreshSr1 = () => loadSr1(false);
 
   // ---- TERM SWITCHING ----------------------------------------------------
   // Confirmed via dialog. On confirm: persist the new term, make sure the
@@ -1340,6 +1647,31 @@ export default function App() {
       await toggleClassPrep(myId, ck, pid);
       refresh();
     };
+    // ---- PRACTICUM (student side) ----------------------------------------
+    // Opens the booking form for a window, defaulting the lesson start to the
+    // first genuinely open moment so she is not typing into a taken slot.
+    const openSr1Book = (w) => {
+      const gaps = sr1OpenGaps(w, sr1.taken).filter(g => !sr1TooSoon(g.start.toISOString()));
+      const first = gaps[0];
+      const timeOf = d => new Date(d).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: SR1_TZ });
+      const start = first ? timeOf(first.start) : w.start_time.slice(0, 5);
+      const end = first
+        ? timeOf(new Date(Math.min(first.start.getTime() + 45 * 60000, first.end.getTime())))
+        : '';
+      setSr1BookWindow({ win: w, lessonStart: start, lessonEnd: end, topic: '', err: '' });
+    };
+
+    const handleStudentCancelSr1 = async (b) => {
+      if (!confirm(`Cancel your observation on ${fmtDay(b.lesson_start)} at ${fmtTime(b.lesson_start)}?`)) return;
+      const { error, blocked } = await cancelSr1Booking(b.id);
+      // The 24-hour lockout lives in the RLS policy, so a late attempt simply
+      // matches no rows rather than erroring.
+      if (blocked) { showToast('That observation is within 24 hours — email Dr. Beggs at mbeggs@ucmo.edu to change it.'); return; }
+      if (error) { showToast('Could not cancel — please try again.'); return; }
+      showToast('Observation cancelled', 'success');
+      refreshSr1();
+    };
+
     const handleToken = async () => {
       if (!modal || tfSubmitting) return;
       setTfSubmitting(true);
@@ -1580,6 +1912,109 @@ export default function App() {
             </div>;
           })}
 
+          {/* Practicum booking form. Every rule shown here is also enforced in
+              book_sr1_observation(); this is the friendly version, not the gate. */}
+          {sr1BookWindow && (() => {
+            const B = sr1BookWindow;
+            const w = B.win;
+            const set = p => setSr1BookWindow(v => ({ ...v, ...p }));
+            const lsISO = centralISO(w.window_date, B.lessonStart);
+            const leISO = centralISO(w.window_date, B.lessonEnd);
+            const okOrder = lsISO && leISO && new Date(leISO) > new Date(lsISO);
+            const mins = okOrder ? Math.round((new Date(leISO) - new Date(lsISO)) / 60000) : 0;
+            const reflISO = okOrder ? new Date(new Date(leISO).getTime() + w.reflection_minutes * 60000) : null;
+            const winEnd = new Date(centralISO(w.window_date, w.end_time));
+            const winStart = new Date(centralISO(w.window_date, w.start_time));
+
+            let problem = '';
+            if (B.lessonStart && B.lessonEnd) {
+              if (!okOrder) problem = 'The end time must be after the start time.';
+              else if (mins < 20) problem = 'A lesson must be at least 20 minutes long.';
+              else if (mins > 90) problem = 'A lesson cannot be longer than 90 minutes. Email Dr. Beggs if you need more.';
+              else if (new Date(lsISO) < winStart) problem = `This day does not open until ${fmtTime(winStart)}.`;
+              else if (reflISO > winEnd) problem = `Your reflection would run to ${fmtTime(reflISO)}, past the ${fmtTime(winEnd)} close. Choose an earlier start.`;
+              else if (sr1TooSoon(lsISO)) problem = 'That time is less than 48 hours away and can no longer be booked online. Email Dr. Beggs at mbeggs@ucmo.edu.';
+            }
+            const ready = okOrder && !problem && B.topic.trim().length > 0;
+
+            return <div role="dialog" aria-modal="true" aria-labelledby="sr1-book-title"
+              onClick={e => { if (e.target === e.currentTarget) setSr1BookWindow(null); }}
+              style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.3)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20 }}>
+              <div style={{ background: "#fff", borderRadius: 14, padding: "22px", maxWidth: 440, width: "100%", maxHeight: "88vh", overflowY: "auto", boxShadow: "0 12px 40px rgba(0,0,0,.15)" }}>
+                <h2 id="sr1-book-title" style={{ fontFamily: F.d, fontSize: 18, fontWeight: 600, marginBottom: 3 }}>Book an observation</h2>
+                <div style={{ fontFamily: F.b, fontSize: 12, color: "#555", marginBottom: 4 }}>{fmtDateOnly(w.window_date)}</div>
+                <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 14 }}>
+                  Dr. Beggs is available {fmtTime(winStart)} – {fmtTime(winEnd)}{w.note ? ` · ${w.note}` : ''}
+                </div>
+
+                {(() => {
+                  const gaps = sr1OpenGaps(w, sr1.taken).filter(g => !sr1TooSoon(g.start.toISOString()));
+                  if (gaps.length === 0) return null;
+                  return <div style={{ marginBottom: 14, padding: "8px 10px", background: "#F9F8F5", borderRadius: 6 }}>
+                    <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Times still open</div>
+                    <ul style={{ margin: 0, paddingLeft: 16 }}>
+                      {gaps.map((g, i) => <li key={i} style={{ fontFamily: F.b, fontSize: 11, color: "#2D6A4F" }}>{fmtTime(g.start)} – {fmtTime(g.end)}</li>)}
+                    </ul>
+                  </div>;
+                })()}
+
+                <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+                  <div>
+                    <label htmlFor="sr1-b-start" style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Lesson starts</label>
+                    <input id="sr1-b-start" type="time" value={B.lessonStart} onChange={e => set({ lessonStart: e.target.value })}
+                      style={{ padding: "7px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13 }} />
+                  </div>
+                  <div>
+                    <label htmlFor="sr1-b-end" style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Lesson ends</label>
+                    <input id="sr1-b-end" type="time" value={B.lessonEnd} onChange={e => set({ lessonEnd: e.target.value })}
+                      style={{ padding: "7px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13 }} />
+                  </div>
+                </div>
+
+                {/* The reflection window is the part her CT needs to hear about,
+                    so it is announced rather than only displayed. */}
+                {okOrder && !problem && <div role="status" aria-live="polite" style={{ fontFamily: F.b, fontSize: 12, color: "#1A1A1A", background: "#F0F8FF", border: "1px solid #DCEEFB", borderRadius: 6, padding: "9px 11px", marginBottom: 12, lineHeight: 1.5 }}>
+                  Lesson {fmtTimeRange(lsISO, leISO)} · Reflection {fmtTimeRange(leISO, reflISO)}
+                  <div style={{ color: "#555", marginTop: 3 }}>Make sure your cooperating teacher can release you until {fmtTime(reflISO)}.</div>
+                </div>}
+
+                {problem && <div role="alert" style={{ fontFamily: F.b, fontSize: 12, color: "#C0392B", background: "#FDF2F2", border: "1px solid #F5C6CB", borderRadius: 6, padding: "9px 11px", marginBottom: 12, lineHeight: 1.5 }}>{problem}</div>}
+
+                <div style={{ marginBottom: 6 }}>
+                  <label htmlFor="sr1-b-topic" style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>What are you teaching?</label>
+                  <input id="sr1-b-topic" type="text" value={B.topic} onChange={e => set({ topic: e.target.value })}
+                    placeholder="e.g. Fractions — comparing unlike denominators"
+                    style={{ width: "100%", padding: "8px 11px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, boxSizing: "border-box" }} />
+                </div>
+
+                {B.err && <div role="alert" style={{ fontFamily: F.b, fontSize: 12, color: "#C0392B", background: "#FDF2F2", border: "1px solid #F5C6CB", borderRadius: 6, padding: "9px 11px", margin: "10px 0", lineHeight: 1.5 }}>{B.err}</div>}
+
+                <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+                  <button disabled={!ready || sr1Busy}
+                    onClick={async () => {
+                      setSr1Busy(true); set({ err: '' });
+                      const { error } = await bookSr1Observation(w.id, lsISO, leISO, B.topic.trim());
+                      setSr1Busy(false);
+                      if (error) {
+                        // The database messages are written to be read by students.
+                        set({ err: error.message || 'Could not book that time. Please try another.' });
+                        refreshSr1();
+                        return;
+                      }
+                      setSr1BookWindow(null);
+                      showToast('Observation booked ✓', 'success');
+                      refreshSr1();
+                    }}
+                    style={{ padding: "9px 18px", background: (!ready || sr1Busy) ? "#E0DDD8" : c.color, color: "#fff", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 13, fontWeight: 600, cursor: (!ready || sr1Busy) ? "not-allowed" : "pointer" }}>
+                    {sr1Busy ? "Booking…" : "Book this time"}
+                  </button>
+                  <button onClick={() => setSr1BookWindow(null)}
+                    style={{ padding: "9px 14px", background: "#F0EEEA", color: "#6B6B6B", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 12, cursor: "pointer" }}>Cancel</button>
+                </div>
+              </div>
+            </div>;
+          })()}
+
           {/* Token Modal */}
           {modal && <div role="dialog" aria-modal="true" aria-label="Submit a token" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.3)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }} onClick={() => setModal(null)}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: "24px", maxWidth: 420, width: "90%", boxShadow: "0 12px 40px rgba(0,0,0,.15)" }}>
@@ -1655,6 +2090,117 @@ export default function App() {
                   </div> : <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>Teaching window has closed.</div>}
                 </div>;
               });
+            })()}
+          </div>}
+          </>}
+
+          {/* Practicum Observations — renders only for the candidates Dr. Beggs
+              supervises in the field. Everyone else never sees it exist. */}
+          {sr1.mySup && <>
+          {sr1.myNotifs.length > 0 && <div style={{ marginBottom: 12 }}>
+            {sr1.myNotifs.map(n => (
+              <div key={n.id} role="status" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, padding: "10px 14px", marginBottom: 6, background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 8 }}>
+                <span style={{ fontFamily: F.b, fontSize: 12, color: "#856404", lineHeight: 1.5 }}>{n.message}</span>
+                <button onClick={async () => { await dismissSr1Notification(n.id); refreshSr1(); }}
+                  aria-label="Dismiss this notice"
+                  style={{ flexShrink: 0, padding: "2px 9px", background: "#fff", border: "1px solid #E8D9A8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#856404", cursor: "pointer" }}>Dismiss</button>
+              </div>
+            ))}
+          </div>}
+
+          <button aria-expanded={expSr1Student} onClick={() => setExpSr1Student(!expSr1Student)}
+            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "12px 16px", background: "#fff", border: "1px solid #E8E6E1", borderRadius: expSr1Student ? "10px 10px 0 0" : 10, cursor: "pointer", marginBottom: expSr1Student ? 0 : 12 }}>
+            <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555" }}>Practicum Observations</span>
+            <span aria-hidden="true" style={{ fontSize: 11, color: "#767676", transform: expSr1Student ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
+          </button>
+          {expSr1Student && <div style={{ background: "#fff", border: "1px solid #E8E6E1", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 16px", marginBottom: 12 }}>
+            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12, lineHeight: 1.5 }}>
+              Check with your cooperating teacher before booking. Your reflection happens right after the lesson, so you will need to be free until the reflection ends — not just until the lesson does.
+            </div>
+
+            {/* My bookings */}
+            {(() => {
+              const now = Date.now();
+              const active = sr1.myBookings.filter(b => b.status === 'booked');
+              const upcoming = active.filter(b => new Date(b.lesson_start).getTime() >= now)
+                .sort((a, b) => new Date(a.lesson_start) - new Date(b.lesson_start));
+              const past = active.filter(b => new Date(b.lesson_start).getTime() < now)
+                .sort((a, b) => new Date(b.lesson_start) - new Date(a.lesson_start));
+              return <>
+                {upcoming.length > 0 && <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 6 }}>Your scheduled observations</div>
+                  {upcoming.map(b => {
+                    const locked = sr1CancelLocked(b.lesson_start);
+                    return <div key={b.id} style={{ padding: "10px 12px", marginBottom: 6, background: "#F0F8FF", border: "1px solid #DCEEFB", borderRadius: 8 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+                        <div>
+                          <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600 }}>{fmtDay(b.lesson_start)}</div>
+                          <div style={{ fontFamily: F.b, fontSize: 12, color: "#555", marginTop: 2 }}>Lesson {fmtTimeRange(b.lesson_start, b.lesson_end)}</div>
+                          <div style={{ fontFamily: F.b, fontSize: 12, color: "#555" }}>Reflection {fmtTimeRange(b.reflection_start, b.reflection_end)}</div>
+                          <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 3 }}>{b.topic}</div>
+                        </div>
+                        {locked
+                          ? <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", maxWidth: 200, textAlign: "right", lineHeight: 1.4 }}>
+                              Within 24 hours — email Dr. Beggs at mbeggs@ucmo.edu to change this.
+                            </span>
+                          : <button onClick={() => handleStudentCancelSr1(b)}
+                              aria-label={`Cancel your observation on ${fmtDay(b.lesson_start)}`}
+                              style={{ flexShrink: 0, padding: "4px 10px", background: "#fff", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: "#C0392B", cursor: "pointer" }}>Cancel</button>}
+                      </div>
+                    </div>;
+                  })}
+                </div>}
+
+                {past.length > 0 && <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", marginBottom: 6 }}>Completed</div>
+                  {past.map(b => <div key={b.id} style={{ padding: "6px 2px" }}>
+                    <span style={{ fontFamily: F.b, fontSize: 12, color: "#767676" }}>{fmtDay(b.lesson_start)} · {fmtTimeRange(b.lesson_start, b.lesson_end)}</span>
+                    <span style={{ fontFamily: F.b, fontSize: 11, color: "#909090" }}> — {b.topic}</span>
+                  </div>)}
+                </div>}
+              </>;
+            })()}
+
+            {/* Bookable windows — already filtered to her building by RLS. */}
+            {(() => {
+              const todayStr = new Date().toISOString().slice(0, 10);
+              const open = sr1.windows
+                .filter(w => w.published && w.window_date >= todayStr)
+                .filter(w => !sr1TooSoon(centralISO(w.window_date, w.end_time)))
+                .sort((a, b) => a.window_date.localeCompare(b.window_date));
+              if (open.length === 0) return <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>
+                No observation times are open right now. Dr. Beggs will post more.
+              </div>;
+              return <div>
+                <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 6 }}>Available days</div>
+                {open.map(w => {
+                  const gaps = sr1OpenGaps(w, sr1.taken).filter(g => !sr1TooSoon(g.start.toISOString()));
+                  const full = gaps.length === 0;
+                  return <div key={w.id} style={{ padding: "10px 12px", marginBottom: 6, background: full ? "#F9F8F5" : "#fff", border: "1px solid #E8E6E1", borderRadius: 8 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <div>
+                        <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600 }}>{fmtDateOnly(w.window_date)}</div>
+                        <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>
+                          {fmtTime(centralISO(w.window_date, w.start_time))} – {fmtTime(centralISO(w.window_date, w.end_time))}
+                          {w.note ? ` · ${w.note}` : ''}
+                        </div>
+                      </div>
+                      {!full && <button onClick={() => openSr1Book(w)}
+                        aria-label={`Book an observation on ${fmtDateOnly(w.window_date)}`}
+                        style={{ padding: "5px 12px", background: c.color, color: "#fff", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Book a time</button>}
+                    </div>
+                    <div style={{ marginTop: 6 }}>
+                      {full
+                        ? <span style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>Fully booked</span>
+                        : <ul style={{ margin: 0, paddingLeft: 16, listStyle: "disc" }}>
+                            {gaps.map((g, i) => <li key={i} style={{ fontFamily: F.b, fontSize: 11, color: "#2D6A4F" }}>
+                              Open: {fmtTime(g.start)} – {fmtTime(g.end)}
+                            </li>)}
+                          </ul>}
+                    </div>
+                  </div>;
+                })}
+              </div>;
             })()}
           </div>}
           </>}
@@ -1770,6 +2316,141 @@ export default function App() {
       showToast('Failed to save — please try again.');
     }
   };
+  // ---- PRACTICUM (SR1) HANDLERS -----------------------------------------
+  // These call refreshSr1() rather than refresh(): practicum data is loaded
+  // separately from courseData, so a full course reload would be wasted work.
+
+  const handleAddSr1Building = async () => {
+    const el = document.getElementById('sr1-new-building');
+    const name = (el?.value || '').trim();
+    if (!name) { showToast('Type a building name first.'); return; }
+    if (sr1.buildings.some(b => b.name.toLowerCase() === name.toLowerCase())) {
+      showToast('That building is already on the list.'); return;
+    }
+    setSr1Busy(true);
+    const { error } = await addSr1Building(name);
+    setSr1Busy(false);
+    if (error) { showToast('Could not add that building — please try again.'); return; }
+    if (el) el.value = '';
+    showToast('Building added ✓', 'success');
+    refreshSr1();
+  };
+
+  const handleDeleteSr1Building = async (b) => {
+    if (!confirm(`Remove ${b.name} from this semester's building list?`)) return;
+    const { error } = await deleteSr1Building(b.id);
+    if (error) { showToast('Could not remove that building.'); return; }
+    showToast('Building removed', 'success');
+    refreshSr1();
+  };
+
+  const handleToggleSr1Supervision = async (student, currentlyOn) => {
+    if (currentlyOn) {
+      const has = sr1.bookings.some(bk => bk.profile_id === student.id && bk.status === 'booked');
+      if (has && !confirm(`${student.first} ${student.last} has scheduled observations. Remove them from supervision anyway? Their bookings will remain but they will lose access to the scheduling page.`)) return;
+      const { error } = await removeSr1Supervision(student.id);
+      if (error) { showToast('Could not update the roster.'); return; }
+    } else {
+      const { error } = await upsertSr1Supervision(student.id, null, null);
+      if (error) { showToast('Could not update the roster.'); return; }
+    }
+    refreshSr1();
+  };
+
+  // Building and CT name both live on the supervision row, so a change to
+  // either is an upsert of the whole row.
+  const handleSetSr1Field = async (profileId, field, value) => {
+    const cur = sr1.roster.find(r => r.profile_id === profileId);
+    if (!cur) return;
+    const buildingId = field === 'building_id' ? value : cur.building_id;
+    const ctName = field === 'ct_name' ? value : cur.ct_name;
+    // Optimistic — the roster list re-renders immediately.
+    const prev = sr1.roster;
+    setSr1(s => ({ ...s, roster: s.roster.map(r => r.profile_id === profileId ? { ...r, building_id: buildingId, ct_name: ctName } : r) }));
+    const { error } = await upsertSr1Supervision(profileId, buildingId, ctName);
+    if (error) {
+      setSr1(s => ({ ...s, roster: prev }));
+      showToast('Could not save that change — please try again.');
+      return;
+    }
+    if (field === 'building_id') {
+      const future = sr1.bookings.filter(bk => bk.profile_id === profileId && bk.status === 'booked' && new Date(bk.lesson_start) > new Date());
+      if (future.length > 0) {
+        showToast(`Building changed. ${future.length} upcoming booking${future.length === 1 ? ' is' : 's are'} still at the old building — review them.`, 'error');
+      }
+    }
+  };
+
+  const handleCreateSr1Window = async (publish) => {
+    const g = id => document.getElementById(id)?.value || '';
+    const building_id = g('sr1-w-building'), window_date = g('sr1-w-date');
+    const start_time = g('sr1-w-start'), end_time = g('sr1-w-end');
+    const reflection_minutes = parseInt(g('sr1-w-refl'), 10);
+    const buffer_minutes = parseInt(g('sr1-w-buffer'), 10);
+    const note = g('sr1-w-note');
+    if (!building_id) { showToast('Choose a building.'); return; }
+    if (!window_date) { showToast('Choose a date.'); return; }
+    if (!start_time || !end_time) { showToast('Set both an opening and closing time.'); return; }
+    if (end_time <= start_time) { showToast('The closing time must be after the opening time.'); return; }
+    if (!Number.isFinite(reflection_minutes) || reflection_minutes < 0 || reflection_minutes > 120) { showToast('Reflection minutes must be between 0 and 120.'); return; }
+    if (!Number.isFinite(buffer_minutes) || buffer_minutes < 0 || buffer_minutes > 120) { showToast('Buffer minutes must be between 0 and 120.'); return; }
+    setSr1Busy(true);
+    const { error } = await createSr1Window({ building_id, window_date, start_time, end_time, reflection_minutes, buffer_minutes, note, published: publish });
+    setSr1Busy(false);
+    if (error) { showToast('Could not create that window — please try again.'); return; }
+    ['sr1-w-date', 'sr1-w-note'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    showToast(publish ? 'Window published ✓' : 'Window saved (hidden)', 'success');
+    refreshSr1();
+  };
+
+  const handleToggleSr1Window = async (w) => {
+    const prev = sr1.windows;
+    setSr1(s => ({ ...s, windows: s.windows.map(x => x.id === w.id ? { ...x, published: !x.published } : x) }));
+    const { error } = await setSr1WindowPublished(w.id, !w.published);
+    if (error) { setSr1(s => ({ ...s, windows: prev })); showToast('Could not change that window.'); }
+  };
+
+  // The FK is ON DELETE RESTRICT, so a window with bookings cannot be deleted
+  // out from under a candidate. Cancel the bookings first, deliberately.
+  const handleDeleteSr1Window = async (w, bookedCount) => {
+    if (bookedCount > 0) {
+      showToast(`That window has ${bookedCount} booking${bookedCount === 1 ? '' : 's'}. Cancel them first, then delete it.`);
+      return;
+    }
+    if (!confirm(`Delete the ${fmtDateOnly(w.window_date)} window?`)) return;
+    const { error } = await deleteSr1Window(w.id);
+    if (error) { showToast('Could not delete that window.'); return; }
+    showToast('Window deleted', 'success');
+    refreshSr1();
+  };
+
+  // Opens the edit modal with the booking's current values, pre-split into the
+  // date/time pieces the form needs.
+  const openSr1Edit = (bk) => {
+    const dateOf = ts => new Date(ts).toLocaleDateString('en-CA', { timeZone: SR1_TZ }); // yyyy-mm-dd
+    const timeOf = ts => new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: SR1_TZ });
+    setSr1EditBooking({
+      booking: bk,
+      date: dateOf(bk.lesson_start),
+      lessonStart: timeOf(bk.lesson_start),
+      lessonEnd: timeOf(bk.lesson_end),
+      reflStart: timeOf(bk.reflection_start),
+      reflEnd: timeOf(bk.reflection_end),
+      topic: bk.topic || '',
+      overrideNote: bk.override_note || '',
+      acknowledged: false,
+      notify: true
+    });
+  };
+
+  const handleInstrCancelSr1 = async (bk, name) => {
+    if (!confirm(`Cancel ${name}'s observation on ${fmtDay(bk.lesson_start)} at ${fmtTime(bk.lesson_start)}?\n\nThey will see a notice the next time they sign in.`)) return;
+    const { error } = await instrCancelSr1Booking(bk);
+    if (error) { showToast('Could not cancel that observation.'); return; }
+    showToast('Observation cancelled — candidate notified', 'success');
+    refreshSr1();
+  };
+
   const handleInstrNote = async (pid, aid, note) => {
     await upsertInstrNote(pid, ck, aid, note);
     refresh();
@@ -2195,7 +2876,7 @@ export default function App() {
 
       <main id="main-content" style={{ maxWidth: 1100, margin: "0 auto", padding: "18px 20px" }}>
         <nav role="tablist" aria-label="Dashboard sections" style={{ display: "flex", gap: 0, marginBottom: 18, borderBottom: "2px solid #F0EEEA" }}>
-          {[{ k: "overview", l: "Overview" }, { k: "settings", l: "Settings" }, { k: "queue", l: "Tokens" }, { k: "tracks", l: "Tracks" }].map(t => <button role="tab" aria-selected={tab === t.k} key={t.k} onClick={() => setTab(t.k)} style={{ padding: "8px 14px", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: tab === t.k ? c.color : "#767676", background: "none", borderBottom: tab === t.k ? `2px solid ${c.color}` : "2px solid transparent", marginBottom: -2, position: "relative" }}>{t.l}{t.k === "queue" && pending.length > 0 && <span aria-label={`${pending.length} pending`} style={{ position: "absolute", top: 4, right: 2, minWidth: 16, height: 16, borderRadius: 8, background: "#CF202E", color: "#fff", fontFamily: F.b, fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{pending.length}</span>}</button>)}
+          {[{ k: "overview", l: "Overview" }, { k: "settings", l: "Settings" }, { k: "queue", l: "Tokens" }, { k: "tracks", l: "Tracks" }, { k: "practicum", l: "Practicum" }].map(t => <button role="tab" aria-selected={tab === t.k} key={t.k} onClick={() => setTab(t.k)} style={{ padding: "8px 14px", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: tab === t.k ? c.color : "#767676", background: "none", borderBottom: tab === t.k ? `2px solid ${c.color}` : "2px solid transparent", marginBottom: -2, position: "relative" }}>{t.l}{t.k === "queue" && pending.length > 0 && <span aria-label={`${pending.length} pending`} style={{ position: "absolute", top: 4, right: 2, minWidth: 16, height: 16, borderRadius: 8, background: "#CF202E", color: "#fff", fontFamily: F.b, fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{pending.length}</span>}</button>)}
         </nav>
 
         {/* OVERVIEW */}
@@ -2991,7 +3672,422 @@ export default function App() {
             </div>}
           </div>
         </div>}
+
+        {/* PRACTICUM — SR1 field observation scheduling.
+            Role-gated only, never course-gated: the roster spans the term, and
+            the course selector above has no bearing on it. Empty in a term with
+            no supervised candidates, which is the honest state. */}
+        {tab === "practicum" && <div>
+          <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 14, lineHeight: 1.5, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
+            Field observations for the candidates you supervise this semester. Publish a window for a building on a day you will be there, and candidates carve their own lesson time out of it after checking with their cooperating teacher. Two candidates can never hold overlapping times.
+          </div>
+
+          {/* ---- AVAILABILITY WINDOWS (collapsed by default) ---- */}
+          <Lbl onClick={() => setExpSr1Windows(!expSr1Windows)} expanded={expSr1Windows}>Availability Windows</Lbl>
+          {expSr1Windows && <>
+            {sr1.buildings.length === 0
+              ? <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", padding: "12px 16px", background: "#fff", border: "1px solid #E8E6E1", borderRadius: 10, marginBottom: 18 }}>
+                  Add at least one building in Roster Setup below before creating a window.
+                </div>
+              : <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", padding: "14px 16px", marginBottom: 14 }}>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                    <div>
+                      <label htmlFor="sr1-w-building" style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Building</label>
+                      <select id="sr1-w-building" defaultValue="" style={{ padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, background: "#fff" }}>
+                        <option value="">Choose…</option>
+                        {sr1.buildings.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label htmlFor="sr1-w-date" style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Date</label>
+                      <input id="sr1-w-date" type="date" style={{ padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12 }} />
+                    </div>
+                    <div>
+                      <label htmlFor="sr1-w-start" style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Opens</label>
+                      <input id="sr1-w-start" type="time" defaultValue="09:00" style={{ padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12 }} />
+                    </div>
+                    <div>
+                      <label htmlFor="sr1-w-end" style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Closes</label>
+                      <input id="sr1-w-end" type="time" defaultValue="14:30" style={{ padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12 }} />
+                    </div>
+                    <div>
+                      <label htmlFor="sr1-w-refl" style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Reflection (min)</label>
+                      <input id="sr1-w-refl" type="number" min="0" max="120" defaultValue="25" style={{ width: 72, padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12 }} />
+                    </div>
+                    <div>
+                      <label htmlFor="sr1-w-buffer" style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Buffer (min)</label>
+                      <input id="sr1-w-buffer" type="number" min="0" max="120" defaultValue="10" style={{ width: 72, padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12 }} />
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 10 }}>
+                    <label htmlFor="sr1-w-note" style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Note for candidates (optional)</label>
+                    <input id="sr1-w-note" type="text" placeholder="e.g. Available after 12:45" style={{ width: "100%", maxWidth: 420, padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, boxSizing: "border-box" }} />
+                  </div>
+                  <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <button disabled={sr1Busy} onClick={() => handleCreateSr1Window(true)}
+                      style={{ padding: "7px 14px", background: sr1Busy ? "#B0ADA8" : c.color, color: "#fff", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 12, fontWeight: 600, cursor: sr1Busy ? "default" : "pointer" }}>
+                      {sr1Busy ? "Saving…" : "Create & publish"}
+                    </button>
+                    <button disabled={sr1Busy} onClick={() => handleCreateSr1Window(false)}
+                      style={{ padding: "7px 14px", background: "#fff", color: "#555", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, fontWeight: 600, cursor: sr1Busy ? "default" : "pointer" }}>
+                      Save unpublished
+                    </button>
+                    <span style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>Unpublished windows are invisible to candidates.</span>
+                  </div>
+                </div>}
+
+            {(() => {
+              const todayStr = new Date().toISOString().slice(0, 10);
+              const upcoming = sr1.windows.filter(w => w.window_date >= todayStr)
+                .sort((a, b) => a.window_date.localeCompare(b.window_date) || a.start_time.localeCompare(b.start_time));
+              if (upcoming.length === 0) return <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", marginBottom: 18 }}>No upcoming windows.</div>;
+              return <div style={{ marginBottom: 18 }}>
+                {upcoming.map(w => {
+                  const bn = sr1.buildings.find(b => b.id === w.building_id)?.name || "—";
+                  const booked = sr1.bookings.filter(bk => bk.window_id === w.id && bk.status === 'booked');
+                  return <div key={w.id} style={{ background: "#fff", border: "1px solid #E8E6E1", borderRadius: 10, padding: "10px 14px", marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                    <div>
+                      <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600 }}>{fmtDateOnly(w.window_date)} · {bn}</div>
+                      <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>
+                        {fmtTime(centralISO(w.window_date, w.start_time))} – {fmtTime(centralISO(w.window_date, w.end_time))}
+                        {` · ${w.reflection_minutes} min reflection · ${w.buffer_minutes} min buffer`}
+                        {w.note ? ` · ${w.note}` : ''}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <Pill t={`${booked.length} booked`} bg={booked.length ? "#DCEEFB" : "#F8F7F4"} c={booked.length ? "#1565C0" : "#767676"} />
+                      <Pill t={w.published ? "Published" : "Hidden"} bg={w.published ? "#D4EDDA" : "#F5F4F0"} c={w.published ? "#2D6A4F" : "#767676"} />
+                      <button onClick={() => handleToggleSr1Window(w)} aria-label={`${w.published ? 'Unpublish' : 'Publish'} window on ${fmtDateOnly(w.window_date)} at ${bn}`}
+                        style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, background: "#fff", color: "#555", cursor: "pointer" }}>
+                        {w.published ? "Unpublish" : "Publish"}
+                      </button>
+                      <button onClick={() => handleDeleteSr1Window(w, booked.length)} aria-label={`Delete window on ${fmtDateOnly(w.window_date)} at ${bn}`}
+                        style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, background: "#fff", color: "#C0392B", cursor: "pointer" }}>
+                        Delete
+                      </button>
+                    </div>
+                  </div>;
+                })}
+              </div>;
+            })()}
+          </>}
+
+          {/* ---- CANDIDATES — the page's main content ---- */}
+          <Lbl s={{ marginTop: 4 }}>Candidates</Lbl>
+          {sr1.roster.length === 0
+            ? <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", padding: "14px 16px", background: "#fff", border: "1px solid #E8E6E1", borderRadius: 10, marginBottom: 18 }}>
+                No supervised candidates this semester. Add them in Roster Setup below.
+              </div>
+            : <div style={{ marginBottom: 18 }}>
+                {sr1.roster.slice()
+                  .sort((a, b) => (a.profiles?.last_name || '').localeCompare(b.profiles?.last_name || ''))
+                  .map(r => {
+                    const nm = `${r.profiles?.first_name || ''} ${r.profiles?.last_name || ''}`.trim() || 'Unknown';
+                    const bn = sr1.buildings.find(b => b.id === r.building_id)?.name || "No building set";
+                    const active = sr1.bookings.filter(bk => bk.profile_id === r.profile_id && bk.status === 'booked');
+                    const now = Date.now();
+                    const upcoming = active.filter(bk => new Date(bk.lesson_start).getTime() >= now)
+                      .sort((a, b) => new Date(a.lesson_start) - new Date(b.lesson_start));
+                    const past = active.filter(bk => new Date(bk.lesson_start).getTime() < now)
+                      .sort((a, b) => new Date(b.lesson_start) - new Date(a.lesson_start));
+                    const next = upcoming[0] || null;
+                    const open = sr1OpenCandidate === r.profile_id;
+                    return <div key={r.id} style={{ background: "#fff", border: "1px solid #E8E6E1", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
+                      <button aria-expanded={open} onClick={() => setSr1OpenCandidate(open ? null : r.profile_id)}
+                        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "12px 16px", background: "none", border: "none", cursor: "pointer", textAlign: "left", gap: 10 }}>
+                        <span style={{ minWidth: 0 }}>
+                          <span style={{ display: "block", fontFamily: F.b, fontSize: 13, fontWeight: 600, color: "#1A1A1A" }}>{nm}</span>
+                          <span style={{ display: "block", fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>
+                            {bn}{r.ct_name ? ` · CT: ${r.ct_name}` : ''}
+                          </span>
+                        </span>
+                        <span style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                          <span style={{ fontFamily: F.b, fontSize: 11, color: next ? "#1A1A1A" : "#767676", fontWeight: next ? 600 : 400 }}>
+                            {next ? `Next: ${fmtDay(next.lesson_start)}, ${fmtTime(next.lesson_start)}` : "No upcoming"}
+                          </span>
+                          <Pill t={`${active.length} total`} />
+                          <span aria-hidden="true" style={{ fontSize: 12, color: "#767676", transform: open ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
+                        </span>
+                      </button>
+
+                      {open && <div style={{ padding: "0 16px 14px", borderTop: "1px solid #F0EEEA" }}>
+                        {active.length === 0 && <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", paddingTop: 12 }}>No observations scheduled.</div>}
+
+                        {upcoming.length > 0 && <div style={{ paddingTop: 12 }}>
+                          {upcoming.map((bk, i) => {
+                            const isNext = i === 0;
+                            return <div key={bk.id} style={{ padding: "10px 12px", marginBottom: 6, borderRadius: 8, background: isNext ? "#F0F8FF" : "#F9F8F5", borderLeft: isNext ? `3px solid ${c.color}` : "3px solid transparent" }}>
+                              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                                <div>
+                                  <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600 }}>
+                                    {isNext && <span aria-hidden="true" style={{ marginRight: 5 }}>●</span>}
+                                    {isNext && <span className="sr-only">Next scheduled. </span>}
+                                    {fmtDay(bk.lesson_start)}
+                                    {bk.instructor_override && <span style={{ marginLeft: 6 }}><Pill t="Adjusted" bg="#FFF3CD" c="#856404" /></span>}
+                                  </div>
+                                  <div style={{ fontFamily: F.b, fontSize: 11, color: "#555", marginTop: 2 }}>
+                                    Lesson {fmtTimeRange(bk.lesson_start, bk.lesson_end)} · Reflection {fmtTimeRange(bk.reflection_start, bk.reflection_end)}
+                                  </div>
+                                  <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 2 }}>{bk.topic}</div>
+                                  {bk.override_note && <div style={{ fontFamily: F.b, fontSize: 11, color: "#856404", marginTop: 2 }}>Note: {bk.override_note}</div>}
+                                </div>
+                                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                                  <button onClick={() => openSr1Edit(bk)} aria-label={`Edit observation for ${nm} on ${fmtDay(bk.lesson_start)}`}
+                                    style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, background: "#fff", color: "#555", cursor: "pointer" }}>✎ Edit</button>
+                                  <button onClick={() => handleInstrCancelSr1(bk, nm)} aria-label={`Cancel observation for ${nm} on ${fmtDay(bk.lesson_start)}`}
+                                    style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, background: "#fff", color: "#C0392B", cursor: "pointer" }}>Cancel</button>
+                                </div>
+                              </div>
+                            </div>;
+                          })}
+                        </div>}
+
+                        {past.length > 0 && <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #F0EEEA" }}>
+                          <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", marginBottom: 6 }}>Completed</div>
+                          {past.map(bk => <div key={bk.id} style={{ padding: "6px 12px", marginBottom: 4 }}>
+                            <div style={{ fontFamily: F.b, fontSize: 12, color: "#767676" }}>
+                              {fmtDay(bk.lesson_start)} · Lesson {fmtTimeRange(bk.lesson_start, bk.lesson_end)}
+                            </div>
+                            <div style={{ fontFamily: F.b, fontSize: 11, color: "#909090" }}>{bk.topic}</div>
+                          </div>)}
+                        </div>}
+                      </div>}
+                    </div>;
+                  })}
+              </div>}
+
+          {/* ---- ROSTER SETUP (collapsed) ---- */}
+          <Lbl onClick={() => setExpSr1Roster(!expSr1Roster)} expanded={expSr1Roster}>Roster Setup</Lbl>
+          {expSr1Roster && <>
+            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12, lineHeight: 1.5, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
+              Set up once a semester. Add your buildings first, then check the candidates you supervise and give each one a building and cooperating teacher.
+            </div>
+
+            <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", padding: "14px 16px", marginBottom: 14 }}>
+              <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 8 }}>Buildings this semester</div>
+              {sr1.buildings.length > 0 && <div style={{ marginBottom: 10 }}>
+                {sr1.buildings.map(b => {
+                  const inUse = sr1.roster.some(r => r.building_id === b.id) || sr1.windows.some(w => w.building_id === b.id);
+                  return <div key={b.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px solid #F5F4F0" }}>
+                    <span style={{ fontFamily: F.b, fontSize: 12 }}>{b.name}</span>
+                    {inUse
+                      ? <span style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>In use</span>
+                      : <button onClick={() => handleDeleteSr1Building(b)} aria-label={`Remove building ${b.name}`}
+                          style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, background: "#fff", color: "#C0392B", cursor: "pointer" }}>Remove</button>}
+                  </div>;
+                })}
+              </div>}
+              <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                <div>
+                  <label htmlFor="sr1-new-building" style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Add a building</label>
+                  <input id="sr1-new-building" type="text" placeholder="e.g. Lee's Summit North"
+                    onKeyDown={e => { if (e.key === 'Enter') handleAddSr1Building(); }}
+                    style={{ width: 260, padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12 }} />
+                </div>
+                <button onClick={handleAddSr1Building} disabled={sr1Busy}
+                  style={{ padding: "6px 14px", background: "#fff", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", cursor: "pointer" }}>Add</button>
+              </div>
+            </div>
+
+            <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", padding: "14px 16px", marginBottom: 18 }}>
+              <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 4 }}>Supervised candidates</div>
+              <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 10 }}>
+                {ck === "ECEL 4850"
+                  ? "Check the candidates you supervise in the field, then set each one's building and cooperating teacher."
+                  : "Switch the course selector at the top to ECEL 4850 to see the roster."}
+              </div>
+              {ck === "ECEL 4850" && (filteredStudents.length === 0
+                ? <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>No students enrolled.</div>
+                : filteredStudents.slice().sort((a, b) => (a.last || '').localeCompare(b.last || '')).map(s => {
+                    const sup = sr1.roster.find(r => r.profile_id === s.id);
+                    const on = !!sup;
+                    return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: "1px solid #F5F4F0", flexWrap: "wrap" }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", minWidth: 190 }}>
+                        <input type="checkbox" checked={on} onChange={() => handleToggleSr1Supervision(s, on)}
+                          aria-label={`${on ? 'Remove' : 'Add'} ${s.first} ${s.last} ${on ? 'from' : 'to'} practicum supervision`}
+                          style={{ width: 16, height: 16, cursor: "pointer", accentColor: c.color }} />
+                        <span style={{ fontFamily: F.b, fontSize: 12 }}>{s.last}, {s.first}</span>
+                      </label>
+                      {on && <>
+                        <select aria-label={`Placement building for ${s.first} ${s.last}`} value={sup.building_id || ''}
+                          onChange={e => handleSetSr1Field(s.id, 'building_id', e.target.value || null)}
+                          style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: "#fff" }}>
+                          <option value="">Choose building…</option>
+                          {sr1.buildings.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                        </select>
+                        <input type="text" defaultValue={sup.ct_name || ''} placeholder="Cooperating teacher"
+                          aria-label={`Cooperating teacher for ${s.first} ${s.last}`}
+                          onBlur={e => { if (e.target.value !== (sup.ct_name || '')) handleSetSr1Field(s.id, 'ct_name', e.target.value); }}
+                          style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, width: 170 }} />
+                      </>}
+                    </div>;
+                  }))}
+            </div>
+          </>}
+        </div>}
       </main>
+
+      {/* Practicum booking edit — the manual-adjustment path.
+          Overlaps are not blocked here; they are surfaced and require an
+          explicit acknowledgement, which sets instructor_override. That flag
+          exempts the row from the exclusion constraint while a database
+          trigger still stops candidates booking on top of it. */}
+      {sr1EditBooking && (() => {
+        const E = sr1EditBooking;
+        const bk = E.booking;
+        const who = sr1.roster.find(r => r.profile_id === bk.profile_id);
+        const nm = `${who?.profiles?.first_name || ''} ${who?.profiles?.last_name || ''}`.trim() || 'Candidate';
+        const set = (patch) => setSr1EditBooking(v => ({ ...v, ...patch }));
+
+        const lsISO = centralISO(E.date, E.lessonStart);
+        const leISO = centralISO(E.date, E.lessonEnd);
+        const rsISO = centralISO(E.date, E.reflStart);
+        const reISO = centralISO(E.date, E.reflEnd);
+        const valid = lsISO && leISO && rsISO && reISO
+          && new Date(leISO) > new Date(lsISO) && new Date(reISO) >= new Date(rsISO);
+
+        // Does this land on anyone else's time? Compare against every other
+        // active booking. Computed from the plain timestamp columns plus that
+        // booking's own buffer, rather than parsing the tstzrange text — the
+        // range's quoting is a Postgres serialization detail, not an API.
+        const bufferMin = bk.buffer_minutes ?? 10;
+        const spanEnd = valid ? new Date(new Date(reISO).getTime() + bufferMin * 60000) : null;
+        const clashes = !valid ? [] : sr1.bookings.filter(o => {
+          if (o.id === bk.id || o.status !== 'booked') return false;
+          const oS = new Date(o.lesson_start);
+          const oE = new Date(new Date(o.reflection_end).getTime() + (o.buffer_minutes ?? 10) * 60000);
+          return new Date(lsISO) < oE && oS < spanEnd;
+        });
+        const needsAck = clashes.length > 0;
+
+        return (
+          <div role="dialog" aria-modal="true" aria-labelledby="sr1-edit-title"
+            onClick={e => { if (e.target === e.currentTarget) setSr1EditBooking(null); }}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }}>
+            <div style={{ background: "#fff", borderRadius: 12, padding: "20px 22px", maxWidth: 520, width: "100%", maxHeight: "88vh", overflowY: "auto" }}>
+              <h2 id="sr1-edit-title" style={{ fontFamily: F.d, fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Edit observation</h2>
+              <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", marginBottom: 14 }}>{nm}{who?.ct_name ? ` · CT: ${who.ct_name}` : ''}</div>
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
+                <div>
+                  <label htmlFor="sr1-e-date" style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Date</label>
+                  <input id="sr1-e-date" type="date" value={E.date} onChange={e => set({ date: e.target.value })}
+                    style={{ padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12 }} />
+                </div>
+                <div>
+                  <label htmlFor="sr1-e-ls" style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Lesson starts</label>
+                  <input id="sr1-e-ls" type="time" value={E.lessonStart}
+                    onChange={e => set({ lessonStart: e.target.value })}
+                    style={{ padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12 }} />
+                </div>
+                <div>
+                  <label htmlFor="sr1-e-le" style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Lesson ends</label>
+                  <input id="sr1-e-le" type="time" value={E.lessonEnd}
+                    onChange={e => {
+                      // Keep reflection glued to the end of the lesson unless it
+                      // has been deliberately detached (reflStart !== lessonEnd).
+                      const wasAttached = E.reflStart === E.lessonEnd;
+                      const patch = { lessonEnd: e.target.value };
+                      if (wasAttached) {
+                        patch.reflStart = e.target.value;
+                        const mins = bk.reflection_minutes ?? 25;
+                        const rs = centralISO(E.date, e.target.value);
+                        if (rs) patch.reflEnd = new Date(new Date(rs).getTime() + mins * 60000)
+                          .toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: SR1_TZ });
+                      }
+                      set(patch);
+                    }}
+                    style={{ padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12 }} />
+                </div>
+              </div>
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
+                <div>
+                  <label htmlFor="sr1-e-rs" style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Reflection starts</label>
+                  <input id="sr1-e-rs" type="time" value={E.reflStart} onChange={e => set({ reflStart: e.target.value })}
+                    style={{ padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12 }} />
+                </div>
+                <div>
+                  <label htmlFor="sr1-e-re" style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Reflection ends</label>
+                  <input id="sr1-e-re" type="time" value={E.reflEnd} onChange={e => set({ reflEnd: e.target.value })}
+                    style={{ padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12 }} />
+                </div>
+              </div>
+              <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginBottom: 12 }}>
+                Reflection normally follows the lesson. Set a later start to move it elsewhere in the day.
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label htmlFor="sr1-e-topic" style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Topic</label>
+                <input id="sr1-e-topic" type="text" value={E.topic} onChange={e => set({ topic: e.target.value })}
+                  style={{ width: "100%", padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, boxSizing: "border-box" }} />
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label htmlFor="sr1-e-note" style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Note to yourself (optional)</label>
+                <input id="sr1-e-note" type="text" value={E.overrideNote} onChange={e => set({ overrideNote: e.target.value })}
+                  placeholder="e.g. Cut reflection to 15 to fit Jordan's 1:30 lesson"
+                  style={{ width: "100%", padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, boxSizing: "border-box" }} />
+              </div>
+
+              {valid && <div style={{ fontFamily: F.b, fontSize: 12, color: "#555", background: "#F9F8F5", borderRadius: 6, padding: "8px 10px", marginBottom: 12 }} role="status" aria-live="polite">
+                Lesson {fmtTimeRange(lsISO, leISO)} · Reflection {fmtTimeRange(rsISO, reISO)}
+              </div>}
+
+              {!valid && <div role="alert" style={{ fontFamily: F.b, fontSize: 12, color: "#C0392B", background: "#FDF2F2", border: "1px solid #F5C6CB", borderRadius: 6, padding: "8px 10px", marginBottom: 12 }}>
+                End times must come after start times.
+              </div>}
+
+              {needsAck && <div role="alert" style={{ fontFamily: F.b, fontSize: 12, color: "#856404", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 6, padding: "10px 12px", marginBottom: 12 }}>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>⚠ This overlaps {clashes.length} other booking{clashes.length === 1 ? '' : 's'}.</div>
+                {clashes.map(o => {
+                  const on = sr1.roster.find(r => r.profile_id === o.profile_id);
+                  const onm = `${on?.profiles?.first_name || ''} ${on?.profiles?.last_name || ''}`.trim() || 'another candidate';
+                  return <div key={o.id} style={{ marginBottom: 2 }}>{onm}: {fmtTimeRange(o.lesson_start, o.reflection_end)}</div>;
+                })}
+                <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, cursor: "pointer" }}>
+                  <input type="checkbox" checked={E.acknowledged} onChange={() => set({ acknowledged: !E.acknowledged })}
+                    style={{ width: 16, height: 16, cursor: "pointer", accentColor: "#856404" }} />
+                  <span style={{ fontWeight: 600 }}>I know — save anyway</span>
+                </label>
+              </div>}
+
+              <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, cursor: "pointer" }}>
+                <input type="checkbox" checked={E.notify} onChange={() => set({ notify: !E.notify })}
+                  style={{ width: 16, height: 16, cursor: "pointer", accentColor: c.color }} />
+                <span style={{ fontFamily: F.b, fontSize: 12, color: "#555" }}>Tell {nm.split(' ')[0]} the time changed</span>
+              </label>
+
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button onClick={() => setSr1EditBooking(null)}
+                  style={{ padding: "7px 14px", background: "#F0EEEA", color: "#555", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 12, cursor: "pointer" }}>Cancel</button>
+                <button disabled={sr1Busy || !valid || (needsAck && !E.acknowledged)}
+                  onClick={async () => {
+                    setSr1Busy(true);
+                    const moved = lsISO !== bk.lesson_start || leISO !== bk.lesson_end || reISO !== bk.reflection_end;
+                    const { error } = await instrUpdateSr1Booking(bk, {
+                      lesson_start: lsISO, lesson_end: leISO,
+                      reflection_start: rsISO, reflection_end: reISO,
+                      topic: E.topic.trim() || bk.topic,
+                      reflection_minutes: Math.round((new Date(reISO) - new Date(rsISO)) / 60000),
+                      buffer_minutes: bufferMin,
+                      instructor_override: needsAck ? true : bk.instructor_override,
+                      override_note: E.overrideNote
+                    }, E.notify && moved);
+                    setSr1Busy(false);
+                    if (error) { showToast('Could not save that change — please try again.'); return; }
+                    setSr1EditBooking(null);
+                    showToast(E.notify && moved ? 'Saved ✓ — candidate notified' : 'Saved ✓', 'success');
+                    refreshSr1();
+                  }}
+                  style={{ padding: "7px 14px", background: (sr1Busy || !valid || (needsAck && !E.acknowledged)) ? "#B0ADA8" : c.color, color: "#fff", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 12, fontWeight: 600, cursor: (sr1Busy || !valid || (needsAck && !E.acknowledged)) ? "default" : "pointer" }}>
+                  {sr1Busy ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Student Preview Modal */}
       {previewStudent && (() => {
