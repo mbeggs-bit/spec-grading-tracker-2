@@ -795,11 +795,15 @@ function TermSwitchDialog({ from, to, busy, selected, onToggleCourse, onCancel, 
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 120 }}
       onClick={() => { if (!busy) onCancel(); }}>
       <div ref={boxRef} onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, padding: 22, maxWidth: 400, width: "90%" }}>
-        <h2 id="term-dlg-title" style={{ fontFamily: F.d, fontSize: 16, fontWeight: 700, margin: "0 0 10px", color: "#1A1A1A" }}>Change semester to {to}?</h2>
+        <h2 id="term-dlg-title" style={{ fontFamily: F.d, fontSize: 16, fontWeight: 700, margin: "0 0 10px", color: "#1A1A1A" }}>{from === to ? `Courses you teach in ${to}` : `Change semester to ${to}?`}</h2>
         <div id="term-dlg-desc" style={{ fontFamily: F.b, fontSize: 12, color: "#555", lineHeight: 1.6, marginBottom: 16 }}>
+          {from === to ? (
+            <p style={{ margin: 0 }}>Check the courses you teach in {to}. Unchecking one hides it from your course list — nothing is deleted, and you can add it back here anytime.</p>
+          ) : (<>
           <p style={{ margin: "0 0 8px" }}>Everything from {from} — students, grades, checkoffs, due dates, tokens — will be hidden from every view in Lumos.</p>
           <p style={{ margin: "0 0 8px" }}>Nothing is deleted. Switching back to {from} restores it exactly as it is now.</p>
           <p style={{ margin: 0 }}>Students enrolled only in {from} will see &ldquo;This course has ended&rdquo; when they sign in. Export your grades first if you haven&rsquo;t.</p>
+          </>)}
         </div>
 
         <fieldset style={{ border: "1px solid #E8E6E1", borderRadius: 8, padding: "10px 12px", marginBottom: 16 }}>
@@ -823,7 +827,7 @@ function TermSwitchDialog({ from, to, busy, selected, onToggleCourse, onCancel, 
             style={{ padding: "7px 14px", background: "#F5F4F0", color: "#555", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 12, fontWeight: 600, cursor: busy ? "default" : "pointer" }}>Cancel</button>
           <button onClick={onConfirm} disabled={busy || !(selected || []).length}
             style={{ padding: "7px 14px", background: (busy || !(selected || []).length) ? "#B0ADA8" : "#CF202E", color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 12, fontWeight: 600, cursor: (busy || !(selected || []).length) ? "default" : "pointer" }}>
-            {busy ? "Changing…" : `Change to ${to}`}
+            {busy ? (from === to ? "Saving…" : "Changing…") : (from === to ? "Save courses" : `Change to ${to}`)}
           </button>
         </div>
       </div>
@@ -1070,12 +1074,13 @@ export default function App() {
     if (!termPending || termSwitching) return;
     setTermSwitching(true);
     const target = termPending;
+    const inPlace = target === termNow;
     try {
       const { error } = await setActiveTerm(target);
       if (error) { showToast('Could not change the term — please try again.'); return; }
 
       const { error: enrErr } = await ensureInstructorEnrollments(user.profile.id, target, termCourses);
-      if (enrErr) showToast('Term changed, but your course enrollments may need attention.', 'error');
+      if (enrErr) showToast('Saved, but your course enrollments may need attention.', 'error');
 
       await loadTermSettings(target);
       setCutoffDraft('');
@@ -1085,7 +1090,7 @@ export default function App() {
       setCourseCodes([]); setExpCodes(false); // collapse rather than show an empty expanded list
       const courses = await loadEnrollments(user.profile.id);
       setUser(u => ({ ...u, courses }));
-      showToast(`Now showing ${target}.`, 'success');
+      showToast(inPlace ? 'Course list updated.' : `Now showing ${target}.`, 'success');
     } finally {
       setTermSwitching(false);
     }
@@ -1631,6 +1636,23 @@ export default function App() {
                 {termOptions().map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
               <span style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>Showing {termNow}</span>
+            </div>
+            {/* Edit the course list for the term you are ALREADY on. The term
+                selector above only opens the dialog when the term CHANGES, so
+                without this there is no in-app way to add/remove a course from
+                the current term. Pre-check with the current term's courses and
+                open the same dialog in edit-in-place mode (termPending === termNow). */}
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #F0EEEA" }}>
+              <button
+                aria-label="Edit which courses I teach this semester"
+                onClick={async () => {
+                  const have = await loadInstructorCoursesForTerm(user.profile.id, termNow);
+                  setTermCourses(have.length ? have : Object.keys(COURSES));
+                  setTermPending(termNow);
+                }}
+                style={{ padding: "6px 12px", background: "#fff", color: "#555", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                Edit courses I teach in {termNow}
+              </button>
             </div>
           </div>
           </>}
