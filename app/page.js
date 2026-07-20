@@ -73,12 +73,39 @@ function termOptions() {
 // them would leave empty courses cluttering the switcher.
 // Idempotent: the (profile_id, course_key, term) unique constraint makes a
 // repeat a no-op.
+// Which courses the instructor is already set up to teach in a given term.
+// Used to pre-check the term-switch dialog so it reflects reality rather than
+// defaulting to everything.
+async function loadInstructorCoursesForTerm(profileId, term) {
+  const { data } = await supabase.from('enrollments')
+    .select('course_key, active').eq('profile_id', profileId).eq('term', term);
+  const rows = (data || []).filter(r => r.active !== false).map(r => r.course_key);
+  return rows;
+}
+
 async function ensureInstructorEnrollments(profileId, term, courseKeys) {
   const keys = (courseKeys && courseKeys.length) ? courseKeys : Object.keys(COURSES);
+
+  // Courses she IS teaching: create (or reactivate) the enrollment.
   const rows = keys.map(k => ({ profile_id: profileId, course_key: k, term, active: true }));
   const { error } = await supabase.from('enrollments')
-    .upsert(rows, { onConflict: 'profile_id,course_key,term', ignoreDuplicates: true });
-  return { error };
+    .upsert(rows, { onConflict: 'profile_id,course_key,term' });
+  if (error) return { error };
+
+  // Courses she is NOT teaching this term: soft-deactivate so they drop out of
+  // her course switcher. Deliberately NOT a delete —
+  //   * loadEnrollments already filters on active !== false, so hiding is enough;
+  //   * re-checking the course in a later switch restores it instantly;
+  //   * the SR1 Roster Setup picker requires the course to be selectable, and a
+  //     deleted enrollment would lock her out of adding candidates from it.
+  const off = Object.keys(COURSES).filter(k => !keys.includes(k));
+  if (off.length) {
+    const { error: offErr } = await supabase.from('enrollments')
+      .update({ active: false })
+      .eq('profile_id', profileId).eq('term', term).in('course_key', off);
+    if (offErr) return { error: offErr };
+  }
+  return { error: null };
 }
 
 // Copy the previous term's due dates into the current term. Section structure
@@ -1055,7 +1082,7 @@ export default function App() {
       setTermNow(target);
       setTermPending(null);
       setCk(null);           // drop back to the course list; old course is gone
-      setCourseCodes([]);
+      setCourseCodes([]); setExpCodes(false); // collapse rather than show an empty expanded list
       const courses = await loadEnrollments(user.profile.id);
       setUser(u => ({ ...u, courses }));
       showToast(`Now showing ${target}.`, 'success');
@@ -1570,6 +1597,74 @@ export default function App() {
               <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{co.assignments.length} assignments</div>
             </button>;
           })}
+
+
+          {/* ---- APP-WIDE SETTINGS (instructor) ----------------------------
+              Semester and Course Codes apply to the whole app, not to one
+              course, so they live here on the course list rather than inside a
+              course's Settings tab — where they used to render once per course
+              and read as though each course had its own semester. */}
+          {user.profile.role === 'instructor' && (
+            <div style={{ marginTop: 28, paddingTop: 24, borderTop: "1px solid #E8E6E1" }}>
+          {/* ---- SEMESTER ---- */}
+          <Lbl onClick={() => setExpSemester(!expSemester)} expanded={expSemester}>Semester · {termNow}</Lbl>
+          {expSemester && <>
+          <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12, lineHeight: 1.5, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
+            Lumos shows one semester at a time. Changing this hides the previous semester's students and coursework from every view — nothing is deleted, and switching back brings it all straight back. Export your grades before you move on.
+          </div>
+          <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", padding: "14px 16px", marginBottom: 18 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <label htmlFor="term-select" style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555" }}>Current semester</label>
+              <select
+                id="term-select"
+                aria-label="Current semester"
+                value={termNow}
+                onChange={async e => { const v = e.target.value; if (v !== termNow) { const have = await loadInstructorCoursesForTerm(user.profile.id, v); setTermCourses(have.length ? have : Object.keys(COURSES)); setTermPending(v); } }}
+                style={{ padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, background: "#fff", cursor: "pointer", outline: "none" }}>
+                {termOptions().map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+              <span style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>Showing {termNow}</span>
+            </div>
+          </div>
+          </>}
+
+          {/* ---- COURSE CODES ---- */}
+          <Lbl onClick={() => { const nx = !expCodes; setExpCodes(nx); if (nx && !courseCodes.length) openCourseCodes(); }} expanded={expCodes}>Course Codes</Lbl>
+          {expCodes && courseCodes.length > 0 && <div style={{ marginBottom: 18 }}>
+            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 10, lineHeight: 1.5, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
+              Students use these codes to sign up. Turn a code off when you no longer want new students joining with it.
+            </div>
+            <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
+              {courseCodes.map((cc, i) => <div key={cc.code} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderBottom: i < courseCodes.length - 1 ? "1px solid #F5F3EF" : "none" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600 }}>{cc.code}</div>
+                  <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 1 }}>{cc.label || cc.course_key}{cc.section ? ` · ${cc.section}` : ''}</div>
+                </div>
+                <span style={{ fontFamily: F.b, fontSize: 11, color: cc.active ? "#2D6A4F" : "#767676", minWidth: 52, textAlign: "right" }}>{cc.active ? "Active" : "Off"}</span>
+                <button role="switch" aria-checked={!!cc.active} aria-label={`${cc.code} sign-ups ${cc.active ? 'active' : 'off'}`}
+                  onClick={() => toggleCourseCode(cc.code, !cc.active)}
+                  style={{ width: 40, height: 22, borderRadius: 11, border: cc.active ? "none" : "1px solid #D0CEC9", background: cc.active ? "#2D6A4F" : "#F0EEEA", cursor: "pointer", padding: 0, position: "relative", flexShrink: 0 }}>
+                  <span aria-hidden="true" style={{ position: "absolute", top: 2, left: cc.active ? 20 : 2, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left .15s", boxShadow: "0 1px 2px rgba(0,0,0,.2)" }} />
+                </button>
+              </div>)}
+            </div>
+          </div>}
+          {expCodes && codesLoading && <div role="status" style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginBottom: 18 }}>Loading course codes…</div>}
+            </div>
+          )}
+
+          {/* The term-switch dialog must be mounted HERE as well: the semester
+              control now lives on this screen, which renders only while ck is
+              null — so the copy inside the course view is unreachable from here. */}
+          {termPending && <TermSwitchDialog
+            from={termNow}
+            to={termPending}
+            busy={termSwitching}
+            selected={termCourses}
+            onToggleCourse={(k) => setTermCourses(cs => cs.includes(k) ? cs.filter(x => x !== k) : [...cs, k])}
+            onCancel={() => setTermPending(null)}
+            onConfirm={confirmTermSwitch}
+          />}
 
           {/* Join another course — students only */}
           {user.profile.role === 'student' && (
@@ -3272,28 +3367,6 @@ export default function App() {
 
         {/* SETTINGS — Due dates for assignments and class prep */}
         {tab === "settings" && <div>
-          {/* ---- SEMESTER ---- */}
-          <Lbl onClick={() => setExpSemester(!expSemester)} expanded={expSemester}>Semester · {termNow}</Lbl>
-          {expSemester && <>
-          <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12, lineHeight: 1.5, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
-            Lumos shows one semester at a time. Changing this hides the previous semester's students and coursework from every view — nothing is deleted, and switching back brings it all straight back. Export your grades before you move on.
-          </div>
-          <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", padding: "14px 16px", marginBottom: 18 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <label htmlFor="term-select" style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555" }}>Current semester</label>
-              <select
-                id="term-select"
-                aria-label="Current semester"
-                value={termNow}
-                onChange={e => { const v = e.target.value; if (v !== termNow) { setTermCourses(Object.keys(COURSES)); setTermPending(v); } }}
-                style={{ padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, background: "#fff", cursor: "pointer", outline: "none" }}>
-                {termOptions().map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-              <span style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>Showing {termNow}</span>
-            </div>
-          </div>
-          </>}
-
           {/* ---- START-OF-SEMESTER SETUP ---- */}
           <Lbl onClick={() => setExpSetup(!expSetup)} expanded={expSetup}>Start-of-Semester Setup</Lbl>
           {expSetup && <>
@@ -3338,29 +3411,6 @@ export default function App() {
             </div>
           </div>
           </>}
-
-          {/* ---- COURSE CODES ---- */}
-          <Lbl onClick={() => { const nx = !expCodes; setExpCodes(nx); if (nx && !courseCodes.length) openCourseCodes(); }} expanded={expCodes}>Course Codes</Lbl>
-          {expCodes && courseCodes.length > 0 && <div style={{ marginBottom: 18 }}>
-            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 10, lineHeight: 1.5, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
-              Students use these codes to sign up. Turn a code off when you no longer want new students joining with it.
-            </div>
-            <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-              {courseCodes.map((cc, i) => <div key={cc.code} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderBottom: i < courseCodes.length - 1 ? "1px solid #F5F3EF" : "none" }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600 }}>{cc.code}</div>
-                  <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 1 }}>{cc.label || cc.course_key}{cc.section ? ` · ${cc.section}` : ''}</div>
-                </div>
-                <span style={{ fontFamily: F.b, fontSize: 11, color: cc.active ? "#2D6A4F" : "#767676", minWidth: 52, textAlign: "right" }}>{cc.active ? "Active" : "Off"}</span>
-                <button role="switch" aria-checked={!!cc.active} aria-label={`${cc.code} sign-ups ${cc.active ? 'active' : 'off'}`}
-                  onClick={() => toggleCourseCode(cc.code, !cc.active)}
-                  style={{ width: 40, height: 22, borderRadius: 11, border: cc.active ? "none" : "1px solid #D0CEC9", background: cc.active ? "#2D6A4F" : "#F0EEEA", cursor: "pointer", padding: 0, position: "relative", flexShrink: 0 }}>
-                  <span aria-hidden="true" style={{ position: "absolute", top: 2, left: cc.active ? 20 : 2, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left .15s", boxShadow: "0 1px 2px rgba(0,0,0,.2)" }} />
-                </button>
-              </div>)}
-            </div>
-          </div>}
-          {expCodes && codesLoading && <div role="status" style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginBottom: 18 }}>Loading course codes…</div>}
 
           <Lbl onClick={() => setExpManageStudents(!expManageStudents)} expanded={expManageStudents}>Manage Students</Lbl>
           {expManageStudents && <>
