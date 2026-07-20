@@ -1584,6 +1584,13 @@ export default function App() {
           <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>Select Course</h1>
           {user.courses.map(({ key: k, active }) => {
             const co = COURSES[k]; if (!co) return null;
+            // An inactive enrollment means different things by role:
+            //  - Instructor: she simply isn't teaching this course this term
+            //    (unchecked in the semester switch). Hide it entirely so the
+            //    course list matches the header dropdown at all times.
+            //  - Student: she was dropped from a course she had joined; show the
+            //    "no longer enrolled" tombstone so it isn't a silent disappearance.
+            if (!active && user.profile.role === 'instructor') return null;
             if (!active) return (
               <div key={k} aria-label={`${co.title} - no longer enrolled`} style={{ display: "block", width: "100%", padding: "16px 20px", marginBottom: 8, background: "#F5F4F0", border: "2px solid #E8E6E1", borderRadius: 10, textAlign: "left", position: "relative", overflow: "hidden", opacity: 0.7 }}>
                 <div style={{ fontFamily: F.d, fontSize: 16, fontWeight: 600, color: "#767676" }}>{co.title}</div>
@@ -2960,6 +2967,11 @@ export default function App() {
         <div style={{ maxWidth: 1100, margin: "0 auto", padding: "10px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button onClick={handleLogout} aria-label="Sign out" style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>← Sign out</button>
+            <div style={{ width: 1, height: 14, background: "#E0DDD8" }} aria-hidden="true" />
+            {/* Return to the course-list / setup screen, where the app-wide
+                Semester switch and Course Codes controls live. Rendering with
+                ck === null is what shows that screen, so this just clears ck. */}
+            <button onClick={() => { setCk(null); setSectionFilter('all'); }} aria-label="Back to course list and semester setup" style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>← Courses &amp; setup</button>
             <div style={{ width: 1, height: 14, background: "#E0DDD8" }} aria-hidden="true" />
             <select aria-label="Select course" value={ck} onChange={e => { setCk(e.target.value); setSectionFilter('all'); }} style={{ fontFamily: F.d, fontSize: 14, fontWeight: 600, border: "none", background: "none", cursor: "pointer", outline: "none" }}>{user.courses.filter(co => co.active).map(({ key: k }) => <option key={k} value={k}>{COURSES[k]?.short || k}</option>)}</select>
             {hasSections && <select aria-label="Filter by section" value={sectionFilter} onChange={e => setSectionFilter(e.target.value)} style={{ fontFamily: F.b, fontSize: 11, border: "1px solid #E0DDD8", borderRadius: 5, padding: "3px 8px", background: "#fff", cursor: "pointer", color: sectionFilter === 'all' ? "#6B6B6B" : c.color, fontWeight: sectionFilter === 'all' ? 400 : 600 }}>
