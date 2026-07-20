@@ -108,6 +108,19 @@ async function ensureInstructorEnrollments(profileId, term, courseKeys) {
   return { error: null };
 }
 
+// Instant per-toggle writer for the "edit courses I teach this term" flow.
+// Writes ONE enrollment row's active flag so a check/uncheck commits immediately
+// with no Save step. Same upsert shape/onConflict as ensureInstructorEnrollments,
+// so a re-checked course reactivates rather than duplicating. Soft-deactivate only
+// (never delete) for the same reasons noted there — restore-on-recheck and the
+// roster picker both need the row to persist.
+async function setInstructorCourseActive(profileId, term, courseKey, active) {
+  const { error } = await supabase.from('enrollments')
+    .upsert([{ profile_id: profileId, course_key: courseKey, term, active }],
+            { onConflict: 'profile_id,course_key,term' });
+  return { error };
+}
+
 // Copy the previous term's due dates into the current term. Section structure
 // and text notes are preserved; dates come across as-is for the instructor to
 // adjust. Items already set in the current term are left alone.
@@ -766,7 +779,7 @@ function GradeRing({ grade, size = 50, label = "" }) { const m = TM[grade] || TM
 // on open, returns it to whatever was focused before on close, traps Tab inside
 // while open, and cancels on Escape. role="dialog" + aria-modal so screen
 // readers treat the rest of the page as inert.
-function TermSwitchDialog({ from, to, busy, selected, onToggleCourse, onCancel, onConfirm }) {
+function TermSwitchDialog({ from, to, busy, selected, onToggleCourse, onCancel, onConfirm, instant }) {
   const boxRef = useRef(null);
   const cancelRef = useRef(null);
   const prevFocus = useRef(null);
@@ -798,7 +811,7 @@ function TermSwitchDialog({ from, to, busy, selected, onToggleCourse, onCancel, 
         <h2 id="term-dlg-title" style={{ fontFamily: F.d, fontSize: 16, fontWeight: 700, margin: "0 0 10px", color: "#1A1A1A" }}>{from === to ? `Courses you teach in ${to}` : `Change semester to ${to}?`}</h2>
         <div id="term-dlg-desc" style={{ fontFamily: F.b, fontSize: 12, color: "#555", lineHeight: 1.6, marginBottom: 16 }}>
           {from === to ? (
-            <p style={{ margin: 0 }}>Check the courses you teach in {to}. Unchecking one hides it from your course list — nothing is deleted, and you can add it back here anytime.</p>
+            <p style={{ margin: 0 }}>Check the courses you teach in {to}. {instant ? 'Each change saves automatically' : 'Unchecking one hides it from your course list'} — nothing is deleted, and you can add it back here anytime.</p>
           ) : (<>
           <p style={{ margin: "0 0 8px" }}>Everything from {from} — students, grades, checkoffs, due dates, tokens — will be hidden from every view in Lumos.</p>
           <p style={{ margin: "0 0 8px" }}>Nothing is deleted. Switching back to {from} restores it exactly as it is now.</p>
@@ -809,7 +822,7 @@ function TermSwitchDialog({ from, to, busy, selected, onToggleCourse, onCancel, 
         <fieldset style={{ border: "1px solid #E8E6E1", borderRadius: 8, padding: "10px 12px", marginBottom: 16 }}>
           <legend style={{ fontFamily: F.b, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: "#555", padding: "0 6px" }}>Teaching in {to}</legend>
           <p style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", margin: "0 0 8px", lineHeight: 1.5 }}>
-            Only the courses you check will appear in your course list. You can add others later by changing semester again.
+            {instant ? 'Only the courses you check appear in your course list. Changes save as you go.' : 'Only the courses you check will appear in your course list. You can add others later by changing semester again.'}
           </p>
           {Object.keys(COURSES).map(k => {
             const on = (selected || []).includes(k);
@@ -823,12 +836,17 @@ function TermSwitchDialog({ from, to, busy, selected, onToggleCourse, onCancel, 
           })}
         </fieldset>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          {instant ? (
+            <button ref={cancelRef} onClick={onCancel} disabled={busy}
+              style={{ padding: "7px 14px", background: "#CF202E", color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 12, fontWeight: 600, cursor: busy ? "default" : "pointer" }}>Done</button>
+          ) : (<>
           <button ref={cancelRef} onClick={onCancel} disabled={busy}
             style={{ padding: "7px 14px", background: "#F5F4F0", color: "#555", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 12, fontWeight: 600, cursor: busy ? "default" : "pointer" }}>Cancel</button>
           <button onClick={onConfirm} disabled={busy || !(selected || []).length}
             style={{ padding: "7px 14px", background: (busy || !(selected || []).length) ? "#B0ADA8" : "#CF202E", color: "#fff", border: "none", borderRadius: 5, fontFamily: F.b, fontSize: 12, fontWeight: 600, cursor: (busy || !(selected || []).length) ? "default" : "pointer" }}>
             {busy ? (from === to ? "Saving…" : "Changing…") : (from === to ? "Save courses" : `Change to ${to}`)}
           </button>
+          </>)}
         </div>
       </div>
     </div>
@@ -1067,6 +1085,44 @@ export default function App() {
   const refreshSr1 = () => loadSr1(false);
 
   // ---- TERM SWITCHING ----------------------------------------------------
+  // Instant per-toggle for editing the courses you teach in the term you are
+  // ALREADY on. No Save step: each check/uncheck commits immediately. Optimistic —
+  // local state and the course switcher update at once, DB write happens in the
+  // background, and we roll back with a toast if it fails. Guards against removing
+  // the last course (you must teach at least one) and against the currently open
+  // course vanishing under you.
+  async function toggleCourseThisTerm(k) {
+    const isOn = termCourses.includes(k);
+    const willOn = !isOn;
+    if (!willOn && termCourses.length <= 1) {
+      showToast('You need at least one course this semester.', 'error');
+      return;
+    }
+    // Optimistic local update.
+    const prevTermCourses = termCourses;
+    const nextTermCourses = willOn ? [...termCourses, k] : termCourses.filter(x => x !== k);
+    setTermCourses(nextTermCourses);
+    setUser(u => {
+      const exists = u.courses.some(co => co.key === k);
+      const courses = exists
+        ? u.courses.map(co => co.key === k ? { ...co, active: willOn } : co)
+        : [...u.courses, { key: k, active: willOn, section: null, term: termNow }];
+      return { ...u, courses };
+    });
+    // If you just turned off the course you're currently viewing, step back to
+    // the course list so you're not left inside a course you no longer teach.
+    if (!willOn && ck === k) { setCk(null); setSectionFilter('all'); }
+
+    const { error } = await setInstructorCourseActive(user.profile.id, termNow, k, willOn);
+    if (error) {
+      // Roll back both local states and tell her.
+      setTermCourses(prevTermCourses);
+      const fresh = await loadEnrollments(user.profile.id);
+      setUser(u => ({ ...u, courses: fresh }));
+      showToast('Could not save that change — please try again.', 'error');
+    }
+  }
+
   // Confirmed via dialog. On confirm: persist the new term, make sure the
   // instructor has an enrollment in every course for it (otherwise her course
   // list comes back empty), then reload from scratch.
@@ -1690,7 +1746,8 @@ export default function App() {
             to={termPending}
             busy={termSwitching}
             selected={termCourses}
-            onToggleCourse={(k) => setTermCourses(cs => cs.includes(k) ? cs.filter(x => x !== k) : [...cs, k])}
+            instant={termPending === termNow}
+            onToggleCourse={termPending === termNow ? toggleCourseThisTerm : (k) => setTermCourses(cs => cs.includes(k) ? cs.filter(x => x !== k) : [...cs, k])}
             onCancel={() => setTermPending(null)}
             onConfirm={confirmTermSwitch}
           />}
@@ -3549,7 +3606,8 @@ export default function App() {
             to={termPending}
             busy={termSwitching}
             selected={termCourses}
-            onToggleCourse={(k) => setTermCourses(cs => cs.includes(k) ? cs.filter(x => x !== k) : [...cs, k])}
+            instant={termPending === termNow}
+            onToggleCourse={termPending === termNow ? toggleCourseThisTerm : (k) => setTermCourses(cs => cs.includes(k) ? cs.filter(x => x !== k) : [...cs, k])}
             onCancel={() => setTermPending(null)}
             onConfirm={confirmTermSwitch}
           />}
