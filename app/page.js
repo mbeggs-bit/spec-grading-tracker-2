@@ -2031,7 +2031,16 @@ export default function App() {
           </div>
 
           {c.groups.map((grp, gi) => {
-            const grpA = grp.ids.map(id => c.assignments.find(a => a.id === id)).filter(Boolean);
+            const grpA = grp.ids.map(id => c.assignments.find(a => a.id === id)).filter(Boolean)
+              .map((a, idx) => ({ a, idx }))
+              .sort((x, y) => {
+                const dx = dueDates[x.a.id]?.date, dy = dueDates[y.a.id]?.date;
+                if (dx && dy) return dx.localeCompare(dy) || (x.idx - y.idx);
+                if (dx) return -1;
+                if (dy) return 1;
+                return x.idx - y.idx;
+              })
+              .map(o => o.a);
             return <div key={gi} style={{ marginBottom: 14 }}>
               {grp.name && <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: c.color, marginBottom: 5, padding: "0 4px" }}>{grp.name}{grp.tokenGroup ? <span style={{ fontWeight: 400, color: "#6B6B6B", fontSize: 11, marginLeft: 6 }}>(1 token covers entire project)</span> : ""}</div>}
               <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
@@ -2402,9 +2411,15 @@ export default function App() {
           </button>
           {expPrep && <div style={{ background: "#fff", border: "1px solid #E8E6E1", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 16px", marginBottom: 12 }}>
             <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 10, lineHeight: 1.5 }}>These do not affect your letter grade. They contribute to your educator disposition assessment.</div>
-            {c.classPrep.map((cp, i) => {
+            {c.classPrep.map((cp, idx) => ({ cp, idx })).sort((x, y) => {
+              const dx = dueDates[x.cp.id]?.date, dy = dueDates[y.cp.id]?.date;
+              if (dx && dy) return dx.localeCompare(dy) || (x.idx - y.idx);
+              if (dx) return -1;
+              if (dy) return 1;
+              return x.idx - y.idx;
+            }).map(o => o.cp).map((cp, i, arr) => {
               const done = !!myPrep[cp.id];
-              return <div key={cp.id} role="checkbox" aria-checked={done} aria-label={`${cp.name} - Completion`} tabIndex={0} onClick={() => handlePrep(cp.id)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePrep(cp.id); } }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 4px", borderBottom: i < c.classPrep.length - 1 ? "1px solid #F5F3EF" : "none", cursor: "pointer" }}
+              return <div key={cp.id} role="checkbox" aria-checked={done} aria-label={`${cp.name} - Completion`} tabIndex={0} onClick={() => handlePrep(cp.id)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePrep(cp.id); } }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 4px", borderBottom: i < arr.length - 1 ? "1px solid #F5F3EF" : "none", cursor: "pointer" }}
                 onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                 <div style={{ width: 20, height: 20, borderRadius: 5, border: done ? "none" : "2px solid #D0CEC9", background: done ? c.color : "#fff", display: "flex", alignItems: "center", justifyContent: "center", transition: "all .2s", flexShrink: 0 }}>{done && <span style={{ color: "#fff", fontSize: 11, fontWeight: 700 }}>✓</span>}</div>
                 <div style={{ flex: 1 }}>
