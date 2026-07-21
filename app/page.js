@@ -904,6 +904,7 @@ export default function App() {
   const [expSr1Windows, setExpSr1Windows] = useState(false); // collapsed by default
   const [expSr1Roster, setExpSr1Roster] = useState(false);
   const [expSr1Student, setExpSr1Student] = useState(false);
+  const [studentTab, setStudentTab] = useState('work'); // 'work' | 'prac' — only shown to SR1 candidates
   const [sr1OpenCandidate, setSr1OpenCandidate] = useState(null); // accordion
   const [sr1EditBooking, setSr1EditBooking] = useState(null);     // instructor edit modal
   const [sr1BookWindow, setSr1BookWindow] = useState(null);       // student booking modal
@@ -1959,6 +1960,32 @@ export default function App() {
             {grade === "A" && <div style={{ marginTop: 12, padding: "10px 14px", background: "#D4EDDA", borderRadius: 8, fontFamily: F.b, fontSize: 12, color: "#2D6A4F" }}>You're on the highest track — keep it up!</div>}
           </div>
 
+          {/* Student tab strip — only for candidates Dr. Beggs supervises in the
+              field (sr1.mySup). Everyone else sees no tabs and the coursework
+              renders exactly as before. Practicum booking (time-sensitive) gets
+              its own screen so it never gets lost in the coursework scroll. */}
+          {sr1.mySup && <div role="tablist" aria-label="Student sections" style={{ display: "flex", gap: 4, marginBottom: 18, borderBottom: "1px solid #E8E6E1" }}>
+            {[{ k: "work", l: "My Course Progress" }, { k: "prac", l: "Practicum Observations" }].map(t => {
+              const on = studentTab === t.k;
+              const hasNotif = t.k === "prac" && sr1.myNotifs.length > 0;
+              return <button role="tab" aria-selected={on} key={t.k}
+                onClick={() => setStudentTab(t.k)}
+                onKeyDown={e => {
+                  if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+                    e.preventDefault();
+                    setStudentTab(studentTab === "work" ? "prac" : "work");
+                  }
+                }}
+                style={{ position: "relative", padding: "9px 16px", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, color: on ? c.color : "#767676", background: "none", borderBottom: on ? `2px solid ${c.color}` : "2px solid transparent", marginBottom: -1 }}>
+                {t.l}
+                {hasNotif && <span aria-label={`${sr1.myNotifs.length} new notice${sr1.myNotifs.length !== 1 ? 's' : ''}`} style={{ position: "absolute", top: 3, right: 2, minWidth: 15, height: 15, borderRadius: 8, background: "#CF202E", color: "#fff", fontFamily: F.b, fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{sr1.myNotifs.length}</span>}
+              </button>;
+            })}
+          </div>}
+
+          {/* ===== COURSE PROGRESS (default view / 'work' tab) ===== */}
+          {(!sr1.mySup || studentTab === "work") && <>
+
           {/* Upcoming Due Dates Feed — Student */}
           {(() => {
             const today = new Date(); today.setHours(0,0,0,0);
@@ -2291,9 +2318,99 @@ export default function App() {
           </div>}
           </>}
 
+
+          {/* Class Prep */}
+          {(c.classPrep && c.classPrep.length > 0) && <>
+
+          <button aria-expanded={expPrep} onClick={() => setExpPrep(!expPrep)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "12px 16px", background: "#fff", border: "1px solid #E8E6E1", borderRadius: expPrep ? "10px 10px 0 0" : 10, cursor: "pointer", marginBottom: expPrep ? 0 : 12 }}>
+            <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555" }}>Class Preparation ({Object.values(myPrep).filter(Boolean).length}/{c.classPrep.length})</span>
+            <span style={{ fontSize: 11, color: "#767676", transform: expPrep ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
+          </button>
+          {expPrep && <div style={{ background: "#fff", border: "1px solid #E8E6E1", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 16px", marginBottom: 12 }}>
+            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 10, lineHeight: 1.5 }}>These do not affect your letter grade. They contribute to your educator disposition assessment.</div>
+            {c.classPrep.map((cp, idx) => ({ cp, idx })).sort((x, y) => {
+              const dx = dueDates[x.cp.id]?.date, dy = dueDates[y.cp.id]?.date;
+              if (dx && dy) return dx.localeCompare(dy) || (x.idx - y.idx);
+              if (dx) return -1;
+              if (dy) return 1;
+              return x.idx - y.idx;
+            }).map(o => o.cp).map((cp, i, arr) => {
+              const done = !!myPrep[cp.id];
+              return <div key={cp.id} role="checkbox" aria-checked={done} aria-label={`${cp.name} - Completion`} tabIndex={0} onClick={() => handlePrep(cp.id)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePrep(cp.id); } }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 4px", borderBottom: i < arr.length - 1 ? "1px solid #F5F3EF" : "none", cursor: "pointer" }}
+                onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <div style={{ width: 20, height: 20, borderRadius: 5, border: done ? "none" : "2px solid #D0CEC9", background: done ? c.color : "#fff", display: "flex", alignItems: "center", justifyContent: "center", transition: "all .2s", flexShrink: 0 }}>{done && <span style={{ color: "#fff", fontSize: 11, fontWeight: 700 }}>✓</span>}</div>
+                <div style={{ flex: 1 }}>
+                  <span style={{ fontFamily: F.b, fontSize: 12, color: done ? "#767676" : "#1A1A1A", textDecoration: done ? "line-through" : "none" }}>{cp.name}</span>
+                  {(dueDates[cp.id]?.date || dueDates[cp.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 11, color: done ? "#767676" : "#6B6B6B", marginTop: 1 }}>{dueDates[cp.id].date ? new Date(dueDates[cp.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[cp.id].date && dueDates[cp.id].label ? ' · ' : ''}{dueDates[cp.id].label || ''}</div>}
+                </div>
+                <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />
+              </div>;
+            })}
+          </div>}
+          </>}
+
+          {/* Grade Tracks */}
+          <button aria-expanded={expTracks} onClick={() => setExpTracks(!expTracks)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "12px 16px", background: "#fff", border: "1px solid #E8E6E1", borderRadius: expTracks ? "10px 10px 0 0" : 10, cursor: "pointer", marginBottom: expTracks ? 0 : 12 }}>
+            <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555" }}>Grade Track Requirements</span>
+            <span style={{ fontSize: 11, color: "#767676", transform: expTracks ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
+          </button>
+          {expTracks && <div style={{ background: "#fff", border: "1px solid #E8E6E1", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 16px", marginBottom: 12 }}>
+            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12 }}>Every item in a track must be checked off to earn that grade.</div>
+            {["A", "B", "C", "D"].map(g => { const t = c.tracks[g]; const m = TM[g]; const isOn = grade === g;
+              return <div key={g} style={{ marginBottom: 8, padding: "8px 12px", borderRadius: 8, border: isOn ? `2px solid ${m.c}` : "1px solid #F0EEEA", position: "relative" }}>
+                {isOn && <span style={{ position: "absolute", top: 6, right: 10, fontFamily: F.b, fontSize: 11, fontWeight: 700, color: "#fff", background: m.c, padding: "2px 6px", borderRadius: 6 }}>YOUR TRACK</span>}
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                  <div style={{ width: 20, height: 20, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 11, fontWeight: 700, color: m.c }}>{g}</div>
+                  <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#333" }}>{g} Track</span>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+                  {(t.req || []).map(id => { const a = c.assignments.find(x => x.id === id); const ch = !!myChecks[id];
+                    return <span key={id} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: ch ? "#D4EDDA" : "#fff", border: `1px solid ${ch ? "#B7DFBF" : "#E8E6E1"}`, color: ch ? "#2D6A4F" : "#555" }}>{ch ? "✓ " : ""}{a?.name || id}</span>;
+                  })}
+                </div>
+                {(t.pick || []).map((p, pi) => {
+                  const doneCount = p.from.filter(id => !!myChecks[id]).length;
+                  const needN = Math.min(p.need, p.from.length);
+                  return <div key={pi} style={{ marginTop: 4 }}>
+                    <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 2 }}>Any {needN} of {p.label || "the following"} ({doneCount}/{needN} done):</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+                      {p.from.map(id => { const a = c.assignments.find(x => x.id === id); const ch = !!myChecks[id];
+                        return <span key={id} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: ch ? "#D4EDDA" : "#fff", border: `1px solid ${ch ? "#B7DFBF" : "#E8E6E1"}`, color: ch ? "#2D6A4F" : "#555" }}>{ch ? "✓ " : ""}{a?.name || id}</span>;
+                      })}
+                    </div>
+                  </div>;
+                })}
+              </div>;
+            })}
+          </div>}
+
+          {/* Tokens */}
+          <button aria-expanded={expTokens} onClick={() => setExpTokens(!expTokens)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "12px 16px", background: "#fff", border: "1px solid #E8E6E1", borderRadius: expTokens ? "10px 10px 0 0" : 10, cursor: "pointer", marginBottom: 12 }}>
+            <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555" }}>Tokens ({tok.avail} available)</span>
+            <span style={{ fontSize: 11, color: "#767676", transform: expTokens ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
+          </button>
+          {expTokens && <div style={{ background: "#fff", border: "1px solid #E8E6E1", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 16px", marginBottom: 12 }}>
+            <div style={{ display: "flex", gap: 5, marginBottom: 8 }}>
+              {Array.from({ length: tok.total }).map((_, i) => <div key={i} style={{ width: 22, height: 22, borderRadius: "50%", background: i < tok.avail ? "#CF202E" : "#E0DDD8", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: i < tok.avail ? "#fff" : "#767676", fontWeight: 700 }}>{i < tok.avail ? "✦" : "✕"}</div>)}
+            </div>
+            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 6 }}>3 per course · {tok.used} used · {tok.avail} available</div>
+            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", lineHeight: 1.5 }}>
+              Use tokens to <strong style={{ color: "#555" }}>revise</strong> or <strong style={{ color: "#555" }}>submit late work</strong>.
+              {cutoff ? <><br /><strong style={{ color: "#C0392B" }}>Token period has ended ({cutoffLabelFor(ck)}).</strong></> : <><br /><span style={{ color: "#6B6B6B" }}>Cutoff: {cutoffLabelFor(ck)}</span></>}
+            </div>
+            {myToks.length > 0 && <div style={{ marginTop: 10 }}>
+              <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "#767676", marginBottom: 4 }}>History</div>
+              {myToks.map((t, i) => { const a = c.assignments.find(x => x.id === t.assignment_id) || (c.tokenGroups || {})[t.assignment_id]; return <div key={t.id} style={{ display: "flex", gap: 6, padding: "4px 0", borderBottom: i < myToks.length - 1 ? "1px solid #F5F3EF" : "none", fontFamily: F.b, fontSize: 11, color: "#777" }}><span style={{ color: "#767676" }}>✦</span>{t.token_type === "revision" ? "Revision" : "Late"}: {a?.name || t.assignment_id}<span style={{ marginLeft: "auto", fontSize: 11, color: "#767676" }}>{new Date(t.submitted_at).toLocaleDateString()}</span></div>; })}
+            </div>}
+          </div>}
+
+          {/* ===== end 'work' tab ===== */}
+          </>}
+
+          {/* ===== PRACTICUM OBSERVATIONS ('prac' tab) ===== */}
           {/* Practicum Observations — renders only for the candidates Dr. Beggs
               supervises in the field. Everyone else never sees it exist. */}
-          {sr1.mySup && <>
+          {sr1.mySup && studentTab === "prac" && <>
           {sr1.myNotifs.length > 0 && <div style={{ marginBottom: 12 }}>
             {sr1.myNotifs.map(n => (
               <div key={n.id} role="status" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, padding: "10px 14px", marginBottom: 6, background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 8 }}>
@@ -2402,90 +2519,6 @@ export default function App() {
           </div>}
           </>}
 
-          {/* Class Prep */}
-          {(c.classPrep && c.classPrep.length > 0) && <>
-
-          <button aria-expanded={expPrep} onClick={() => setExpPrep(!expPrep)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "12px 16px", background: "#fff", border: "1px solid #E8E6E1", borderRadius: expPrep ? "10px 10px 0 0" : 10, cursor: "pointer", marginBottom: expPrep ? 0 : 12 }}>
-            <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555" }}>Class Preparation ({Object.values(myPrep).filter(Boolean).length}/{c.classPrep.length})</span>
-            <span style={{ fontSize: 11, color: "#767676", transform: expPrep ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
-          </button>
-          {expPrep && <div style={{ background: "#fff", border: "1px solid #E8E6E1", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 16px", marginBottom: 12 }}>
-            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 10, lineHeight: 1.5 }}>These do not affect your letter grade. They contribute to your educator disposition assessment.</div>
-            {c.classPrep.map((cp, idx) => ({ cp, idx })).sort((x, y) => {
-              const dx = dueDates[x.cp.id]?.date, dy = dueDates[y.cp.id]?.date;
-              if (dx && dy) return dx.localeCompare(dy) || (x.idx - y.idx);
-              if (dx) return -1;
-              if (dy) return 1;
-              return x.idx - y.idx;
-            }).map(o => o.cp).map((cp, i, arr) => {
-              const done = !!myPrep[cp.id];
-              return <div key={cp.id} role="checkbox" aria-checked={done} aria-label={`${cp.name} - Completion`} tabIndex={0} onClick={() => handlePrep(cp.id)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePrep(cp.id); } }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 4px", borderBottom: i < arr.length - 1 ? "1px solid #F5F3EF" : "none", cursor: "pointer" }}
-                onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                <div style={{ width: 20, height: 20, borderRadius: 5, border: done ? "none" : "2px solid #D0CEC9", background: done ? c.color : "#fff", display: "flex", alignItems: "center", justifyContent: "center", transition: "all .2s", flexShrink: 0 }}>{done && <span style={{ color: "#fff", fontSize: 11, fontWeight: 700 }}>✓</span>}</div>
-                <div style={{ flex: 1 }}>
-                  <span style={{ fontFamily: F.b, fontSize: 12, color: done ? "#767676" : "#1A1A1A", textDecoration: done ? "line-through" : "none" }}>{cp.name}</span>
-                  {(dueDates[cp.id]?.date || dueDates[cp.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 11, color: done ? "#767676" : "#6B6B6B", marginTop: 1 }}>{dueDates[cp.id].date ? new Date(dueDates[cp.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[cp.id].date && dueDates[cp.id].label ? ' · ' : ''}{dueDates[cp.id].label || ''}</div>}
-                </div>
-                <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />
-              </div>;
-            })}
-          </div>}
-          </>}
-
-          {/* Grade Tracks */}
-          <button aria-expanded={expTracks} onClick={() => setExpTracks(!expTracks)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "12px 16px", background: "#fff", border: "1px solid #E8E6E1", borderRadius: expTracks ? "10px 10px 0 0" : 10, cursor: "pointer", marginBottom: expTracks ? 0 : 12 }}>
-            <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555" }}>Grade Track Requirements</span>
-            <span style={{ fontSize: 11, color: "#767676", transform: expTracks ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
-          </button>
-          {expTracks && <div style={{ background: "#fff", border: "1px solid #E8E6E1", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 16px", marginBottom: 12 }}>
-            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12 }}>Every item in a track must be checked off to earn that grade.</div>
-            {["A", "B", "C", "D"].map(g => { const t = c.tracks[g]; const m = TM[g]; const isOn = grade === g;
-              return <div key={g} style={{ marginBottom: 8, padding: "8px 12px", borderRadius: 8, border: isOn ? `2px solid ${m.c}` : "1px solid #F0EEEA", position: "relative" }}>
-                {isOn && <span style={{ position: "absolute", top: 6, right: 10, fontFamily: F.b, fontSize: 11, fontWeight: 700, color: "#fff", background: m.c, padding: "2px 6px", borderRadius: 6 }}>YOUR TRACK</span>}
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                  <div style={{ width: 20, height: 20, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 11, fontWeight: 700, color: m.c }}>{g}</div>
-                  <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#333" }}>{g} Track</span>
-                </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-                  {(t.req || []).map(id => { const a = c.assignments.find(x => x.id === id); const ch = !!myChecks[id];
-                    return <span key={id} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: ch ? "#D4EDDA" : "#fff", border: `1px solid ${ch ? "#B7DFBF" : "#E8E6E1"}`, color: ch ? "#2D6A4F" : "#555" }}>{ch ? "✓ " : ""}{a?.name || id}</span>;
-                  })}
-                </div>
-                {(t.pick || []).map((p, pi) => {
-                  const doneCount = p.from.filter(id => !!myChecks[id]).length;
-                  const needN = Math.min(p.need, p.from.length);
-                  return <div key={pi} style={{ marginTop: 4 }}>
-                    <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 2 }}>Any {needN} of {p.label || "the following"} ({doneCount}/{needN} done):</div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-                      {p.from.map(id => { const a = c.assignments.find(x => x.id === id); const ch = !!myChecks[id];
-                        return <span key={id} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: ch ? "#D4EDDA" : "#fff", border: `1px solid ${ch ? "#B7DFBF" : "#E8E6E1"}`, color: ch ? "#2D6A4F" : "#555" }}>{ch ? "✓ " : ""}{a?.name || id}</span>;
-                      })}
-                    </div>
-                  </div>;
-                })}
-              </div>;
-            })}
-          </div>}
-
-          {/* Tokens */}
-          <button aria-expanded={expTokens} onClick={() => setExpTokens(!expTokens)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "12px 16px", background: "#fff", border: "1px solid #E8E6E1", borderRadius: expTokens ? "10px 10px 0 0" : 10, cursor: "pointer", marginBottom: 12 }}>
-            <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555" }}>Tokens ({tok.avail} available)</span>
-            <span style={{ fontSize: 11, color: "#767676", transform: expTokens ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
-          </button>
-          {expTokens && <div style={{ background: "#fff", border: "1px solid #E8E6E1", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 16px", marginBottom: 12 }}>
-            <div style={{ display: "flex", gap: 5, marginBottom: 8 }}>
-              {Array.from({ length: tok.total }).map((_, i) => <div key={i} style={{ width: 22, height: 22, borderRadius: "50%", background: i < tok.avail ? "#CF202E" : "#E0DDD8", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: i < tok.avail ? "#fff" : "#767676", fontWeight: 700 }}>{i < tok.avail ? "✦" : "✕"}</div>)}
-            </div>
-            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 6 }}>3 per course · {tok.used} used · {tok.avail} available</div>
-            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", lineHeight: 1.5 }}>
-              Use tokens to <strong style={{ color: "#555" }}>revise</strong> or <strong style={{ color: "#555" }}>submit late work</strong>.
-              {cutoff ? <><br /><strong style={{ color: "#C0392B" }}>Token period has ended ({cutoffLabelFor(ck)}).</strong></> : <><br /><span style={{ color: "#6B6B6B" }}>Cutoff: {cutoffLabelFor(ck)}</span></>}
-            </div>
-            {myToks.length > 0 && <div style={{ marginTop: 10 }}>
-              <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "#767676", marginBottom: 4 }}>History</div>
-              {myToks.map((t, i) => { const a = c.assignments.find(x => x.id === t.assignment_id) || (c.tokenGroups || {})[t.assignment_id]; return <div key={t.id} style={{ display: "flex", gap: 6, padding: "4px 0", borderBottom: i < myToks.length - 1 ? "1px solid #F5F3EF" : "none", fontFamily: F.b, fontSize: 11, color: "#777" }}><span style={{ color: "#767676" }}>✦</span>{t.token_type === "revision" ? "Revision" : "Late"}: {a?.name || t.assignment_id}<span style={{ marginLeft: "auto", fontSize: 11, color: "#767676" }}>{new Date(t.submitted_at).toLocaleDateString()}</span></div>; })}
-            </div>}
-          </div>}
         </main>
       </div>
     );
@@ -3846,6 +3879,91 @@ export default function App() {
             Field observations for the candidates you supervise this semester. Publish a window for a building on a day you will be there, and candidates carve their own lesson time out of it after checking with their cooperating teacher. Two candidates can never hold overlapping times.
           </div>
 
+          {/* ---- CANDIDATES — the actionable bookings, kept at the top. Windows
+                  and Roster Setup are planning tools, collapsed below. ---- */}
+          <Lbl s={{ marginTop: 4 }}>Candidates</Lbl>
+          {sr1.roster.length === 0
+            ? <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", padding: "14px 16px", background: "#fff", border: "1px solid #E8E6E1", borderRadius: 10, marginBottom: 18 }}>
+                No supervised candidates this semester. Add them in Roster Setup below.
+              </div>
+            : <div style={{ marginBottom: 18 }}>
+                {sr1.roster.slice()
+                  .sort((a, b) => (a.profiles?.last_name || '').localeCompare(b.profiles?.last_name || ''))
+                  .map(r => {
+                    const nm = `${r.profiles?.first_name || ''} ${r.profiles?.last_name || ''}`.trim() || 'Unknown';
+                    const bn = sr1.buildings.find(b => b.id === r.building_id)?.name || "No building set";
+                    const active = sr1.bookings.filter(bk => bk.profile_id === r.profile_id && bk.status === 'booked');
+                    const now = Date.now();
+                    const upcoming = active.filter(bk => new Date(bk.lesson_start).getTime() >= now)
+                      .sort((a, b) => new Date(a.lesson_start) - new Date(b.lesson_start));
+                    const past = active.filter(bk => new Date(bk.lesson_start).getTime() < now)
+                      .sort((a, b) => new Date(b.lesson_start) - new Date(a.lesson_start));
+                    const next = upcoming[0] || null;
+                    const open = sr1OpenCandidate === r.profile_id;
+                    return <div key={r.id} style={{ background: "#fff", border: "1px solid #E8E6E1", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
+                      <button aria-expanded={open} onClick={() => setSr1OpenCandidate(open ? null : r.profile_id)}
+                        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "12px 16px", background: "none", border: "none", cursor: "pointer", textAlign: "left", gap: 10 }}>
+                        <span style={{ minWidth: 0 }}>
+                          <span style={{ display: "block", fontFamily: F.b, fontSize: 13, fontWeight: 600, color: "#1A1A1A" }}>{nm}</span>
+                          <span style={{ display: "block", fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>
+                            {bn}{r.ct_name ? ` · CT: ${r.ct_name}` : ''}
+                          </span>
+                        </span>
+                        <span style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                          <span style={{ fontFamily: F.b, fontSize: 11, color: next ? "#1A1A1A" : "#767676", fontWeight: next ? 600 : 400 }}>
+                            {next ? `Next: ${fmtDay(next.lesson_start)}, ${fmtTime(next.lesson_start)}` : "No upcoming"}
+                          </span>
+                          <Pill t={`${active.length} total`} />
+                          <span aria-hidden="true" style={{ fontSize: 12, color: "#767676", transform: open ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
+                        </span>
+                      </button>
+
+                      {open && <div style={{ padding: "0 16px 14px", borderTop: "1px solid #F0EEEA" }}>
+                        {active.length === 0 && <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", paddingTop: 12 }}>No observations scheduled.</div>}
+
+                        {upcoming.length > 0 && <div style={{ paddingTop: 12 }}>
+                          {upcoming.map((bk, i) => {
+                            const isNext = i === 0;
+                            return <div key={bk.id} style={{ padding: "10px 12px", marginBottom: 6, borderRadius: 8, background: isNext ? "#F0F8FF" : "#F9F8F5", borderLeft: isNext ? `3px solid ${c.color}` : "3px solid transparent" }}>
+                              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                                <div>
+                                  <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600 }}>
+                                    {isNext && <span aria-hidden="true" style={{ marginRight: 5 }}>●</span>}
+                                    {isNext && <span className="sr-only">Next scheduled. </span>}
+                                    {fmtDay(bk.lesson_start)}
+                                    {bk.instructor_override && <span style={{ marginLeft: 6 }}><Pill t="Adjusted" bg="#FFF3CD" c="#856404" /></span>}
+                                  </div>
+                                  <div style={{ fontFamily: F.b, fontSize: 11, color: "#555", marginTop: 2 }}>
+                                    Lesson {fmtTimeRange(bk.lesson_start, bk.lesson_end)} · Reflection {fmtTimeRange(bk.reflection_start, bk.reflection_end)}
+                                  </div>
+                                  <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 2 }}>{bk.topic}</div>
+                                  {bk.override_note && <div style={{ fontFamily: F.b, fontSize: 11, color: "#856404", marginTop: 2 }}>Note: {bk.override_note}</div>}
+                                </div>
+                                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                                  <button onClick={() => openSr1Edit(bk)} aria-label={`Edit observation for ${nm} on ${fmtDay(bk.lesson_start)}`}
+                                    style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, background: "#fff", color: "#555", cursor: "pointer" }}>✎ Edit</button>
+                                  <button onClick={() => handleInstrCancelSr1(bk, nm)} aria-label={`Cancel observation for ${nm} on ${fmtDay(bk.lesson_start)}`}
+                                    style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, background: "#fff", color: "#C0392B", cursor: "pointer" }}>Cancel</button>
+                                </div>
+                              </div>
+                            </div>;
+                          })}
+                        </div>}
+
+                        {past.length > 0 && <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #F0EEEA" }}>
+                          <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", marginBottom: 6 }}>Completed</div>
+                          {past.map(bk => <div key={bk.id} style={{ padding: "6px 12px", marginBottom: 4 }}>
+                            <div style={{ fontFamily: F.b, fontSize: 12, color: "#767676" }}>
+                              {fmtDay(bk.lesson_start)} · Lesson {fmtTimeRange(bk.lesson_start, bk.lesson_end)}
+                            </div>
+                            <div style={{ fontFamily: F.b, fontSize: 11, color: "#909090" }}>{bk.topic}</div>
+                          </div>)}
+                        </div>}
+                      </div>}
+                    </div>;
+                  })}
+              </div>}
+
           {/* ---- AVAILABILITY WINDOWS (collapsed by default) ---- */}
           <Lbl onClick={() => setExpSr1Windows(!expSr1Windows)} expanded={expSr1Windows}>Availability Windows</Lbl>
           {expSr1Windows && <>
@@ -3935,90 +4053,6 @@ export default function App() {
               </div>;
             })()}
           </>}
-
-          {/* ---- CANDIDATES — the page's main content ---- */}
-          <Lbl s={{ marginTop: 4 }}>Candidates</Lbl>
-          {sr1.roster.length === 0
-            ? <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", padding: "14px 16px", background: "#fff", border: "1px solid #E8E6E1", borderRadius: 10, marginBottom: 18 }}>
-                No supervised candidates this semester. Add them in Roster Setup below.
-              </div>
-            : <div style={{ marginBottom: 18 }}>
-                {sr1.roster.slice()
-                  .sort((a, b) => (a.profiles?.last_name || '').localeCompare(b.profiles?.last_name || ''))
-                  .map(r => {
-                    const nm = `${r.profiles?.first_name || ''} ${r.profiles?.last_name || ''}`.trim() || 'Unknown';
-                    const bn = sr1.buildings.find(b => b.id === r.building_id)?.name || "No building set";
-                    const active = sr1.bookings.filter(bk => bk.profile_id === r.profile_id && bk.status === 'booked');
-                    const now = Date.now();
-                    const upcoming = active.filter(bk => new Date(bk.lesson_start).getTime() >= now)
-                      .sort((a, b) => new Date(a.lesson_start) - new Date(b.lesson_start));
-                    const past = active.filter(bk => new Date(bk.lesson_start).getTime() < now)
-                      .sort((a, b) => new Date(b.lesson_start) - new Date(a.lesson_start));
-                    const next = upcoming[0] || null;
-                    const open = sr1OpenCandidate === r.profile_id;
-                    return <div key={r.id} style={{ background: "#fff", border: "1px solid #E8E6E1", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
-                      <button aria-expanded={open} onClick={() => setSr1OpenCandidate(open ? null : r.profile_id)}
-                        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "12px 16px", background: "none", border: "none", cursor: "pointer", textAlign: "left", gap: 10 }}>
-                        <span style={{ minWidth: 0 }}>
-                          <span style={{ display: "block", fontFamily: F.b, fontSize: 13, fontWeight: 600, color: "#1A1A1A" }}>{nm}</span>
-                          <span style={{ display: "block", fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>
-                            {bn}{r.ct_name ? ` · CT: ${r.ct_name}` : ''}
-                          </span>
-                        </span>
-                        <span style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-                          <span style={{ fontFamily: F.b, fontSize: 11, color: next ? "#1A1A1A" : "#767676", fontWeight: next ? 600 : 400 }}>
-                            {next ? `Next: ${fmtDay(next.lesson_start)}, ${fmtTime(next.lesson_start)}` : "No upcoming"}
-                          </span>
-                          <Pill t={`${active.length} total`} />
-                          <span aria-hidden="true" style={{ fontSize: 12, color: "#767676", transform: open ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
-                        </span>
-                      </button>
-
-                      {open && <div style={{ padding: "0 16px 14px", borderTop: "1px solid #F0EEEA" }}>
-                        {active.length === 0 && <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", paddingTop: 12 }}>No observations scheduled.</div>}
-
-                        {upcoming.length > 0 && <div style={{ paddingTop: 12 }}>
-                          {upcoming.map((bk, i) => {
-                            const isNext = i === 0;
-                            return <div key={bk.id} style={{ padding: "10px 12px", marginBottom: 6, borderRadius: 8, background: isNext ? "#F0F8FF" : "#F9F8F5", borderLeft: isNext ? `3px solid ${c.color}` : "3px solid transparent" }}>
-                              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                                <div>
-                                  <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600 }}>
-                                    {isNext && <span aria-hidden="true" style={{ marginRight: 5 }}>●</span>}
-                                    {isNext && <span className="sr-only">Next scheduled. </span>}
-                                    {fmtDay(bk.lesson_start)}
-                                    {bk.instructor_override && <span style={{ marginLeft: 6 }}><Pill t="Adjusted" bg="#FFF3CD" c="#856404" /></span>}
-                                  </div>
-                                  <div style={{ fontFamily: F.b, fontSize: 11, color: "#555", marginTop: 2 }}>
-                                    Lesson {fmtTimeRange(bk.lesson_start, bk.lesson_end)} · Reflection {fmtTimeRange(bk.reflection_start, bk.reflection_end)}
-                                  </div>
-                                  <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 2 }}>{bk.topic}</div>
-                                  {bk.override_note && <div style={{ fontFamily: F.b, fontSize: 11, color: "#856404", marginTop: 2 }}>Note: {bk.override_note}</div>}
-                                </div>
-                                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                                  <button onClick={() => openSr1Edit(bk)} aria-label={`Edit observation for ${nm} on ${fmtDay(bk.lesson_start)}`}
-                                    style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, background: "#fff", color: "#555", cursor: "pointer" }}>✎ Edit</button>
-                                  <button onClick={() => handleInstrCancelSr1(bk, nm)} aria-label={`Cancel observation for ${nm} on ${fmtDay(bk.lesson_start)}`}
-                                    style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, background: "#fff", color: "#C0392B", cursor: "pointer" }}>Cancel</button>
-                                </div>
-                              </div>
-                            </div>;
-                          })}
-                        </div>}
-
-                        {past.length > 0 && <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #F0EEEA" }}>
-                          <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", marginBottom: 6 }}>Completed</div>
-                          {past.map(bk => <div key={bk.id} style={{ padding: "6px 12px", marginBottom: 4 }}>
-                            <div style={{ fontFamily: F.b, fontSize: 12, color: "#767676" }}>
-                              {fmtDay(bk.lesson_start)} · Lesson {fmtTimeRange(bk.lesson_start, bk.lesson_end)}
-                            </div>
-                            <div style={{ fontFamily: F.b, fontSize: 11, color: "#909090" }}>{bk.topic}</div>
-                          </div>)}
-                        </div>}
-                      </div>}
-                    </div>;
-                  })}
-              </div>}
 
           {/* ---- ROSTER SETUP (collapsed) ---- */}
           <Lbl onClick={() => setExpSr1Roster(!expSr1Roster)} expanded={expSr1Roster}>Roster Setup</Lbl>
