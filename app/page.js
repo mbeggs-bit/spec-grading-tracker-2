@@ -1906,44 +1906,44 @@ export default function App() {
       <div style={{ overflowX: "hidden" }}>
         <a href="#main-content" className="skip-link">Skip to main content</a>
         <header style={{ borderBottom: "1px solid #E8E6E1", background: "#fff", position: "sticky", top: 0, zIndex: 10 }}>
-          <div style={{ maxWidth: 780, margin: "0 auto", padding: "10px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+          <div style={{ maxWidth: 920, margin: "0 auto", padding: "10px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <button onClick={() => setCk(null)} aria-label="Back to course list" style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>← Back</button>
+              <button onClick={() => setCk(null)} aria-label="Back to course list" style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 13, color: "#6B6B6B" }}>← Back</button>
               <div style={{ width: 1, height: 14, background: "#E0DDD8" }} aria-hidden="true" />
-              <span style={{ fontFamily: F.d, fontSize: 14, fontWeight: 600 }}>{c.short}</span>
+              <span style={{ fontFamily: F.d, fontSize: 16, fontWeight: 600 }}>{c.short}</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <a href={CAL_LINK} target="_blank" rel="noopener noreferrer" aria-label="Schedule a meeting with Dr. Beggs" style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 12px", background: "#FFF5F5", border: "1px solid #FCDEDE", borderRadius: 7, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#CF202E", textDecoration: "none" }}>📅 Meet with Dr. Beggs</a>
-              <a href="mailto:mbeggs@ucmo.edu" aria-label="Email Dr. Beggs" style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 12px", background: "#F5F5F5", border: "1px solid #E8E6E1", borderRadius: 7, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", textDecoration: "none" }}>✉ Email Dr. Beggs</a>
-              <button onClick={handleLogout} aria-label="Sign out" style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", background: "none", border: "1px solid #E0DDD8", borderRadius: 4, padding: "3px 8px", cursor: "pointer" }}>Sign out</button>
+              <a href={CAL_LINK} target="_blank" rel="noopener noreferrer" aria-label="Schedule a meeting with Dr. Beggs" style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 12px", background: "#FFF5F5", border: "1px solid #FCDEDE", borderRadius: 7, fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#CF202E", textDecoration: "none" }}>📅 Meet with Dr. Beggs</a>
+              <a href="mailto:mbeggs@ucmo.edu" aria-label="Email Dr. Beggs" style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 12px", background: "#F5F5F5", border: "1px solid #E8E6E1", borderRadius: 7, fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", textDecoration: "none" }}>✉ Email Dr. Beggs</a>
+              <button onClick={handleLogout} aria-label="Sign out" style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", background: "none", border: "1px solid #E0DDD8", borderRadius: 4, padding: "3px 8px", cursor: "pointer" }}>Sign out</button>
             </div>
           </div>
         </header>
 
-        <main id="main-content" style={{ maxWidth: 780, margin: "0 auto", padding: "22px 20px" }}>
+        <main id="main-content" style={{ maxWidth: 920, margin: "0 auto", padding: "22px 20px" }}>
           {/* Dashboard */}
           <div style={{ background: "#fff", border: `2px solid ${(TM[grade] || TM.F).c}`, borderRadius: 14, padding: "22px", marginBottom: 18 }}>
             <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
               <GradeRing grade={grade} size={54} />
               <div style={{ flex: 1, minWidth: 180 }}>
-                <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "#6B6B6B", marginBottom: 2 }}>
+                <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "#6B6B6B", marginBottom: 2 }}>
                   {grade === "early" ? "Status" : "Based on what's been assigned so far"}
                 </div>
                 <div style={{ fontFamily: F.d, fontSize: 22, fontWeight: 700, color: (TM[grade] || TM.F).c }}>
                   {grade === "early" ? "Getting Started" : grade === "F" ? "You're on F track" : `You're on ${grade} track`}
                 </div>
-                <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{relAssignments.filter(id => myChecks[id]).length} of {relAssignments.length} checked off</div>
+                <div style={{ fontFamily: F.b, fontSize: 12, color: "#767676", marginTop: 1 }}>{relAssignments.filter(id => myChecks[id]).length} of {relAssignments.length} checked off</div>
               </div>
               <div style={{ textAlign: "center", padding: "6px 14px", background: "#F9F8F5", borderRadius: 8 }}>
                 <div style={{ display: "flex", gap: 3, justifyContent: "center", marginBottom: 3 }} aria-hidden="true">
                   {Array.from({ length: tok.total }).map((_, i) => <div key={i} style={{ width: 14, height: 14, borderRadius: "50%", background: i < tok.avail ? "#CF202E" : "#E0DDD8", fontSize: 9, color: i < tok.avail ? "#fff" : "#767676", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>✦</div>)}
                 </div>
-                <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }} aria-label={`${tok.avail} tokens available, ${tok.used} used`}>{tok.avail} token{tok.avail !== 1 ? "s" : ""}</div>
+                <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }} aria-label={`${tok.avail} tokens available, ${tok.used} used`}>{tok.avail} token{tok.avail !== 1 ? "s" : ""}</div>
               </div>
             </div>
             {target && blockers.length > 0 && <div style={{ marginTop: 14, padding: "10px 14px", background: "#FFFCF5", borderRadius: 8, borderLeft: `3px solid ${(TM[target] || TM.F).c}` }}>
-              <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: (TM[target] || TM.F).c, marginBottom: 3 }}>To reach {target} track:</div>
-              <div style={{ fontFamily: F.b, fontSize: 12, color: "#666", lineHeight: 1.6 }}>
+              <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: (TM[target] || TM.F).c, marginBottom: 3 }}>To reach {target} track:</div>
+              <div style={{ fontFamily: F.b, fontSize: 13, color: "#666", lineHeight: 1.6 }}>
                 {blockers.map((id, i) => {
                   const a = c.assignments.find(x => x.id === id);
                   const isMastery = a?.eval === "mastery";
@@ -1956,8 +1956,8 @@ export default function App() {
                 })}
               </div>
             </div>}
-            {grade === "early" && <div style={{ marginTop: 12, padding: "10px 14px", background: "#F3F4F6", borderRadius: 8, fontFamily: F.b, fontSize: 12, color: "#6B7280" }}>Check off your first assignment to see your grade track!</div>}
-            {grade === "A" && <div style={{ marginTop: 12, padding: "10px 14px", background: "#D4EDDA", borderRadius: 8, fontFamily: F.b, fontSize: 12, color: "#2D6A4F" }}>You're on the highest track — keep it up!</div>}
+            {grade === "early" && <div style={{ marginTop: 12, padding: "10px 14px", background: "#F3F4F6", borderRadius: 8, fontFamily: F.b, fontSize: 13, color: "#6B7280" }}>Check off your first assignment to see your grade track!</div>}
+            {grade === "A" && <div style={{ marginTop: 12, padding: "10px 14px", background: "#D4EDDA", borderRadius: 8, fontFamily: F.b, fontSize: 13, color: "#2D6A4F" }}>You're on the highest track — keep it up!</div>}
           </div>
 
           {/* Student tab strip — only for candidates Dr. Beggs supervises in the
@@ -1976,7 +1976,7 @@ export default function App() {
                     setStudentTab(studentTab === "work" ? "prac" : "work");
                   }
                 }}
-                style={{ position: "relative", padding: "9px 16px", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, color: on ? c.color : "#767676", background: "none", borderBottom: on ? `2px solid ${c.color}` : "2px solid transparent", marginBottom: -1 }}>
+                style={{ position: "relative", padding: "9px 16px", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 15, fontWeight: 600, color: on ? c.color : "#767676", background: "none", borderBottom: on ? `2px solid ${c.color}` : "2px solid transparent", marginBottom: -1 }}>
                 {t.l}
                 {hasNotif && <span aria-label={`${sr1.myNotifs.length} new notice${sr1.myNotifs.length !== 1 ? 's' : ''}`} style={{ position: "absolute", top: 3, right: 2, minWidth: 15, height: 15, borderRadius: 8, background: "#CF202E", color: "#fff", fontFamily: F.b, fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{sr1.myNotifs.length}</span>}
               </button>;
@@ -2029,8 +2029,8 @@ export default function App() {
             if (feedItems.length === 0) return null;
             return <div role="region" aria-label="Upcoming due dates" style={{ marginBottom: 14, background: "#fff", borderRadius: 10, border: `1px solid ${c.colorLight || '#E8E6E1'}`, overflow: "hidden" }}>
               <div style={{ padding: "10px 14px", background: "#FAFAF7", borderBottom: "1px solid #F0EEEA", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <h2 style={{ fontFamily: F.b, fontSize: 12, fontWeight: 700, color: "#555", margin: 0 }}>📋 Due This Week</h2>
-                <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{feedItems.length} item{feedItems.length !== 1 ? 's' : ''}</span>
+                <h2 style={{ fontFamily: F.b, fontSize: 13, fontWeight: 700, color: "#555", margin: 0 }}>📋 Due This Week</h2>
+                <span style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>{feedItems.length} item{feedItems.length !== 1 ? 's' : ''}</span>
               </div>
               {feedItems.map((item, ii) => {
                 const dDate = new Date(item.date + 'T00:00:00');
@@ -2039,8 +2039,8 @@ export default function App() {
                 const urgColor = daysUntil <= 0 ? { bg: "#FFF3CD", c: "#856404" } : daysUntil <= 2 ? { bg: "#FAEEDA", c: "#633806" } : { bg: "#F5F4F0", c: "#666" };
                 return <div key={ii} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderBottom: ii < feedItems.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                   <Pill t={urgLabel} bg={urgColor.bg} c={urgColor.c} />
-                  <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", flex: 1 }}>{item.name}</span>
-                  {item.label && <span style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>{item.label}</span>}
+                  <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, color: "#1A1A1A", flex: 1 }}>{item.name}</span>
+                  {item.label && <span style={{ fontFamily: F.b, fontSize: 12, color: "#767676" }}>{item.label}</span>}
                   {item.type === 'teaching' && <Pill t="Plan" bg="#DCEEFB" c="#1565C0" />}
                   {item.type === 'mastery' && <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />}
                   {item.type === 'completion' && <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
@@ -2052,7 +2052,7 @@ export default function App() {
 
           {/* Checklist */}
           <Lbl>My Progress</Lbl>
-          <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", marginBottom: 14, lineHeight: 1.6, padding: "10px 14px", background: "#F9F8F5", borderRadius: 8 }}>
+          <div style={{ fontFamily: F.b, fontSize: 13, color: "#6B6B6B", marginBottom: 14, lineHeight: 1.6, padding: "10px 14px", background: "#F9F8F5", borderRadius: 8 }}>
             <strong style={{ color: "#555" }}>Completion items:</strong> Check off once you've submitted your work.<br />
             <strong style={{ color: "#555" }}>Mastery items:</strong> Unlocked once Dr. Beggs has reviewed your work. Check off when you've met the specs.
           </div>
@@ -2069,7 +2069,7 @@ export default function App() {
               })
               .map(o => o.a);
             return <div key={gi} style={{ marginBottom: 14 }}>
-              {grp.name && <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: c.color, marginBottom: 5, padding: "0 4px" }}>{grp.name}{grp.tokenGroup ? <span style={{ fontWeight: 400, color: "#6B6B6B", fontSize: 11, marginLeft: 6 }}>(1 token covers entire project)</span> : ""}</div>}
+              {grp.name && <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: c.color, marginBottom: 5, padding: "0 4px" }}>{grp.name}{grp.tokenGroup ? <span style={{ fontWeight: 400, color: "#6B6B6B", fontSize: 12, marginLeft: 6 }}>(1 token covers entire project)</span> : ""}</div>}
               <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
                 {grpA.map((a, i) => {
                   const isChecked = !!myChecks[a.id];
@@ -2088,19 +2088,19 @@ export default function App() {
                         <span style={{ fontSize: 10, color: "#B0ADA8" }}>🔒</span>
                       </div>
                       <div style={{ flex: 1 }}>
-                        <span style={{ fontFamily: F.b, fontSize: 13, color: "#555" }}>{a.name}</span>
-                        {(dueDates[a.id]?.date || dueDates[a.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 1 }}>{dueDates[a.id].date ? new Date(dueDates[a.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[a.id].date && dueDates[a.id].label ? ' · ' : ''}{dueDates[a.id].label || ''}</div>}
+                        <span style={{ fontFamily: F.b, fontSize: 15, color: "#555" }}>{a.name}</span>
+                        {(dueDates[a.id]?.date || dueDates[a.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 12, color: "#767676", marginTop: 1 }}>{dueDates[a.id].date ? new Date(dueDates[a.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[a.id].date && dueDates[a.id].label ? ' · ' : ''}{dueDates[a.id].label || ''}</div>}
                         {isNS
-                          ? <div style={{ fontFamily: F.b, fontSize: 11, color: "#C0392B", marginTop: 2, fontStyle: "italic" }}>No submission recorded. If you believe this is an error, contact Dr. Beggs.</div>
-                          : <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 2, fontStyle: "italic" }}>Locked until Dr. Beggs reviews your work</div>
+                          ? <div style={{ fontFamily: F.b, fontSize: 12, color: "#C0392B", marginTop: 2, fontStyle: "italic" }}>No submission recorded. If you believe this is an error, contact Dr. Beggs.</div>
+                          : <div style={{ fontFamily: F.b, fontSize: 12, color: "#767676", marginTop: 2, fontStyle: "italic" }}>Locked until Dr. Beggs reviews your work</div>
                         }
                       </div>
                       <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />
                     </div>
-                    {(() => { const ts = tokenStatusFor(a); return ts ? <div role="status" style={{ margin: "0 16px 10px 48px", padding: "5px 10px", background: "#F9F8F5", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: "#555" }}>✦ {ts.text}</div> : null; })()}
+                    {(() => { const ts = tokenStatusFor(a); return ts ? <div role="status" style={{ margin: "0 16px 10px 48px", padding: "5px 10px", background: "#F9F8F5", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 12, color: "#555" }}>✦ {ts.text}</div> : null; })()}
                     {showTokenBtn(a) && isFirstInGroup(a) && <div style={{ padding: "0 16px 10px 48px" }}>
                       <button onClick={(e) => { e.stopPropagation(); const tt = getTokenTarget(a.id, ck); setModal(tt); setTfType("late"); setTfNote(""); setTfLink(""); setTfExtra(""); }}
-                        style={{ padding: "4px 12px", background: "#FFFCF5", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>
+                        style={{ padding: "4px 12px", background: "#FFFCF5", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#856404", cursor: "pointer" }}>
                         Submit a token{a.tokenGroup ? " (entire project)" : ""}
                       </button>
                     </div>}
@@ -2113,20 +2113,20 @@ export default function App() {
                       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCheck(a.id); } }}
                       onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                       <div style={{ width: 22, height: 22, borderRadius: 6, border: isChecked ? "none" : "2px solid #D0CEC9", background: isChecked ? "#CF202E" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", transition: "all .2s", flexShrink: 0 }}>
-                        {isChecked && <span style={{ color: "#fff", fontSize: 13, fontWeight: 700 }}>✓</span>}
+                        {isChecked && <span style={{ color: "#fff", fontSize: 15, fontWeight: 700 }}>✓</span>}
                       </div>
                       <div style={{ flex: 1 }}>
-                        <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, color: isChecked ? "#767676" : "#1A1A1A", textDecoration: isChecked ? "line-through" : "none", textDecorationColor: "#DDD" }}>{a.name}</span>
-                        {(dueDates[a.id]?.date || dueDates[a.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 11, color: isChecked ? "#767676" : "#6B6B6B", marginTop: 1 }}>{dueDates[a.id].date ? new Date(dueDates[a.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[a.id].date && dueDates[a.id].label ? ' · ' : ''}{dueDates[a.id].label || ''}</div>}
-                        {isMastery && instrStatus && instrStatus !== 'not_submitted' && !isChecked && <div style={{ fontFamily: F.b, fontSize: 11, color: isRevision ? "#856404" : "#2D6A4F", marginTop: 2 }}>{`Dr. Beggs left feedback${instrDate ? ` on ${instrDate}` : ''} — please review it before checking off`}</div>}
+                        <span style={{ fontFamily: F.b, fontSize: 15, fontWeight: 500, color: isChecked ? "#767676" : "#1A1A1A", textDecoration: isChecked ? "line-through" : "none", textDecorationColor: "#DDD" }}>{a.name}</span>
+                        {(dueDates[a.id]?.date || dueDates[a.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 12, color: isChecked ? "#767676" : "#6B6B6B", marginTop: 1 }}>{dueDates[a.id].date ? new Date(dueDates[a.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[a.id].date && dueDates[a.id].label ? ' · ' : ''}{dueDates[a.id].label || ''}</div>}
+                        {isMastery && instrStatus && instrStatus !== 'not_submitted' && !isChecked && <div style={{ fontFamily: F.b, fontSize: 12, color: isRevision ? "#856404" : "#2D6A4F", marginTop: 2 }}>{`Dr. Beggs left feedback${instrDate ? ` on ${instrDate}` : ''} — please review it before checking off`}</div>}
                       </div>
                       {isMastery && <Pill t="Mastery" bg="#FFF0F0" c="#C0392B" />}
                       {a.eval === "completion" && <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />}
                     </div>
-                    {(() => { const ts = tokenStatusFor(a); return ts ? <div role="status" style={{ margin: "0 16px 10px 48px", padding: "5px 10px", background: "#F9F8F5", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: "#555" }}>✦ {ts.text}</div> : null; })()}
+                    {(() => { const ts = tokenStatusFor(a); return ts ? <div role="status" style={{ margin: "0 16px 10px 48px", padding: "5px 10px", background: "#F9F8F5", border: "1px solid #E8E6E1", borderRadius: 5, fontFamily: F.b, fontSize: 12, color: "#555" }}>✦ {ts.text}</div> : null; })()}
                     {showTokenBtn(a) && isFirstInGroup(a) && <div style={{ padding: "0 16px 10px 48px" }}>
                       <button onClick={(e) => { e.stopPropagation(); const tt = getTokenTarget(a.id, ck); setModal(tt); setTfType("revision"); setTfNote(""); setTfLink(""); setTfExtra(""); }}
-                        style={{ padding: "4px 12px", background: "#FFFCF5", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>
+                        style={{ padding: "4px 12px", background: "#FFFCF5", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#856404", cursor: "pointer" }}>
                         Submit a token{a.tokenGroup ? " (entire project)" : ""}
                       </button>
                     </div>}
@@ -2166,8 +2166,8 @@ export default function App() {
               style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.3)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20 }}>
               <div style={{ background: "#fff", borderRadius: 14, padding: "22px", maxWidth: 440, width: "100%", maxHeight: "88vh", overflowY: "auto", boxShadow: "0 12px 40px rgba(0,0,0,.15)" }}>
                 <h2 id="sr1-book-title" style={{ fontFamily: F.d, fontSize: 18, fontWeight: 600, marginBottom: 3 }}>Book an observation</h2>
-                <div style={{ fontFamily: F.b, fontSize: 12, color: "#555", marginBottom: 4 }}>{fmtDateOnly(w.window_date)}</div>
-                <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 14 }}>
+                <div style={{ fontFamily: F.b, fontSize: 13, color: "#555", marginBottom: 4 }}>{fmtDateOnly(w.window_date)}</div>
+                <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", marginBottom: 14 }}>
                   Dr. Beggs is available {fmtTime(winStart)} – {fmtTime(winEnd)}{w.note ? ` · ${w.note}` : ''}
                 </div>
 
@@ -2175,43 +2175,43 @@ export default function App() {
                   const gaps = sr1OpenGaps(w, sr1.taken).filter(g => !sr1TooSoon(g.start.toISOString()));
                   if (gaps.length === 0) return null;
                   return <div style={{ marginBottom: 14, padding: "8px 10px", background: "#F9F8F5", borderRadius: 6 }}>
-                    <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Times still open</div>
+                    <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 3 }}>Times still open</div>
                     <ul style={{ margin: 0, paddingLeft: 16 }}>
-                      {gaps.map((g, i) => <li key={i} style={{ fontFamily: F.b, fontSize: 11, color: "#2D6A4F" }}>{fmtTime(g.start)} – {fmtTime(g.end)}</li>)}
+                      {gaps.map((g, i) => <li key={i} style={{ fontFamily: F.b, fontSize: 12, color: "#2D6A4F" }}>{fmtTime(g.start)} – {fmtTime(g.end)}</li>)}
                     </ul>
                   </div>;
                 })()}
 
                 <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
                   <div>
-                    <label htmlFor="sr1-b-start" style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Lesson starts</label>
+                    <label htmlFor="sr1-b-start" style={{ display: "block", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 3 }}>Lesson starts</label>
                     <input id="sr1-b-start" type="time" value={B.lessonStart} onChange={e => set({ lessonStart: e.target.value })}
-                      style={{ padding: "7px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13 }} />
+                      style={{ padding: "7px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 15 }} />
                   </div>
                   <div>
-                    <label htmlFor="sr1-b-end" style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Lesson ends</label>
+                    <label htmlFor="sr1-b-end" style={{ display: "block", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 3 }}>Lesson ends</label>
                     <input id="sr1-b-end" type="time" value={B.lessonEnd} onChange={e => set({ lessonEnd: e.target.value })}
-                      style={{ padding: "7px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13 }} />
+                      style={{ padding: "7px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 15 }} />
                   </div>
                 </div>
 
                 {/* The reflection window is the part her CT needs to hear about,
                     so it is announced rather than only displayed. */}
-                {okOrder && !problem && <div role="status" aria-live="polite" style={{ fontFamily: F.b, fontSize: 12, color: "#1A1A1A", background: "#F0F8FF", border: "1px solid #DCEEFB", borderRadius: 6, padding: "9px 11px", marginBottom: 12, lineHeight: 1.5 }}>
+                {okOrder && !problem && <div role="status" aria-live="polite" style={{ fontFamily: F.b, fontSize: 13, color: "#1A1A1A", background: "#F0F8FF", border: "1px solid #DCEEFB", borderRadius: 6, padding: "9px 11px", marginBottom: 12, lineHeight: 1.5 }}>
                   Lesson {fmtTimeRange(lsISO, leISO)} · Reflection {fmtTimeRange(leISO, reflISO)}
                   <div style={{ color: "#555", marginTop: 3 }}>Make sure your cooperating teacher can release you until {fmtTime(reflISO)}.</div>
                 </div>}
 
-                {problem && <div role="alert" style={{ fontFamily: F.b, fontSize: 12, color: "#C0392B", background: "#FDF2F2", border: "1px solid #F5C6CB", borderRadius: 6, padding: "9px 11px", marginBottom: 12, lineHeight: 1.5 }}>{problem}</div>}
+                {problem && <div role="alert" style={{ fontFamily: F.b, fontSize: 13, color: "#C0392B", background: "#FDF2F2", border: "1px solid #F5C6CB", borderRadius: 6, padding: "9px 11px", marginBottom: 12, lineHeight: 1.5 }}>{problem}</div>}
 
                 <div style={{ marginBottom: 6 }}>
-                  <label htmlFor="sr1-b-topic" style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>What are you teaching?</label>
+                  <label htmlFor="sr1-b-topic" style={{ display: "block", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 3 }}>What are you teaching?</label>
                   <input id="sr1-b-topic" type="text" value={B.topic} onChange={e => set({ topic: e.target.value })}
                     placeholder="e.g. Fractions — comparing unlike denominators"
-                    style={{ width: "100%", padding: "8px 11px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, boxSizing: "border-box" }} />
+                    style={{ width: "100%", padding: "8px 11px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, boxSizing: "border-box" }} />
                 </div>
 
-                {B.err && <div role="alert" style={{ fontFamily: F.b, fontSize: 12, color: "#C0392B", background: "#FDF2F2", border: "1px solid #F5C6CB", borderRadius: 6, padding: "9px 11px", margin: "10px 0", lineHeight: 1.5 }}>{B.err}</div>}
+                {B.err && <div role="alert" style={{ fontFamily: F.b, fontSize: 13, color: "#C0392B", background: "#FDF2F2", border: "1px solid #F5C6CB", borderRadius: 6, padding: "9px 11px", margin: "10px 0", lineHeight: 1.5 }}>{B.err}</div>}
 
                 <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
                   <button disabled={!ready || sr1Busy}
@@ -2229,11 +2229,11 @@ export default function App() {
                       showToast('Observation booked ✓', 'success');
                       refreshSr1();
                     }}
-                    style={{ padding: "9px 18px", background: (!ready || sr1Busy) ? "#E0DDD8" : c.color, color: "#fff", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 13, fontWeight: 600, cursor: (!ready || sr1Busy) ? "not-allowed" : "pointer" }}>
+                    style={{ padding: "9px 18px", background: (!ready || sr1Busy) ? "#E0DDD8" : c.color, color: "#fff", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 15, fontWeight: 600, cursor: (!ready || sr1Busy) ? "not-allowed" : "pointer" }}>
                     {sr1Busy ? "Booking…" : "Book this time"}
                   </button>
                   <button onClick={() => setSr1BookWindow(null)}
-                    style={{ padding: "9px 14px", background: "#F0EEEA", color: "#6B6B6B", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 12, cursor: "pointer" }}>Cancel</button>
+                    style={{ padding: "9px 14px", background: "#F0EEEA", color: "#6B6B6B", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 13, cursor: "pointer" }}>Cancel</button>
                 </div>
               </div>
             </div>;
@@ -2243,30 +2243,30 @@ export default function App() {
           {modal && <div role="dialog" aria-modal="true" aria-label="Submit a token" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.3)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }} onClick={() => setModal(null)}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: "24px", maxWidth: 420, width: "90%", boxShadow: "0 12px 40px rgba(0,0,0,.15)" }}>
               <h2 style={{ fontFamily: F.d, fontSize: 18, fontWeight: 600, marginBottom: 4 }}>Submit a Token</h2>
-              <div style={{ fontFamily: F.b, fontSize: 13, color: "#555", marginBottom: 14 }}>{modal.name}</div>
-              <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 6 }}>What is this token for?</div>
+              <div style={{ fontFamily: F.b, fontSize: 15, color: "#555", marginBottom: 14 }}>{modal.name}</div>
+              <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: "#555", marginBottom: 6 }}>What is this token for?</div>
               <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-                {[{ v: "revision", l: "I revised this" }, { v: "late", l: "I'm submitting late" }, { v: "extra", l: "Using an extra token" }].map(o => <button key={o.v} onClick={() => setTfType(o.v)} style={{ padding: "7px 14px", borderRadius: 6, fontFamily: F.b, fontSize: 11, cursor: "pointer", background: tfType === o.v ? c.color : "#fff", color: tfType === o.v ? "#fff" : "#555", border: tfType === o.v ? `1px solid ${c.color}` : "1px solid #E0DDD8", flex: 1, textAlign: "center", minWidth: o.v === "extra" ? "100%" : "auto" }}>{o.l}</button>)}
+                {[{ v: "revision", l: "I revised this" }, { v: "late", l: "I'm submitting late" }, { v: "extra", l: "Using an extra token" }].map(o => <button key={o.v} onClick={() => setTfType(o.v)} style={{ padding: "7px 14px", borderRadius: 6, fontFamily: F.b, fontSize: 12, cursor: "pointer", background: tfType === o.v ? c.color : "#fff", color: tfType === o.v ? "#fff" : "#555", border: tfType === o.v ? `1px solid ${c.color}` : "1px solid #E0DDD8", flex: 1, textAlign: "center", minWidth: o.v === "extra" ? "100%" : "auto" }}>{o.l}</button>)}
               </div>
-              {tfType === "extra" && <input value={tfExtra} onChange={e => setTfExtra(e.target.value)} placeholder="List the extra token assignment you completed" aria-label="Extra token activity" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 8, boxSizing: "border-box" }} />}
-              <input value={tfLink} onChange={e => setTfLink(e.target.value)} placeholder="Paste a link to your work (Google Doc, Slides, Canva, etc.)" aria-label="Link to your work" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 8, boxSizing: "border-box" }} />
-              <input value={tfNote} onChange={e => setTfNote(e.target.value)} placeholder="Note for Dr. Beggs (optional)" aria-label="Note for Dr. Beggs" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, marginBottom: 14, boxSizing: "border-box" }} />
+              {tfType === "extra" && <input value={tfExtra} onChange={e => setTfExtra(e.target.value)} placeholder="List the extra token assignment you completed" aria-label="Extra token activity" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }} />}
+              <input value={tfLink} onChange={e => setTfLink(e.target.value)} placeholder="Paste a link to your work (Google Doc, Slides, Canva, etc.)" aria-label="Link to your work" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }} />
+              <input value={tfNote} onChange={e => setTfNote(e.target.value)} placeholder="Note for Dr. Beggs (optional)" aria-label="Note for Dr. Beggs" style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: 14, boxSizing: "border-box" }} />
               <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={handleToken} disabled={tfSubmitting} style={{ padding: "8px 18px", background: tfSubmitting ? "#E0DDD8" : c.color, color: "#fff", border: "none", borderRadius: 6, cursor: tfSubmitting ? "not-allowed" : "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600 }}>{tfSubmitting ? "Submitting..." : "Submit Token"}</button>
-                <button onClick={() => setModal(null)} style={{ padding: "8px 14px", background: "#F0EEEA", color: "#6B6B6B", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 12 }}>Cancel</button>
+                <button onClick={handleToken} disabled={tfSubmitting} style={{ padding: "8px 18px", background: tfSubmitting ? "#E0DDD8" : c.color, color: "#fff", border: "none", borderRadius: 6, cursor: tfSubmitting ? "not-allowed" : "pointer", fontFamily: F.b, fontSize: 15, fontWeight: 600 }}>{tfSubmitting ? "Submitting..." : "Submit Token"}</button>
+                <button onClick={() => setModal(null)} style={{ padding: "8px 14px", background: "#F0EEEA", color: "#6B6B6B", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 13 }}>Cancel</button>
               </div>
-              <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginTop: 8 }}>{tfType === "extra" ? "Uses 1 extra token. Requires prior approval from Dr. Beggs." : `Uses 1 of your ${tok.avail} token${tok.avail !== 1 ? "s" : ""}.`}</div>
+              <div style={{ fontFamily: F.b, fontSize: 12, color: "#767676", marginTop: 8 }}>{tfType === "extra" ? "Uses 1 extra token. Requires prior approval from Dr. Beggs." : `Uses 1 of your ${tok.avail} token${tok.avail !== 1 ? "s" : ""}.`}</div>
             </div>
           </div>}
 
           {/* Teaching Schedule */}
           {teachDates.length > 0 && <>
           <button aria-expanded={expTeach} onClick={() => setExpTeach(!expTeach)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "12px 16px", background: "#fff", border: "1px solid #E8E6E1", borderRadius: expTeach ? "10px 10px 0 0" : 10, cursor: "pointer", marginBottom: expTeach ? 0 : 12 }}>
-            <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555" }}>Teaching Schedule</span>
-            <span style={{ fontSize: 11, color: "#767676", transform: expTeach ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
+            <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: "#555" }}>Teaching Schedule</span>
+            <span style={{ fontSize: 12, color: "#767676", transform: expTeach ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
           </button>
           {expTeach && <div style={{ background: "#fff", border: "1px solid #E8E6E1", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 16px", marginBottom: 12 }}>
-            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12, lineHeight: 1.5 }}>Select your teaching dates below. Your planning document is due 3 days before your teaching day.</div>
+            <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", marginBottom: 12, lineHeight: 1.5 }}>Select your teaching dates below. Your planning document is due 3 days before your teaching day.</div>
             {(() => {
               const assignmentIds = [...new Set(teachDates.map(td => td.assignment_id))];
               const mySection = myEnrollment?.section || null;
@@ -2284,34 +2284,34 @@ export default function App() {
                 const formatDate = (d) => { const dt = new Date(d + 'T12:00:00'); return dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }); };
                 return <div key={aid} style={{ marginBottom: 12, padding: "12px", background: allClosed ? "#F9F8F5" : "#F0F8FF", borderRadius: 8, border: allClosed ? "1px solid #E8E6E1" : "1px solid #DCEEFB" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                    <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: allClosed ? "#767676" : "#1A1A1A" }}>{a?.name || aid}</div>
+                    <div style={{ fontFamily: F.b, fontSize: 15, fontWeight: 600, color: allClosed ? "#767676" : "#1A1A1A" }}>{a?.name || aid}</div>
                     {allClosed && <Pill t="Closed" bg="#F5F4F0" c="#767676" />}
                     {mySel && !allClosed && <Pill t="Scheduled" bg="#D4EDDA" c="#2D6A4F" />}
                   </div>
                   {mySel ? <div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0" }}>
                       <div>
-                        <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>Teaching</div>
-                        <div style={{ fontFamily: F.b, fontSize: 14, fontWeight: 500 }}>{formatDate(mySel.teach_date)}</div>
+                        <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>Teaching</div>
+                        <div style={{ fontFamily: F.b, fontSize: 16, fontWeight: 500 }}>{formatDate(mySel.teach_date)}</div>
                       </div>
                       <div style={{ textAlign: "right" }}>
-                        <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>Plan due</div>
-                        <div style={{ fontFamily: F.b, fontSize: 14, fontWeight: 500 }}>{formatDate(mySel.plan_due_date)}</div>
+                        <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>Plan due</div>
+                        <div style={{ fontFamily: F.b, fontSize: 16, fontWeight: 500 }}>{formatDate(mySel.plan_due_date)}</div>
                       </div>
-                      {!allClosed && <button aria-label="Change teaching date" onClick={async () => { await removeTeachingSelection(myId, ck, aid); refresh(); }} style={{ padding: "4px 10px", background: "#fff", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: "#6B6B6B", cursor: "pointer" }}>Change</button>}
+                      {!allClosed && <button aria-label="Change teaching date" onClick={async () => { await removeTeachingSelection(myId, ck, aid); refresh(); }} style={{ padding: "4px 10px", background: "#fff", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 12, color: "#6B6B6B", cursor: "pointer" }}>Change</button>}
                     </div>
                   </div> : !allClosed ? <div>
-                    <div style={{ fontFamily: F.b, fontSize: 11, color: "#555", marginBottom: 6 }}>Pick your teaching date:</div>
+                    <div style={{ fontFamily: F.b, fontSize: 12, color: "#555", marginBottom: 6 }}>Pick your teaching date:</div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                       {dates.filter(d => !d.closed).map(d => <button key={d.id || d.teach_date} aria-label={`Pick teaching date: ${formatDate(d.teach_date)}`} onClick={async () => { await pickTeachingDate(myId, ck, aid, d.teach_date); refresh(); }}
-                        style={{ padding: "5px 10px", background: "#fff", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, cursor: "pointer", position: "relative" }}
+                        style={{ padding: "5px 10px", background: "#fff", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 12, cursor: "pointer", position: "relative" }}
                         onMouseEnter={e => { e.currentTarget.style.background = "#DCEEFB"; e.currentTarget.style.borderColor = "#1565C0"; }}
                         onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#E0DDD8"; }}>
                         {formatDate(d.teach_date)}
-                        {d.note && <div style={{ fontSize: 11, color: "#C0392B", marginTop: 1 }}>⚠ {d.note}</div>}
+                        {d.note && <div style={{ fontSize: 12, color: "#C0392B", marginTop: 1 }}>⚠ {d.note}</div>}
                       </button>)}
                     </div>
-                  </div> : <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>Teaching window has closed.</div>}
+                  </div> : <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>Teaching window has closed.</div>}
                 </div>;
               });
             })()}
@@ -2323,11 +2323,11 @@ export default function App() {
           {(c.classPrep && c.classPrep.length > 0) && <>
 
           <button aria-expanded={expPrep} onClick={() => setExpPrep(!expPrep)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "12px 16px", background: "#fff", border: "1px solid #E8E6E1", borderRadius: expPrep ? "10px 10px 0 0" : 10, cursor: "pointer", marginBottom: expPrep ? 0 : 12 }}>
-            <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555" }}>Class Preparation ({Object.values(myPrep).filter(Boolean).length}/{c.classPrep.length})</span>
-            <span style={{ fontSize: 11, color: "#767676", transform: expPrep ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
+            <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: "#555" }}>Class Preparation ({Object.values(myPrep).filter(Boolean).length}/{c.classPrep.length})</span>
+            <span style={{ fontSize: 12, color: "#767676", transform: expPrep ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
           </button>
           {expPrep && <div style={{ background: "#fff", border: "1px solid #E8E6E1", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 16px", marginBottom: 12 }}>
-            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 10, lineHeight: 1.5 }}>These do not affect your letter grade. They contribute to your educator disposition assessment.</div>
+            <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", marginBottom: 10, lineHeight: 1.5 }}>These do not affect your letter grade. They contribute to your educator disposition assessment.</div>
             {c.classPrep.map((cp, idx) => ({ cp, idx })).sort((x, y) => {
               const dx = dueDates[x.cp.id]?.date, dy = dueDates[y.cp.id]?.date;
               if (dx && dy) return dx.localeCompare(dy) || (x.idx - y.idx);
@@ -2338,10 +2338,10 @@ export default function App() {
               const done = !!myPrep[cp.id];
               return <div key={cp.id} role="checkbox" aria-checked={done} aria-label={`${cp.name} - Completion`} tabIndex={0} onClick={() => handlePrep(cp.id)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePrep(cp.id); } }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 4px", borderBottom: i < arr.length - 1 ? "1px solid #F5F3EF" : "none", cursor: "pointer" }}
                 onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                <div style={{ width: 20, height: 20, borderRadius: 5, border: done ? "none" : "2px solid #D0CEC9", background: done ? c.color : "#fff", display: "flex", alignItems: "center", justifyContent: "center", transition: "all .2s", flexShrink: 0 }}>{done && <span style={{ color: "#fff", fontSize: 11, fontWeight: 700 }}>✓</span>}</div>
+                <div style={{ width: 20, height: 20, borderRadius: 5, border: done ? "none" : "2px solid #D0CEC9", background: done ? c.color : "#fff", display: "flex", alignItems: "center", justifyContent: "center", transition: "all .2s", flexShrink: 0 }}>{done && <span style={{ color: "#fff", fontSize: 12, fontWeight: 700 }}>✓</span>}</div>
                 <div style={{ flex: 1 }}>
-                  <span style={{ fontFamily: F.b, fontSize: 12, color: done ? "#767676" : "#1A1A1A", textDecoration: done ? "line-through" : "none" }}>{cp.name}</span>
-                  {(dueDates[cp.id]?.date || dueDates[cp.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 11, color: done ? "#767676" : "#6B6B6B", marginTop: 1 }}>{dueDates[cp.id].date ? new Date(dueDates[cp.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[cp.id].date && dueDates[cp.id].label ? ' · ' : ''}{dueDates[cp.id].label || ''}</div>}
+                  <span style={{ fontFamily: F.b, fontSize: 13, color: done ? "#767676" : "#1A1A1A", textDecoration: done ? "line-through" : "none" }}>{cp.name}</span>
+                  {(dueDates[cp.id]?.date || dueDates[cp.id]?.label) && <div style={{ fontFamily: F.b, fontSize: 12, color: done ? "#767676" : "#6B6B6B", marginTop: 1 }}>{dueDates[cp.id].date ? new Date(dueDates[cp.id].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[cp.id].date && dueDates[cp.id].label ? ' · ' : ''}{dueDates[cp.id].label || ''}</div>}
                 </div>
                 <Pill t="Completion" bg="#F0F8FF" c="#1565C0" />
               </div>;
@@ -2351,31 +2351,31 @@ export default function App() {
 
           {/* Grade Tracks */}
           <button aria-expanded={expTracks} onClick={() => setExpTracks(!expTracks)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "12px 16px", background: "#fff", border: "1px solid #E8E6E1", borderRadius: expTracks ? "10px 10px 0 0" : 10, cursor: "pointer", marginBottom: expTracks ? 0 : 12 }}>
-            <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555" }}>Grade Track Requirements</span>
-            <span style={{ fontSize: 11, color: "#767676", transform: expTracks ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
+            <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: "#555" }}>Grade Track Requirements</span>
+            <span style={{ fontSize: 12, color: "#767676", transform: expTracks ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
           </button>
           {expTracks && <div style={{ background: "#fff", border: "1px solid #E8E6E1", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 16px", marginBottom: 12 }}>
-            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12 }}>Every item in a track must be checked off to earn that grade.</div>
+            <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", marginBottom: 12 }}>Every item in a track must be checked off to earn that grade.</div>
             {["A", "B", "C", "D"].map(g => { const t = c.tracks[g]; const m = TM[g]; const isOn = grade === g;
               return <div key={g} style={{ marginBottom: 8, padding: "8px 12px", borderRadius: 8, border: isOn ? `2px solid ${m.c}` : "1px solid #F0EEEA", position: "relative" }}>
-                {isOn && <span style={{ position: "absolute", top: 6, right: 10, fontFamily: F.b, fontSize: 11, fontWeight: 700, color: "#fff", background: m.c, padding: "2px 6px", borderRadius: 6 }}>YOUR TRACK</span>}
+                {isOn && <span style={{ position: "absolute", top: 6, right: 10, fontFamily: F.b, fontSize: 12, fontWeight: 700, color: "#fff", background: m.c, padding: "2px 6px", borderRadius: 6 }}>YOUR TRACK</span>}
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                  <div style={{ width: 20, height: 20, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 11, fontWeight: 700, color: m.c }}>{g}</div>
-                  <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#333" }}>{g} Track</span>
+                  <div style={{ width: 20, height: 20, borderRadius: "50%", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.d, fontSize: 12, fontWeight: 700, color: m.c }}>{g}</div>
+                  <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: "#333" }}>{g} Track</span>
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
                   {(t.req || []).map(id => { const a = c.assignments.find(x => x.id === id); const ch = !!myChecks[id];
-                    return <span key={id} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: ch ? "#D4EDDA" : "#fff", border: `1px solid ${ch ? "#B7DFBF" : "#E8E6E1"}`, color: ch ? "#2D6A4F" : "#555" }}>{ch ? "✓ " : ""}{a?.name || id}</span>;
+                    return <span key={id} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 12, background: ch ? "#D4EDDA" : "#fff", border: `1px solid ${ch ? "#B7DFBF" : "#E8E6E1"}`, color: ch ? "#2D6A4F" : "#555" }}>{ch ? "✓ " : ""}{a?.name || id}</span>;
                   })}
                 </div>
                 {(t.pick || []).map((p, pi) => {
                   const doneCount = p.from.filter(id => !!myChecks[id]).length;
                   const needN = Math.min(p.need, p.from.length);
                   return <div key={pi} style={{ marginTop: 4 }}>
-                    <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 2 }}>Any {needN} of {p.label || "the following"} ({doneCount}/{needN} done):</div>
+                    <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", marginBottom: 2 }}>Any {needN} of {p.label || "the following"} ({doneCount}/{needN} done):</div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
                       {p.from.map(id => { const a = c.assignments.find(x => x.id === id); const ch = !!myChecks[id];
-                        return <span key={id} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: ch ? "#D4EDDA" : "#fff", border: `1px solid ${ch ? "#B7DFBF" : "#E8E6E1"}`, color: ch ? "#2D6A4F" : "#555" }}>{ch ? "✓ " : ""}{a?.name || id}</span>;
+                        return <span key={id} style={{ padding: "2px 6px", borderRadius: 5, fontFamily: F.b, fontSize: 12, background: ch ? "#D4EDDA" : "#fff", border: `1px solid ${ch ? "#B7DFBF" : "#E8E6E1"}`, color: ch ? "#2D6A4F" : "#555" }}>{ch ? "✓ " : ""}{a?.name || id}</span>;
                       })}
                     </div>
                   </div>;
@@ -2386,21 +2386,21 @@ export default function App() {
 
           {/* Tokens */}
           <button aria-expanded={expTokens} onClick={() => setExpTokens(!expTokens)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "12px 16px", background: "#fff", border: "1px solid #E8E6E1", borderRadius: expTokens ? "10px 10px 0 0" : 10, cursor: "pointer", marginBottom: 12 }}>
-            <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555" }}>Tokens ({tok.avail} available)</span>
-            <span style={{ fontSize: 11, color: "#767676", transform: expTokens ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
+            <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: "#555" }}>Tokens ({tok.avail} available)</span>
+            <span style={{ fontSize: 12, color: "#767676", transform: expTokens ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
           </button>
           {expTokens && <div style={{ background: "#fff", border: "1px solid #E8E6E1", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 16px", marginBottom: 12 }}>
             <div style={{ display: "flex", gap: 5, marginBottom: 8 }}>
-              {Array.from({ length: tok.total }).map((_, i) => <div key={i} style={{ width: 22, height: 22, borderRadius: "50%", background: i < tok.avail ? "#CF202E" : "#E0DDD8", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: i < tok.avail ? "#fff" : "#767676", fontWeight: 700 }}>{i < tok.avail ? "✦" : "✕"}</div>)}
+              {Array.from({ length: tok.total }).map((_, i) => <div key={i} style={{ width: 22, height: 22, borderRadius: "50%", background: i < tok.avail ? "#CF202E" : "#E0DDD8", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: i < tok.avail ? "#fff" : "#767676", fontWeight: 700 }}>{i < tok.avail ? "✦" : "✕"}</div>)}
             </div>
-            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 6 }}>3 per course · {tok.used} used · {tok.avail} available</div>
-            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", lineHeight: 1.5 }}>
+            <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", marginBottom: 6 }}>3 per course · {tok.used} used · {tok.avail} available</div>
+            <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", lineHeight: 1.5 }}>
               Use tokens to <strong style={{ color: "#555" }}>revise</strong> or <strong style={{ color: "#555" }}>submit late work</strong>.
               {cutoff ? <><br /><strong style={{ color: "#C0392B" }}>Token period has ended ({cutoffLabelFor(ck)}).</strong></> : <><br /><span style={{ color: "#6B6B6B" }}>Cutoff: {cutoffLabelFor(ck)}</span></>}
             </div>
             {myToks.length > 0 && <div style={{ marginTop: 10 }}>
-              <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "#767676", marginBottom: 4 }}>History</div>
-              {myToks.map((t, i) => { const a = c.assignments.find(x => x.id === t.assignment_id) || (c.tokenGroups || {})[t.assignment_id]; return <div key={t.id} style={{ display: "flex", gap: 6, padding: "4px 0", borderBottom: i < myToks.length - 1 ? "1px solid #F5F3EF" : "none", fontFamily: F.b, fontSize: 11, color: "#777" }}><span style={{ color: "#767676" }}>✦</span>{t.token_type === "revision" ? "Revision" : "Late"}: {a?.name || t.assignment_id}<span style={{ marginLeft: "auto", fontSize: 11, color: "#767676" }}>{new Date(t.submitted_at).toLocaleDateString()}</span></div>; })}
+              <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "#767676", marginBottom: 4 }}>History</div>
+              {myToks.map((t, i) => { const a = c.assignments.find(x => x.id === t.assignment_id) || (c.tokenGroups || {})[t.assignment_id]; return <div key={t.id} style={{ display: "flex", gap: 6, padding: "4px 0", borderBottom: i < myToks.length - 1 ? "1px solid #F5F3EF" : "none", fontFamily: F.b, fontSize: 12, color: "#777" }}><span style={{ color: "#767676" }}>✦</span>{t.token_type === "revision" ? "Revision" : "Late"}: {a?.name || t.assignment_id}<span style={{ marginLeft: "auto", fontSize: 12, color: "#767676" }}>{new Date(t.submitted_at).toLocaleDateString()}</span></div>; })}
             </div>}
           </div>}
 
@@ -2414,21 +2414,21 @@ export default function App() {
           {sr1.myNotifs.length > 0 && <div style={{ marginBottom: 12 }}>
             {sr1.myNotifs.map(n => (
               <div key={n.id} role="status" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, padding: "10px 14px", marginBottom: 6, background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 8 }}>
-                <span style={{ fontFamily: F.b, fontSize: 12, color: "#856404", lineHeight: 1.5 }}>{n.message}</span>
+                <span style={{ fontFamily: F.b, fontSize: 13, color: "#856404", lineHeight: 1.5 }}>{n.message}</span>
                 <button onClick={async () => { await dismissSr1Notification(n.id); refreshSr1(); }}
                   aria-label="Dismiss this notice"
-                  style={{ flexShrink: 0, padding: "2px 9px", background: "#fff", border: "1px solid #E8D9A8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: "#856404", cursor: "pointer" }}>Dismiss</button>
+                  style={{ flexShrink: 0, padding: "2px 9px", background: "#fff", border: "1px solid #E8D9A8", borderRadius: 4, fontFamily: F.b, fontSize: 12, color: "#856404", cursor: "pointer" }}>Dismiss</button>
               </div>
             ))}
           </div>}
 
           <button aria-expanded={expSr1Student} onClick={() => setExpSr1Student(!expSr1Student)}
             style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "12px 16px", background: "#fff", border: "1px solid #E8E6E1", borderRadius: expSr1Student ? "10px 10px 0 0" : 10, cursor: "pointer", marginBottom: expSr1Student ? 0 : 12 }}>
-            <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555" }}>Practicum Observations</span>
-            <span aria-hidden="true" style={{ fontSize: 11, color: "#767676", transform: expSr1Student ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
+            <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: "#555" }}>Practicum Observations</span>
+            <span aria-hidden="true" style={{ fontSize: 12, color: "#767676", transform: expSr1Student ? "rotate(180deg)" : "", transition: "transform .2s" }}>▾</span>
           </button>
           {expSr1Student && <div style={{ background: "#fff", border: "1px solid #E8E6E1", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 16px", marginBottom: 12 }}>
-            <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12, lineHeight: 1.5 }}>
+            <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", marginBottom: 12, lineHeight: 1.5 }}>
               Check with your cooperating teacher before booking. Your reflection happens right after the lesson, so you will need to be free until the reflection ends — not just until the lesson does.
             </div>
 
@@ -2442,34 +2442,34 @@ export default function App() {
                 .sort((a, b) => new Date(b.lesson_start) - new Date(a.lesson_start));
               return <>
                 {upcoming.length > 0 && <div style={{ marginBottom: 14 }}>
-                  <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 6 }}>Your scheduled observations</div>
+                  <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 6 }}>Your scheduled observations</div>
                   {upcoming.map(b => {
                     const locked = sr1CancelLocked(b.lesson_start);
                     return <div key={b.id} style={{ padding: "10px 12px", marginBottom: 6, background: "#F0F8FF", border: "1px solid #DCEEFB", borderRadius: 8 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
                         <div>
-                          <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600 }}>{fmtDay(b.lesson_start)}</div>
-                          <div style={{ fontFamily: F.b, fontSize: 12, color: "#555", marginTop: 2 }}>Lesson {fmtTimeRange(b.lesson_start, b.lesson_end)}</div>
-                          <div style={{ fontFamily: F.b, fontSize: 12, color: "#555" }}>Reflection {fmtTimeRange(b.reflection_start, b.reflection_end)}</div>
-                          <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 3 }}>{b.topic}</div>
+                          <div style={{ fontFamily: F.b, fontSize: 15, fontWeight: 600 }}>{fmtDay(b.lesson_start)}</div>
+                          <div style={{ fontFamily: F.b, fontSize: 13, color: "#555", marginTop: 2 }}>Lesson {fmtTimeRange(b.lesson_start, b.lesson_end)}</div>
+                          <div style={{ fontFamily: F.b, fontSize: 13, color: "#555" }}>Reflection {fmtTimeRange(b.reflection_start, b.reflection_end)}</div>
+                          <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", marginTop: 3 }}>{b.topic}</div>
                         </div>
                         {locked
-                          ? <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", maxWidth: 200, textAlign: "right", lineHeight: 1.4 }}>
+                          ? <span style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", maxWidth: 200, textAlign: "right", lineHeight: 1.4 }}>
                               Within 24 hours — email Dr. Beggs at mbeggs@ucmo.edu to change this.
                             </span>
                           : <button onClick={() => handleStudentCancelSr1(b)}
                               aria-label={`Cancel your observation on ${fmtDay(b.lesson_start)}`}
-                              style={{ flexShrink: 0, padding: "4px 10px", background: "#fff", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: "#C0392B", cursor: "pointer" }}>Cancel</button>}
+                              style={{ flexShrink: 0, padding: "4px 10px", background: "#fff", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 12, color: "#C0392B", cursor: "pointer" }}>Cancel</button>}
                       </div>
                     </div>;
                   })}
                 </div>}
 
                 {past.length > 0 && <div style={{ marginBottom: 14 }}>
-                  <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", marginBottom: 6 }}>Completed</div>
+                  <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#767676", marginBottom: 6 }}>Completed</div>
                   {past.map(b => <div key={b.id} style={{ padding: "6px 2px" }}>
-                    <span style={{ fontFamily: F.b, fontSize: 12, color: "#767676" }}>{fmtDay(b.lesson_start)} · {fmtTimeRange(b.lesson_start, b.lesson_end)}</span>
-                    <span style={{ fontFamily: F.b, fontSize: 11, color: "#909090" }}> — {b.topic}</span>
+                    <span style={{ fontFamily: F.b, fontSize: 13, color: "#767676" }}>{fmtDay(b.lesson_start)} · {fmtTimeRange(b.lesson_start, b.lesson_end)}</span>
+                    <span style={{ fontFamily: F.b, fontSize: 12, color: "#909090" }}> — {b.topic}</span>
                   </div>)}
                 </div>}
               </>;
@@ -2482,32 +2482,32 @@ export default function App() {
                 .filter(w => w.published && w.window_date >= todayStr)
                 .filter(w => !sr1TooSoon(centralISO(w.window_date, w.end_time)))
                 .sort((a, b) => a.window_date.localeCompare(b.window_date));
-              if (open.length === 0) return <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>
+              if (open.length === 0) return <div style={{ fontFamily: F.b, fontSize: 13, color: "#6B6B6B" }}>
                 No observation times are open right now. Dr. Beggs will post more.
               </div>;
               return <div>
-                <div style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 6 }}>Available days</div>
+                <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 6 }}>Available days</div>
                 {open.map(w => {
                   const gaps = sr1OpenGaps(w, sr1.taken).filter(g => !sr1TooSoon(g.start.toISOString()));
                   const full = gaps.length === 0;
                   return <div key={w.id} style={{ padding: "10px 12px", marginBottom: 6, background: full ? "#F9F8F5" : "#fff", border: "1px solid #E8E6E1", borderRadius: 8 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                       <div>
-                        <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600 }}>{fmtDateOnly(w.window_date)}</div>
-                        <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>
+                        <div style={{ fontFamily: F.b, fontSize: 15, fontWeight: 600 }}>{fmtDateOnly(w.window_date)}</div>
+                        <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>
                           {fmtTime(centralISO(w.window_date, w.start_time))} – {fmtTime(centralISO(w.window_date, w.end_time))}
                           {w.note ? ` · ${w.note}` : ''}
                         </div>
                       </div>
                       {!full && <button onClick={() => openSr1Book(w)}
                         aria-label={`Book an observation on ${fmtDateOnly(w.window_date)}`}
-                        style={{ padding: "5px 12px", background: c.color, color: "#fff", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Book a time</button>}
+                        style={{ padding: "5px 12px", background: c.color, color: "#fff", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Book a time</button>}
                     </div>
                     <div style={{ marginTop: 6 }}>
                       {full
-                        ? <span style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>Fully booked</span>
+                        ? <span style={{ fontFamily: F.b, fontSize: 12, color: "#767676" }}>Fully booked</span>
                         : <ul style={{ margin: 0, paddingLeft: 16, listStyle: "disc" }}>
-                            {gaps.map((g, i) => <li key={i} style={{ fontFamily: F.b, fontSize: 11, color: "#2D6A4F" }}>
+                            {gaps.map((g, i) => <li key={i} style={{ fontFamily: F.b, fontSize: 12, color: "#2D6A4F" }}>
                               Open: {fmtTime(g.start)} – {fmtTime(g.end)}
                             </li>)}
                           </ul>}
