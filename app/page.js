@@ -1502,8 +1502,11 @@ export default function App() {
     <main style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
       <div style={{ maxWidth: 420, width: "100%", padding: "0 20px" }}>
         <div style={{ textAlign: "center", marginBottom: 36 }}>
-          <div aria-hidden="true" style={{ display: "inline-block", padding: "4px 10px", background: "#CF202E", color: "#fff", fontFamily: F.b, fontSize: 11, fontWeight: 600, letterSpacing: ".1em", textTransform: "uppercase", borderRadius: 3, marginBottom: 14 }}>Lumos</div>
-          <h1 style={{ fontSize: 30, fontWeight: 700, color: "#1A1A1A", lineHeight: 1.15, marginBottom: 6 }}>Learning, illuminated.</h1>
+          <img
+            src="/lumos-header.png"
+            alt="Lumos — Learning, illuminated."
+            style={{ maxWidth: 220, width: "100%", height: "auto", marginBottom: 14 }}
+          />
           <p style={{ fontFamily: F.b, fontSize: 13, color: "#6B6B6B" }}>Own your learning. Track your growth. Pursue mastery.</p>
         </div>
         <div role="region" aria-label={forgotMode ? "Reset password" : isSignup ? "Create account" : "Sign in"} style={{ background: "#fff", border: "1px solid #E8E6E1", borderRadius: 10, padding: "20px" }}>
@@ -1520,7 +1523,7 @@ export default function App() {
                 </div>
               )}
               <button onClick={handleForgotPassword}
-                style={{ width: "100%", padding: "10px", background: "#CF202E", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
+                style={{ width: "100%", padding: "10px", background: "#0B1436", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
                 Send Reset Link
               </button>
               <button onClick={() => { setForgotMode(false); setForgotMsg(''); setForgotEmail(''); }}
@@ -1558,7 +1561,7 @@ export default function App() {
               {isSignup && <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginBottom: 12, paddingLeft: 2 }}>Example: MATH4850 or MATH3820</div>}
               {loginErr && <div role="alert" aria-live="assertive" style={{ fontFamily: F.b, fontSize: 11, color: "#C0392B", marginBottom: 10, lineHeight: 1.4 }}>{loginErr}</div>}
               <button onClick={isSignup ? handleSignup : handleLogin}
-                style={{ width: "100%", padding: "10px", background: "#CF202E", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
+                style={{ width: "100%", padding: "10px", background: "#0B1436", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
                 {isSignup ? "Create Account" : "Sign In"}
               </button>
               <button onClick={() => { setIsSignup(!isSignup); setLoginErr(''); }}
