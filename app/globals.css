@@ -52,3 +52,23 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 button, select {
   min-height: 32px;
 }
+/* Splash screen (shown on page load) */
+#splash-screen {
+  position: fixed;
+  inset: 0;
+  background: #0B1436;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  transition: opacity 0.4s ease;
+}
+#splash-screen img {
+  width: 120px;
+  height: 120px;
+  animation: lumos-pulse 1.6s ease-in-out infinite;
+}
+@keyframes lumos-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.06); opacity: 0.85; }
+}
