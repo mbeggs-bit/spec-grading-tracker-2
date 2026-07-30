@@ -956,7 +956,7 @@ export default function App() {
   const [expFinalGrades, setExpFinalGrades] = useState(false);
   const [expTracks, setExpTracks] = useState(false);
   const [expTokens, setExpTokens] = useState(false);
-  const [expPrep, setExpPrep] = useState(false);
+  const [expPrep, setExpPrep] = useState(true);
   const [expTeach, setExpTeach] = useState(true);
   const [toast, setToast] = useState(null); // { msg, type }
   const [previewStudent, setPreviewStudent] = useState(null); // { id, name } — instructor preview of student view
