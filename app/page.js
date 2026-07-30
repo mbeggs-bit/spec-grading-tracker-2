@@ -3733,13 +3733,13 @@ export default function App() {
           </div>
           </>}
 
-          {c.assignments.some(a => a.id === 'les1') && <>
+          {c.assignments.some(a => a.teachingSchedule) && <>
           <Lbl s={{ marginTop: 20 }}>Teaching Dates</Lbl>
           <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 12, lineHeight: 1.5, padding: "8px 12px", background: "#F9F8F5", borderRadius: 8 }}>
-            Dates when TCs may teach their lesson. Students pick from these dates; their lesson plan is due 3 days before their chosen date. Dates default to both sections — use the selector to add a date for just one section when they differ.
+            Dates when TCs may teach. Students pick from these dates; their planning document is due 3 days before their chosen date. Dates default to both sections — use the selector to add a date for just one section when they differ.
           </div>
-          {['les1', 'les2'].map(aid => {
-            const a = c.assignments.find(x => x.id === aid);
+          {c.assignments.filter(a => a.teachingSchedule).map(a => {
+            const aid = a.id;
             if (!a) return null;
             const dates = teachDates.filter(td => td.assignment_id === aid);
             return <div key={aid} style={{ marginBottom: 14 }}>
