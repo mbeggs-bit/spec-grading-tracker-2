@@ -3696,7 +3696,7 @@ export default function App() {
           {c.groups.map((grp, gi) => <div key={gi} style={{ marginBottom: 14 }}>
             {grp.name && <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: c.color, marginBottom: 4 }}>{grp.name}</div>}
             <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
-              {grp.ids.map((id, i) => { const a = c.assignments.find(x => x.id === id); if (!a) return null; const ddObj = dueDates[id]; const ddLabel = ddObj?.label; const ddDate = ddObj?.date; const isEditingDue = editDue === id; const summary = dueSummary(id, courseSections);
+              {grp.ids.map((id, i) => { const a = c.assignments.find(x => x.id === id); if (!a || a.teachingSchedule) return null; const ddObj = dueDates[id]; const ddLabel = ddObj?.label; const ddDate = ddObj?.date; const isEditingDue = editDue === id; const summary = dueSummary(id, courseSections);
                 return <div key={id} style={{ borderBottom: i < grp.ids.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px" }}
                     onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
