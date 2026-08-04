@@ -208,6 +208,7 @@ export async function GET(request) {
     lines.push('BEGIN:VEVENT');
     lines.push(`UID:${uid(bk.id)}`);
     lines.push(`DTSTAMP:${now}`);
+    lines.push('TRANSP:OPAQUE');
     lines.push(foldLine(`DTSTART;TZID=${SR1_TZ}:${toIcsLocal(bk.lesson_start)}`));
     lines.push(foldLine(`DTEND;TZID=${SR1_TZ}:${toIcsLocal(bk.reflection_end)}`));
     lines.push(foldLine(`SUMMARY:SR1 Observation — ${icsEscape(name)}`));
