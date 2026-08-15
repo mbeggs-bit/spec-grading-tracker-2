@@ -2093,6 +2093,7 @@ export default function App() {
 
           {c.groups.map((grp, gi) => {
             const grpA = grp.ids.map(id => c.assignments.find(a => a.id === id)).filter(Boolean)
+              .filter(a => relAssignments.includes(a.id))
               .map((a, idx) => ({ a, idx }))
               .sort((x, y) => {
                 const dx = dueDates[x.a.id]?.date, dy = dueDates[y.a.id]?.date;
