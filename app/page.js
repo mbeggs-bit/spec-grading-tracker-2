@@ -646,6 +646,20 @@ async function setSr1WindowPublished(id, published) {
   return { error };
 }
 
+async function updateSr1Window(id, fields) {
+  const { error } = await supabase.from('sr1_windows').update({
+    building_id: fields.building_id || null,
+    building_group: fields.building_group || null,
+    window_date: fields.window_date,
+    start_time: fields.start_time,
+    end_time: fields.end_time,
+    reflection_minutes: fields.reflection_minutes,
+    buffer_minutes: fields.buffer_minutes,
+    note: fields.note || null,
+  }).eq('id', id);
+  return { error };
+}
+
 // RESTRICT on the FK means this fails while bookings still reference the
 // window — deliberate, so a window can never silently take bookings with it.
 async function deleteSr1Window(id) {
@@ -918,6 +932,7 @@ export default function App() {
   const [studentTab, setStudentTab] = useState('work'); // 'work' | 'prac' — only shown to SR1 candidates
   const [sr1OpenCandidate, setSr1OpenCandidate] = useState(null); // accordion
   const [sr1EditBooking, setSr1EditBooking] = useState(null);     // instructor edit modal
+  const [sr1EditWindow, setSr1EditWindow] = useState(null);       // inline window editor (id)
   const [sr1BookWindow, setSr1BookWindow] = useState(null);       // student booking modal
   const [sr1Busy, setSr1Busy] = useState(false);
 
@@ -2669,6 +2684,36 @@ export default function App() {
     if (error) { setSr1(s => ({ ...s, windows: prev })); showToast('Could not change that window.'); }
   };
 
+  const handleSaveEditSr1Window = async (w, bookedCount) => {
+    const g = id => document.getElementById(`sr1-ew-${w.id}-${id}`)?.value || '';
+    const buildingVal = g('building');
+    const window_date = g('date');
+    const start_time = g('start'), end_time = g('end');
+    const reflection_minutes = parseInt(g('refl'), 10);
+    const buffer_minutes = parseInt(g('buffer'), 10);
+    const note = g('note');
+    if (!buildingVal) { showToast('Choose a building or travel zone.'); return; }
+    if (!window_date) { showToast('Choose a date.'); return; }
+    if (!start_time || !end_time) { showToast('Set both an opening and closing time.'); return; }
+    if (end_time <= start_time) { showToast('The closing time must be after the opening time.'); return; }
+    if (!Number.isFinite(reflection_minutes) || reflection_minutes < 0 || reflection_minutes > 120) { showToast('Reflection minutes must be between 0 and 120.'); return; }
+    if (!Number.isFinite(buffer_minutes) || buffer_minutes < 0 || buffer_minutes > 120) { showToast('Buffer minutes must be between 0 and 120.'); return; }
+    if (bookedCount > 0) {
+      const ok = confirm(`This window has ${bookedCount} booking${bookedCount === 1 ? '' : 's'}. Saving changes may affect those candidates — you'll need to notify them manually. Continue?`);
+      if (!ok) return;
+    }
+    const isZone = buildingVal.startsWith('z:');
+    const building_id = isZone ? null : buildingVal.slice(2);
+    const building_group = isZone ? buildingVal.slice(2) : null;
+    setSr1Busy(true);
+    const { error } = await updateSr1Window(w.id, { building_id, building_group, window_date, start_time, end_time, reflection_minutes, buffer_minutes, note });
+    setSr1Busy(false);
+    if (error) { showToast('Could not save changes — please try again.', 'error'); return; }
+    setSr1(s => ({ ...s, windows: s.windows.map(x => x.id === w.id ? { ...x, building_id, building_group, window_date, start_time, end_time, reflection_minutes, buffer_minutes, note: note || null } : x) }));
+    setSr1EditWindow(null);
+    showToast('Window updated ✓', 'success');
+  };
+
   // The FK is ON DELETE RESTRICT, so a window with bookings cannot be deleted
   // out from under a candidate. Cancel the bookings first, deliberately.
   const handleDeleteSr1Window = async (w, bookedCount) => {
@@ -4073,27 +4118,87 @@ export default function App() {
                     ? `${w.building_group.charAt(0).toUpperCase() + w.building_group.slice(1)} (travel zone)`
                     : sr1.buildings.find(b => b.id === w.building_id)?.name || "—";
                   const booked = sr1.bookings.filter(bk => bk.window_id === w.id && bk.status === 'booked');
-                  return <div key={w.id} style={{ background: "#fff", border: "1px solid #E8E6E1", borderRadius: 10, padding: "10px 14px", marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                    <div>
-                      <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600 }}>{fmtDateOnly(w.window_date)} · {bn}</div>
-                      <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>
-                        {fmtTime(centralISO(w.window_date, w.start_time))} – {fmtTime(centralISO(w.window_date, w.end_time))}
-                        {` · ${w.reflection_minutes} min reflection · ${w.buffer_minutes} min buffer`}
-                        {w.note ? ` · ${w.note}` : ''}
+                  const isEditing = sr1EditWindow === w.id;
+                  // Current dropdown value for pre-filling edit form
+                  const currentBuildingVal = w.building_group ? `z:${w.building_group}` : w.building_id ? `b:${w.building_id}` : '';
+                  return <div key={w.id} style={{ background: "#fff", border: `1px solid ${isEditing ? c.color : '#E8E6E1'}`, borderRadius: 10, padding: "10px 14px", marginBottom: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                      <div>
+                        <div style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600 }}>{fmtDateOnly(w.window_date)} · {bn}</div>
+                        <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>
+                          {fmtTime(centralISO(w.window_date, w.start_time))} – {fmtTime(centralISO(w.window_date, w.end_time))}
+                          {` · ${w.reflection_minutes} min reflection · ${w.buffer_minutes} min buffer`}
+                          {w.note ? ` · ${w.note}` : ''}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <Pill t={`${booked.length} booked`} bg={booked.length ? "#DCEEFB" : "#F8F7F4"} c={booked.length ? "#1565C0" : "#767676"} />
+                        <Pill t={w.published ? "Published" : "Hidden"} bg={w.published ? "#D4EDDA" : "#F5F4F0"} c={w.published ? "#2D6A4F" : "#767676"} />
+                        <button onClick={() => setSr1EditWindow(isEditing ? null : w.id)} aria-label={`${isEditing ? 'Cancel editing' : 'Edit'} window on ${fmtDateOnly(w.window_date)} at ${bn}`}
+                          style={{ padding: "3px 9px", border: `1px solid ${isEditing ? c.color : '#E0DDD8'}`, borderRadius: 4, fontFamily: F.b, fontSize: 11, background: isEditing ? c.color : "#fff", color: isEditing ? "#fff" : "#555", cursor: "pointer" }}>
+                          {isEditing ? "Cancel" : "Edit"}
+                        </button>
+                        <button onClick={() => handleToggleSr1Window(w)} aria-label={`${w.published ? 'Unpublish' : 'Publish'} window on ${fmtDateOnly(w.window_date)} at ${bn}`}
+                          style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, background: "#fff", color: "#555", cursor: "pointer" }}>
+                          {w.published ? "Unpublish" : "Publish"}
+                        </button>
+                        <button onClick={() => handleDeleteSr1Window(w, booked.length)} aria-label={`Delete window on ${fmtDateOnly(w.window_date)} at ${bn}`}
+                          style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, background: "#fff", color: "#C0392B", cursor: "pointer" }}>
+                          Delete
+                        </button>
                       </div>
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                      <Pill t={`${booked.length} booked`} bg={booked.length ? "#DCEEFB" : "#F8F7F4"} c={booked.length ? "#1565C0" : "#767676"} />
-                      <Pill t={w.published ? "Published" : "Hidden"} bg={w.published ? "#D4EDDA" : "#F5F4F0"} c={w.published ? "#2D6A4F" : "#767676"} />
-                      <button onClick={() => handleToggleSr1Window(w)} aria-label={`${w.published ? 'Unpublish' : 'Publish'} window on ${fmtDateOnly(w.window_date)} at ${bn}`}
-                        style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, background: "#fff", color: "#555", cursor: "pointer" }}>
-                        {w.published ? "Unpublish" : "Publish"}
-                      </button>
-                      <button onClick={() => handleDeleteSr1Window(w, booked.length)} aria-label={`Delete window on ${fmtDateOnly(w.window_date)} at ${bn}`}
-                        style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, background: "#fff", color: "#C0392B", cursor: "pointer" }}>
-                        Delete
-                      </button>
-                    </div>
+                    {isEditing && <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #F0EEEA" }}>
+                      {booked.length > 0 && <div style={{ fontFamily: F.b, fontSize: 11, color: "#E65100", marginBottom: 10, padding: "6px 10px", background: "#FFF3E0", borderRadius: 6 }}>
+                        ⚠ {booked.length} candidate{booked.length === 1 ? ' has' : 's have'} booked this window. Saving changes may affect their bookings — notify them manually.
+                      </div>}
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                        <div>
+                          <label htmlFor={`sr1-ew-${w.id}-building`} style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Building</label>
+                          <select id={`sr1-ew-${w.id}-building`} defaultValue={currentBuildingVal} style={{ padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, background: "#fff" }}>
+                            <option value="">Choose…</option>
+                            <optgroup label="Buildings">
+                              {sr1.buildings.map(b => <option key={b.id} value={`b:${b.id}`}>{b.name}</option>)}
+                            </optgroup>
+                            {(() => { const zones = [...new Set(sr1.buildings.map(b => b.building_group).filter(Boolean))]; if (zones.length === 0) return null; return <optgroup label="Travel Zones">{zones.map(z => <option key={z} value={`z:${z}`}>{z.charAt(0).toUpperCase() + z.slice(1)}</option>)}</optgroup>; })()}
+                          </select>
+                        </div>
+                        <div>
+                          <label htmlFor={`sr1-ew-${w.id}-date`} style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Date</label>
+                          <input id={`sr1-ew-${w.id}-date`} type="date" defaultValue={w.window_date} style={{ padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12 }} />
+                        </div>
+                        <div>
+                          <label htmlFor={`sr1-ew-${w.id}-start`} style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Opens</label>
+                          <input id={`sr1-ew-${w.id}-start`} type="time" defaultValue={w.start_time} style={{ padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12 }} />
+                        </div>
+                        <div>
+                          <label htmlFor={`sr1-ew-${w.id}-end`} style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Closes</label>
+                          <input id={`sr1-ew-${w.id}-end`} type="time" defaultValue={w.end_time} style={{ padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12 }} />
+                        </div>
+                        <div>
+                          <label htmlFor={`sr1-ew-${w.id}-refl`} style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Reflection (min)</label>
+                          <input id={`sr1-ew-${w.id}-refl`} type="number" min="0" max="120" defaultValue={w.reflection_minutes} style={{ width: 72, padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12 }} />
+                        </div>
+                        <div>
+                          <label htmlFor={`sr1-ew-${w.id}-buffer`} style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Buffer (min)</label>
+                          <input id={`sr1-ew-${w.id}-buffer`} type="number" min="0" max="120" defaultValue={w.buffer_minutes} style={{ width: 72, padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12 }} />
+                        </div>
+                      </div>
+                      <div style={{ marginTop: 10 }}>
+                        <label htmlFor={`sr1-ew-${w.id}-note`} style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Note for candidates (optional)</label>
+                        <input id={`sr1-ew-${w.id}-note`} type="text" defaultValue={w.note || ''} placeholder="e.g. Available after 12:45" style={{ width: "100%", maxWidth: 420, padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, boxSizing: "border-box" }} />
+                      </div>
+                      <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
+                        <button disabled={sr1Busy} onClick={() => handleSaveEditSr1Window(w, booked.length)}
+                          style={{ padding: "6px 14px", background: sr1Busy ? "#B0ADA8" : c.color, color: "#fff", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 12, fontWeight: 600, cursor: sr1Busy ? "default" : "pointer" }}>
+                          {sr1Busy ? "Saving…" : "Save changes"}
+                        </button>
+                        <button onClick={() => setSr1EditWindow(null)}
+                          style={{ padding: "6px 14px", background: "#fff", color: "#555", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, cursor: "pointer" }}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>}
                   </div>;
                 })}
               </div>;
