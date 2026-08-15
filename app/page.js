@@ -3424,8 +3424,12 @@ export default function App() {
               <div style={{ flex: 1, display: "flex", gap: 3 }}>{relAssignments.map(id => { const x = c.assignments.find(a => a.id === id);
                 const words = (x?.name || "").split(' ');
                 const abbr = words.length >= 3 ? words.filter(w => w.length > 1).map(w => w[0]).join('').substring(0, 5) : (x?.name || "").substring(0, 6);
-                return <div key={id} style={{ flex: 1, minWidth: 28, maxWidth: 40, display: "flex", alignItems: "flex-end", justifyContent: "center" }} title={x?.name} aria-label={x?.name}>
-                  <div style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", fontFamily: F.b, fontSize: 10, fontWeight: 600, color: "#555", textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", maxHeight: 72, lineHeight: 1.2, paddingBottom: 2 }}>{x?.name || ""}</div>
+                const aSection = x?.sections || null; // e.g. ['WB'] or null
+                const sectionLabel = aSection ? `(${aSection.join('/')})` : '';
+                // Hide column entirely when filtered to a section this assignment doesn't serve
+                if (aSection && sectionFilter !== 'all' && !aSection.includes(sectionFilter)) return null;
+                return <div key={id} style={{ flex: 1, minWidth: 28, maxWidth: 40, display: "flex", alignItems: "flex-end", justifyContent: "center" }} title={x?.name + (sectionLabel ? ` — ${sectionLabel} only` : '')} aria-label={x?.name + (sectionLabel ? ` (${aSection.join('/')} section only)` : '')}>
+                  <div style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", fontFamily: F.b, fontSize: 10, fontWeight: 600, color: aSection ? "#9B6B00" : "#555", textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", maxHeight: 72, lineHeight: 1.2, paddingBottom: 2 }}>{(x?.name || "") + (sectionLabel ? ` ${sectionLabel}` : '')}</div>
                 </div>; })}</div>
               <div style={{ width: 50, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", textAlign: "right" }}>Self</div>
             </div>
@@ -3438,8 +3442,16 @@ export default function App() {
                 <button onClick={() => copyProgressEmail(s)} aria-label={`Copy progress email for ${s.name}`} title={`Copy progress email for ${s.name}`} style={{ flexShrink: 0, width: 22, height: 22, borderRadius: 4, background: "none", border: "1px solid #E0DDD8", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "#767676", padding: 0 }}>✉</button>
                 <div style={{ flex: 1, display: "flex", gap: 3 }}>
                   {relAssignments.map(id => { const st = (iS[s.id] || {})[id] || "";
-                    const aName = c.assignments.find(a => a.id === id)?.name || id;
-                    const isMastery = c.assignments.find(a => a.id === id)?.eval === "mastery";
+                    const asgn = c.assignments.find(a => a.id === id);
+                    const aName = asgn?.name || id;
+                    const isMastery = asgn?.eval === "mastery";
+                    const aSection = asgn?.sections || null;
+                    // Hide cell when column is hidden (filtered to non-matching section)
+                    if (aSection && sectionFilter !== 'all' && !aSection.includes(sectionFilter)) return null;
+                    // Show dimmed dash when this student's section doesn't match the assignment
+                    const studentSection = s.section || null;
+                    const notApplicable = aSection && studentSection && !aSection.includes(studentSection);
+                    if (notApplicable) return <div key={id} style={{ flex: 1, minWidth: 28, maxWidth: 40, height: 22, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#CCC" }} aria-label={`${aName} — not assigned to this section`} title={`Not assigned to ${studentSection}`}>—</div>;
                     const nextVal = st === "" ? "mastery" : st === "mastery" ? (isMastery ? "revision" : "not_submitted") : st === "revision" ? "not_submitted" : null;
                     const cycleLabel = st === "" ? `Mark ${aName} mastered` : st === "mastery" ? (isMastery ? `Change ${aName} to needs revision` : `Change ${aName} to not submitted`) : st === "revision" ? `Change ${aName} to not submitted` : `Clear ${aName}`;
                     return <button key={id} title={aName} aria-label={cycleLabel} onClick={() => handleInstrUpdate(s.id, id, nextVal)} style={{ flex: 1, minWidth: 28, maxWidth: 40, height: 22, borderRadius: 4, background: st === "mastery" ? "#D4EDDA" : st === "revision" ? "#FFF3CD" : st === "not_submitted" ? "#FCE8E8" : "#F5F4F0", border: !st ? "1.5px dashed #E8E6E1" : "1.5px solid transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: st === "mastery" ? "#2D6A4F" : st === "revision" ? "#856404" : st === "not_submitted" ? "#C0392B" : "transparent", cursor: "pointer", padding: 0 }}>{st === "mastery" ? "M" : st === "revision" ? "R" : st === "not_submitted" ? "NS" : ""}</button>;
