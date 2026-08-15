@@ -569,7 +569,7 @@ function centralISO(dateStr, timeStr) {
 
 async function loadSr1Buildings() {
   const { data } = await supabase.from('sr1_buildings')
-    .select('id, name, active').eq('term', activeTerm()).order('name');
+    .select('id, name, active, building_group').eq('term', activeTerm()).order('name');
   return data || [];
 }
 
@@ -581,6 +581,12 @@ async function addSr1Building(name) {
 
 async function deleteSr1Building(id) {
   const { error } = await supabase.from('sr1_buildings').delete().eq('id', id);
+  return { error };
+}
+
+async function updateSr1BuildingGroup(id, group) {
+  const { error } = await supabase.from('sr1_buildings')
+    .update({ building_group: group || null }).eq('id', id);
   return { error };
 }
 
@@ -1793,8 +1799,13 @@ export default function App() {
   const c = COURSES[ck];
   const isInstr = user.profile.role === 'instructor';
   const assignmentIds = new Set(c.assignments.map(a => a.id));
-  // All assignments are now visible from day one — no release gating
-  const relAssignments = c.assignments.map(a => a.id);
+  // All assignments are visible from day one — no release gating.
+  // Assignments with a `sections` array are only shown to students in those sections.
+  // Instructors always see all assignments; the section filter handles their display separately.
+  const mySection = !isInstr ? (user.courses.find(co => co.key === ck)?.section || null) : null;
+  const relAssignments = c.assignments
+    .filter(a => !a.sections || !mySection || a.sections.includes(mySection))
+    .map(a => a.id);
 
   // ---- STUDENT VIEW ----
   if (!isInstr) {
@@ -4069,8 +4080,25 @@ export default function App() {
               {sr1.buildings.length > 0 && <div style={{ marginBottom: 10 }}>
                 {sr1.buildings.map(b => {
                   const inUse = sr1.roster.some(r => r.building_id === b.id) || sr1.windows.some(w => w.building_id === b.id);
-                  return <div key={b.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px solid #F5F4F0" }}>
-                    <span style={{ fontFamily: F.b, fontSize: 12 }}>{b.name}</span>
+                  return <div key={b.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 0", borderBottom: "1px solid #F5F4F0", flexWrap: "wrap" }}>
+                    <span style={{ fontFamily: F.b, fontSize: 12, minWidth: 140 }}>{b.name}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1 }}>
+                      <label style={{ fontFamily: F.b, fontSize: 11, color: "#767676", whiteSpace: "nowrap" }}>Travel zone:</label>
+                      <input
+                        type="text"
+                        defaultValue={b.building_group || ''}
+                        placeholder="e.g. mill-creek-ott"
+                        aria-label={`Travel zone group for ${b.name}`}
+                        onBlur={async e => {
+                          const val = e.target.value.trim();
+                          if (val === (b.building_group || '')) return; // no change
+                          const { error } = await updateSr1BuildingGroup(b.id, val);
+                          if (error) { showToast('Could not save travel zone — please try again.', 'error'); e.target.value = b.building_group || ''; }
+                          else { setSr1(s => ({ ...s, buildings: s.buildings.map(x => x.id === b.id ? { ...x, building_group: val || null } : x) })); showToast('Travel zone saved ✓', 'success'); }
+                        }}
+                        style={{ width: 160, padding: "3px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11 }}
+                      />
+                    </div>
                     {inUse
                       ? <span style={{ fontFamily: F.b, fontSize: 11, color: "#767676" }}>In use</span>
                       : <button onClick={() => handleDeleteSr1Building(b)} aria-label={`Remove building ${b.name}`}
