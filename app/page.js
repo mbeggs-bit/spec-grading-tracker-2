@@ -627,8 +627,13 @@ async function loadSr1Windows() {
 }
 
 async function createSr1Window(w) {
+  // Zone windows (travel zone selected) store building_group and leave building_id null.
+  // Individual building windows store building_id and leave building_group null.
   const { error } = await supabase.from('sr1_windows').insert({
-    term: activeTerm(), building_id: w.building_id, window_date: w.window_date,
+    term: activeTerm(),
+    building_id: w.building_id || null,
+    building_group: w.building_group || null,
+    window_date: w.window_date,
     start_time: w.start_time, end_time: w.end_time,
     reflection_minutes: w.reflection_minutes, buffer_minutes: w.buffer_minutes,
     note: w.note || null, published: w.published
@@ -2633,19 +2638,23 @@ export default function App() {
 
   const handleCreateSr1Window = async (publish) => {
     const g = id => document.getElementById(id)?.value || '';
-    const building_id = g('sr1-w-building'), window_date = g('sr1-w-date');
+    const buildingVal = g('sr1-w-building'); // "b:uuid" for a building, "z:groupname" for a zone
+    const window_date = g('sr1-w-date');
     const start_time = g('sr1-w-start'), end_time = g('sr1-w-end');
     const reflection_minutes = parseInt(g('sr1-w-refl'), 10);
     const buffer_minutes = parseInt(g('sr1-w-buffer'), 10);
     const note = g('sr1-w-note');
-    if (!building_id) { showToast('Choose a building.'); return; }
+    if (!buildingVal) { showToast('Choose a building or travel zone.'); return; }
     if (!window_date) { showToast('Choose a date.'); return; }
     if (!start_time || !end_time) { showToast('Set both an opening and closing time.'); return; }
     if (end_time <= start_time) { showToast('The closing time must be after the opening time.'); return; }
     if (!Number.isFinite(reflection_minutes) || reflection_minutes < 0 || reflection_minutes > 120) { showToast('Reflection minutes must be between 0 and 120.'); return; }
     if (!Number.isFinite(buffer_minutes) || buffer_minutes < 0 || buffer_minutes > 120) { showToast('Buffer minutes must be between 0 and 120.'); return; }
+    const isZone = buildingVal.startsWith('z:');
+    const building_id = isZone ? null : buildingVal.slice(2);
+    const building_group = isZone ? buildingVal.slice(2) : null;
     setSr1Busy(true);
-    const { error } = await createSr1Window({ building_id, window_date, start_time, end_time, reflection_minutes, buffer_minutes, note, published: publish });
+    const { error } = await createSr1Window({ building_id, building_group, window_date, start_time, end_time, reflection_minutes, buffer_minutes, note, published: publish });
     setSr1Busy(false);
     if (error) { showToast('Could not create that window — please try again.'); return; }
     ['sr1-w-date', 'sr1-w-note'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
@@ -3991,7 +4000,16 @@ export default function App() {
                       <label htmlFor="sr1-w-building" style={{ display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 }}>Building</label>
                       <select id="sr1-w-building" defaultValue="" style={{ padding: "6px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, background: "#fff" }}>
                         <option value="">Choose…</option>
-                        {sr1.buildings.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                        <optgroup label="Buildings">
+                          {sr1.buildings.map(b => <option key={b.id} value={`b:${b.id}`}>{b.name}</option>)}
+                        </optgroup>
+                        {(() => {
+                          const zones = [...new Set(sr1.buildings.map(b => b.building_group).filter(Boolean))];
+                          if (zones.length === 0) return null;
+                          return <optgroup label="Travel Zones">
+                            {zones.map(z => <option key={z} value={`z:${z}`}>{z.charAt(0).toUpperCase() + z.slice(1)}</option>)}
+                          </optgroup>;
+                        })()}
                       </select>
                     </div>
                     <div>
@@ -4039,7 +4057,9 @@ export default function App() {
               if (upcoming.length === 0) return <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", marginBottom: 18 }}>No upcoming windows.</div>;
               return <div style={{ marginBottom: 18 }}>
                 {upcoming.map(w => {
-                  const bn = sr1.buildings.find(b => b.id === w.building_id)?.name || "—";
+                  const bn = w.building_group
+                    ? `${w.building_group.charAt(0).toUpperCase() + w.building_group.slice(1)} (travel zone)`
+                    : sr1.buildings.find(b => b.id === w.building_id)?.name || "—";
                   const booked = sr1.bookings.filter(bk => bk.window_id === w.id && bk.status === 'booked');
                   return <div key={w.id} style={{ background: "#fff", border: "1px solid #E8E6E1", borderRadius: 10, padding: "10px 14px", marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                     <div>
