@@ -3778,7 +3778,10 @@ export default function App() {
                   <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px" }}
                     onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{a.name}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 500 }}>{a.name}</span>
+                        {a.sections && <span style={{ fontFamily: F.b, fontSize: 10, fontWeight: 700, color: "#9B6B00", background: "#FFF3CD", border: "1px solid #F0E0A0", borderRadius: 4, padding: "1px 5px", whiteSpace: "nowrap" }}>{a.sections.join('/')} only</span>}
+                      </div>
                       {summary && !isEditingDue && <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginTop: 1 }}>{summary}</div>}
                     </div>
                     <button onClick={(e) => { e.stopPropagation(); if (isEditingDue) { setEditDue(null); } else { openDueEditor(id, courseSections); } }} aria-label={`${(ddLabel || ddDate) ? 'Edit' : 'Add'} due date for ${a.name}`} style={{ padding: "2px 8px", border: "1px solid #E0DDD8", borderRadius: 4, fontFamily: F.b, fontSize: 11, color: (ddLabel || ddDate) ? "#856404" : "#767676", cursor: "pointer", background: "#fff", flexShrink: 0 }}>{ddDate ? "✎ Due" : ddLabel ? "✎ Note" : "+ Due date"}</button>
