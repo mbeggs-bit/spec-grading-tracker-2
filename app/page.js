@@ -207,6 +207,37 @@ async function setCourseCodeActive(code, active) {
   return { error };
 }
 
+// Course codes never contain spaces, so strip every whitespace character —
+// including interior spaces ("MATH 4850WB") and non-breaking spaces — plus the
+// zero-width characters that ride along when a code is copied out of Word, a
+// PDF, or Brightspace. `.trim()` alone caught neither.
+function normalizeCode(raw) {
+  return (raw || '').replace(/[\s\u200B-\u200D\uFEFF]/g, '').toUpperCase();
+}
+
+// Course-code lookup that tells a wrong code apart from a failed request.
+//
+// The previous call discarded `error` and tested only `!data`. `.single()`
+// yields data:null for BOTH "no such active code" and any transport failure
+// (dropped request, timeout, rate limit), so a student whose request simply
+// never landed was told her code was invalid — and retrying a moment later
+// "fixed" it. One silent retry absorbs the common blip; after that the caller
+// gets an explicit reason and can say something true.
+//
+// Returns exactly one of: { row } | { notFound: true } | { failed: true }
+async function lookupCourseCode(rawCode) {
+  const code = normalizeCode(rawCode);
+  if (!code) return { notFound: true };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { data, error } = await supabase.from('course_codes')
+      .select('*').eq('code', code).eq('active', true).maybeSingle();
+    // maybeSingle: zero rows is data:null with NO error — a genuine miss.
+    if (!error) return data ? { row: data } : { notFound: true };
+    if (attempt === 0) await new Promise(r => setTimeout(r, 600));
+  }
+  return { failed: true };
+}
+
 // Mark/unmark an enrollment as a test account (colleague sign-ins used to check
 // the student view). Test enrollments are excluded from grade distribution,
 // counts, CSV export, and the Tracks tab.
@@ -914,6 +945,19 @@ export default function App() {
   const [forgotMode, setForgotMode] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotMsg, setForgotMsg] = useState(''); // confirmation message after submission
+  // Single in-flight guard for sign in / create account / join course. Each of
+  // those fires several sequential round trips with no visual feedback, so a
+  // student on slow wifi taps twice and fires the whole sequence concurrently.
+  const [authBusy, setAuthBusy] = useState(false);
+  // Password recovery. Arriving from a reset email used to drop the student
+  // straight into the app with her OLD password still in force — the link acted
+  // as a one-time sign-in, not a reset. These drive the "set a new password"
+  // screen that now intercepts that arrival.
+  const [recoveryMode, setRecoveryMode] = useState(false);
+  const [newPass, setNewPass] = useState('');
+  const [newPass2, setNewPass2] = useState('');
+  const [recoveryErr, setRecoveryErr] = useState('');
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
 
   // Course data
   // Course data — single object to prevent multiple re-renders
@@ -1000,10 +1044,58 @@ export default function App() {
     setTimeout(() => setToast(null), 4000);
   };
 
-  // Check auth on mount
+  // Check auth on mount.
+  //
+  // Read the URL hash BEFORE anything awaits. A password-reset link arrives as
+  // #access_token=...&type=recovery, and the Supabase client exchanges that for
+  // a live session and strips the hash. Missing this window is what let a reset
+  // link behave as a silent one-time sign-in while the student's OLD password
+  // stayed in force. The onAuthStateChange listener is the belt-and-braces path
+  // for the case where the client fires the event before this effect runs.
   useEffect(() => {
+    const hash = typeof window !== 'undefined' ? window.location.hash : '';
+    if (hash.includes('type=recovery')) setRecoveryMode(true);
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') setRecoveryMode(true);
+    });
     checkAuth();
+    return () => { try { sub?.subscription?.unsubscribe(); } catch { /* no-op */ } };
   }, []);
+
+  // Complete the reset: actually change the password, then clear the token out
+  // of the address bar so a refresh or a shared history entry cannot replay it.
+  async function handleSetNewPassword() {
+    if (recoveryBusy) return;
+    setRecoveryErr('');
+    if (newPass.length < 6) { setRecoveryErr('Please choose a password with at least 6 characters.'); return; }
+    if (newPass !== newPass2) { setRecoveryErr('The two passwords do not match.'); return; }
+    setRecoveryBusy(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPass });
+      if (error) {
+        const m = (error.message || '').toLowerCase();
+        setRecoveryErr(
+          m.includes('session') || m.includes('expired') || m.includes('token')
+            ? 'This reset link has expired or has already been used. Return to sign in and request a new one.'
+            : error.message
+        );
+        return;
+      }
+      if (typeof window !== 'undefined') window.history.replaceState(null, '', window.location.pathname);
+      setNewPass(''); setNewPass2('');
+      setRecoveryMode(false);
+      await checkAuth();
+    } finally {
+      setRecoveryBusy(false);
+    }
+  }
+
+  async function cancelRecovery() {
+    if (typeof window !== 'undefined') window.history.replaceState(null, '', window.location.pathname);
+    setNewPass(''); setNewPass2(''); setRecoveryErr(''); setRecoveryMode(false);
+    await supabase.auth.signOut();
+    setUser(null); setCk(null);
+  }
 
   async function checkAuth() {
     const { data: { session } } = await supabase.auth.getSession();
@@ -1365,20 +1457,27 @@ export default function App() {
   }
 
   async function handleLogin() {
+    if (authBusy) return;
     setLoginErr('');
-    const { error } = await supabase.auth.signInWithPassword({ email: loginEmail, password: loginPass });
-    if (error) {
-      if (error.message.includes('Invalid login')) {
-        setLoginErr('Invalid email or password. If this is your first time, click "First time? Create account".');
-      } else {
-        setLoginErr(error.message);
+    setAuthBusy(true);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email: loginEmail.trim().toLowerCase(), password: loginPass });
+      if (error) {
+        if (error.message.includes('Invalid login')) {
+          setLoginErr('Invalid email or password. If this is your first time, click "First time? Create account".');
+        } else {
+          setLoginErr(error.message);
+        }
+        return;
       }
-      return;
+      await checkAuth();
+    } finally {
+      setAuthBusy(false);
     }
-    await checkAuth();
   }
 
   async function handleSignup() {
+    if (authBusy) return;
     setLoginErr('');
     const email = loginEmail.trim().toLowerCase();
     
@@ -1393,13 +1492,21 @@ export default function App() {
       setLoginErr('Please enter your first and last name.');
       return;
     }
-    
-    // Validate course code
-    const { data: courseCode } = await supabase.from('course_codes').select('*').eq('code', signupCode.trim().toUpperCase()).eq('active', true).single();
-    if (!courseCode) {
-      setLoginErr('Invalid course code. Check with Dr. Beggs for the correct code.');
+
+    setAuthBusy(true);
+    try {
+    // Validate course code. Three outcomes, three messages — a request that
+    // never landed must not read as "your code is wrong."
+    const codeRes = await lookupCourseCode(signupCode);
+    if (codeRes.failed) {
+      setLoginErr("We couldn't reach the server just now. Please tap Create Account again in a moment — your code is most likely fine.");
       return;
     }
+    if (codeRes.notFound) {
+      setLoginErr('That course code was not recognized. Enter it exactly as it appears in your syllabus or in the email from Dr. Beggs.');
+      return;
+    }
+    const courseCode = codeRes.row;
     
     // Create the auth account
     const { error } = await supabase.auth.signUp({ email, password: loginPass });
@@ -1468,6 +1575,9 @@ export default function App() {
     }
     
     await checkAuth();
+    } finally {
+      setAuthBusy(false);
+    }
   }
 
   async function handleLogout() {
@@ -1487,13 +1597,24 @@ export default function App() {
   }
 
   async function handleJoinCourse() {
+    if (authBusy) return;
     setJoinErr('');
-    const code = joinCode.trim().toUpperCase();
+    const code = normalizeCode(joinCode);
     if (!code) { setJoinErr('Please enter a course code.'); return; }
 
-    // Validate the code is active
-    const { data: courseCode } = await supabase.from('course_codes').select('*').eq('code', code).eq('active', true).single();
-    if (!courseCode) { setJoinErr('Invalid course code. Check with Dr. Beggs for the correct code.'); return; }
+    setAuthBusy(true);
+    try {
+    // Validate the code is active — same three-outcome handling as signup.
+    const codeRes = await lookupCourseCode(code);
+    if (codeRes.failed) {
+      setJoinErr("We couldn't reach the server just now. Please tap Join again in a moment — your code is most likely fine.");
+      return;
+    }
+    if (codeRes.notFound) {
+      setJoinErr('That course code was not recognized. Enter it exactly as it appears in your syllabus or in the email from Dr. Beggs.');
+      return;
+    }
+    const courseCode = codeRes.row;
 
     // Check not already enrolled
     const existing = await loadEnrollments(user.profile.id);
@@ -1518,10 +1639,49 @@ export default function App() {
     setJoinCode('');
     setJoinErr({ ok: true, msg: 'Course added! Select it below.' });
     await checkAuth();
+    } finally {
+      setAuthBusy(false);
+    }
   }
 
   // ---- LOADING ----
   if (loading) return <Loading />;
+
+  // ---- SET NEW PASSWORD (arrived from a reset email) ----
+  // Must be tested BEFORE any user-dependent render. The recovery link produces
+  // a valid session, so without this gate checkAuth() would simply drop her into
+  // her dashboard and the password would never change.
+  if (recoveryMode) return (
+    <main style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
+      <div style={{ maxWidth: 420, width: "100%", padding: "0 20px" }}>
+        <div style={{ textAlign: "center", marginBottom: 36 }}>
+          <img src="/lumos-header.png" alt="Lumos — Learning, illuminated." style={{ maxWidth: 220, width: "100%", height: "auto", marginBottom: 14 }} />
+        </div>
+        <div role="region" aria-label="Choose a new password" style={{ background: "#fff", border: "1px solid #E8E6E1", borderRadius: 10, padding: "20px" }}>
+          <h2 style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "#6B6B6B", marginBottom: 10 }}>Choose a New Password</h2>
+          <p style={{ fontFamily: F.b, fontSize: 12, color: "#555", marginBottom: 12, lineHeight: 1.5 }}>
+            Enter a new password for your Lumos account. You'll be signed in as soon as it's saved.
+          </p>
+          <input value={newPass} onChange={e => { setNewPass(e.target.value); setRecoveryErr(''); }}
+            type="password" autoComplete="new-password" placeholder="New password (6+ characters)" aria-label="New password"
+            style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: 8, boxSizing: "border-box", outline: "none" }} />
+          <input value={newPass2} onChange={e => { setNewPass2(e.target.value); setRecoveryErr(''); }}
+            type="password" autoComplete="new-password" placeholder="Confirm new password" aria-label="Confirm new password"
+            onKeyDown={e => { if (e.key === 'Enter') handleSetNewPassword(); }}
+            style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: 10, boxSizing: "border-box", outline: "none" }} />
+          {recoveryErr && <div role="alert" aria-live="assertive" style={{ fontFamily: F.b, fontSize: 11, color: "#C0392B", marginBottom: 10, lineHeight: 1.4 }}>{recoveryErr}</div>}
+          <button onClick={handleSetNewPassword} disabled={recoveryBusy} aria-label="Save new password"
+            style={{ width: "100%", padding: "10px", background: recoveryBusy ? "#6B6B6B" : "#0B1436", color: "#fff", border: "none", borderRadius: 6, cursor: recoveryBusy ? "not-allowed" : "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
+            {recoveryBusy ? "Saving…" : "Save Password"}
+          </button>
+          <button onClick={cancelRecovery}
+            style={{ width: "100%", padding: "8px", background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>
+            ← Cancel and return to sign in
+          </button>
+        </div>
+      </div>
+    </main>
+  );
 
   // ---- LOGIN ----
   if (!user) return (
@@ -1584,13 +1744,13 @@ export default function App() {
               {isSignup && <input value={signupCode} onChange={e => { setSignupCode(e.target.value); setLoginErr(''); }} placeholder="Course code (provided by Dr. Beggs)" aria-label="Course code"
                 onKeyDown={e => { if (e.key === 'Enter') handleSignup(); }}
                 style={{ width: "100%", padding: "8px 12px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, marginBottom: 4, boxSizing: "border-box", outline: "none" }} />}
-              {isSignup && <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginBottom: 12, paddingLeft: 2 }}>Example: MATH4850 or MATH3820</div>}
+              {isSignup && <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginBottom: 12, paddingLeft: 2 }}>Use the exact code from your syllabus or from Dr. Beggs. Codes are section-specific.</div>}
               {loginErr && <div role="alert" aria-live="assertive" style={{ fontFamily: F.b, fontSize: 11, color: "#C0392B", marginBottom: 10, lineHeight: 1.4 }}>{loginErr}</div>}
-              <button onClick={isSignup ? handleSignup : handleLogin}
-                style={{ width: "100%", padding: "10px", background: "#0B1436", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
-                {isSignup ? "Create Account" : "Sign In"}
+              <button onClick={isSignup ? handleSignup : handleLogin} disabled={authBusy}
+                style={{ width: "100%", padding: "10px", background: authBusy ? "#6B6B6B" : "#0B1436", color: "#fff", border: "none", borderRadius: 6, cursor: authBusy ? "not-allowed" : "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
+                {authBusy ? (isSignup ? "Creating your account…" : "Signing in…") : (isSignup ? "Create Account" : "Sign In")}
               </button>
-              <button onClick={() => { setIsSignup(!isSignup); setLoginErr(''); }}
+              <button onClick={() => { setIsSignup(!isSignup); setLoginErr(''); }} disabled={authBusy}
                 style={{ width: "100%", padding: "8px", background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>
                 {isSignup ? "Already have an account? Sign in" : "First time? Create account"}
               </button>
@@ -1644,9 +1804,10 @@ export default function App() {
               />
               <button
                 onClick={handleJoinCourse}
+                disabled={authBusy}
                 aria-label="Join course"
-                style={{ padding: "8px 16px", background: "#CF202E", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
-                Join
+                style={{ padding: "8px 16px", background: authBusy ? "#6B6B6B" : "#CF202E", color: "#fff", border: "none", borderRadius: 6, cursor: authBusy ? "not-allowed" : "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
+                {authBusy ? "Joining…" : "Join"}
               </button>
             </div>
             {joinErr && (
@@ -1797,9 +1958,10 @@ export default function App() {
                 />
                 <button
                   onClick={handleJoinCourse}
+                  disabled={authBusy}
                   aria-label="Join course"
-                  style={{ padding: "8px 16px", background: "#CF202E", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
-                  Join
+                  style={{ padding: "8px 16px", background: authBusy ? "#6B6B6B" : "#CF202E", color: "#fff", border: "none", borderRadius: 6, cursor: authBusy ? "not-allowed" : "pointer", fontFamily: F.b, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
+                  {authBusy ? "Joining…" : "Join"}
                 </button>
               </div>
               {joinErr && (
