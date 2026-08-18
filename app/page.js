@@ -1751,7 +1751,7 @@ export default function App() {
                 {authBusy ? (isSignup ? "Creating your account…" : "Signing in…") : (isSignup ? "Create Account" : "Sign In")}
               </button>
               <button onClick={() => { setIsSignup(!isSignup); setLoginErr(''); }} disabled={authBusy}
-                style={{ width: "100%", padding: "8px", background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>
+                style={{ width: "100%", padding: "8px", background: "none", border: "none", cursor: authBusy ? "not-allowed" : "pointer", fontFamily: F.b, fontSize: 11, color: authBusy ? "#9A9A9A" : "#6B6B6B" }}>
                 {isSignup ? "Already have an account? Sign in" : "First time? Create account"}
               </button>
             </>
