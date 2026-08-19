@@ -380,6 +380,19 @@ async function loadClassPrep(courseKey, profileId) {
   return map;
 }
 
+// Instructor's OWN class prep confirmation — deliberately a separate table from
+// `class_prep` (student self-report). Never read this in the student view, and
+// never let a student write to it (enforced by RLS — instructor-only policies).
+// This mirrors the student_checks / instructor_statuses split used for
+// assignments, so marking prep complete here can never be confused with, or
+// silently populated by, a student's own checkoff.
+async function loadClassPrepInstructor(courseKey) {
+  const { data } = await supabase.from('class_prep_instructor_checks').select('*').eq('course_key', courseKey).eq('term', activeTerm());
+  const map = {};
+  (data || []).forEach(r => { if (!map[r.profile_id]) map[r.profile_id] = {}; map[r.profile_id][r.prep_id] = r.checked; });
+  return map;
+}
+
 async function loadTokens(courseKey, profileId) {
   const q = supabase.from('tokens').select('*').eq('course_key', courseKey).eq('term', activeTerm());
   if (profileId) q.eq('profile_id', profileId);
@@ -440,6 +453,18 @@ async function toggleClassPrep(profileId, courseKey, prepId) {
   } else {
     await supabase.from('class_prep').insert({ profile_id: profileId, course_key: courseKey, prep_id: prepId, checked: true, term: activeTerm() });
     return true;
+  }
+}
+
+// Instructor's own class prep write — matches the shape of upsertInstrStatus
+// (returns {error}) so it plugs into the same optimistic-update-with-rollback
+// pattern used for grading. Writes to class_prep_instructor_checks only —
+// never touches the student's class_prep row.
+async function upsertClassPrepInstructor(profileId, courseKey, prepId, checked) {
+  if (!checked) {
+    return await supabase.from('class_prep_instructor_checks').delete().match({ profile_id: profileId, course_key: courseKey, prep_id: prepId, term: activeTerm() });
+  } else {
+    return await supabase.from('class_prep_instructor_checks').upsert({ profile_id: profileId, course_key: courseKey, prep_id: prepId, checked: true, term: activeTerm(), updated_at: new Date().toISOString() }, { onConflict: 'profile_id,course_key,prep_id,term' });
   }
 }
 
@@ -961,9 +986,9 @@ export default function App() {
 
   // Course data
   // Course data — single object to prevent multiple re-renders
-  const [courseData, setCourseData] = useState({ rel: [], dueDates: {}, dueDatesAll: {}, students: [], iS: {}, iN: {}, sC: {}, cP: {}, toks: {}, fq: [], teachDates: [], teachSel: [], myInstrSt: {}, myQueue: {} });
+  const [courseData, setCourseData] = useState({ rel: [], dueDates: {}, dueDatesAll: {}, students: [], iS: {}, iN: {}, sC: {}, cP: {}, cPI: {}, toks: {}, fq: [], teachDates: [], teachSel: [], myInstrSt: {}, myQueue: {} });
   const [dataLoading, setDataLoading] = useState(false);
-  const { rel, dueDates, dueDatesAll, students, iS, iN, sC, cP, toks, fq, teachDates, teachSel, myInstrSt, myQueue } = courseData;
+  const { rel, dueDates, dueDatesAll, students, iS, iN, sC, cP, cPI, toks, fq, teachDates, teachSel, myInstrSt, myQueue } = courseData;
 
   // Practicum (SR1) — loaded separately from courseData because it is not
   // course-scoped. The roster is the ~8 candidates supervised in the field
@@ -1146,7 +1171,7 @@ export default function App() {
     // "all sections" view (null) — the Settings editor works off dueDatesAll, and the
     // feed/grid correctly show the all-sections row as the default.
     const mySection = isStudent ? (user.courses.find(co => co.key === ck)?.section || null) : null;
-    const [r, dd, s, is, inn, sc, cp, t, f, td, ts, mis, mq] = await Promise.all([
+    const [r, dd, s, is, inn, sc, cp, cpi, t, f, td, ts, mis, mq] = await Promise.all([
       loadReleasedAssignments(ck),
       loadDueDates(ck, mySection),
       !isStudent ? loadStudentsForCourse(ck) : Promise.resolve([]),
@@ -1154,6 +1179,7 @@ export default function App() {
       !isStudent ? loadInstrNotes(ck) : Promise.resolve({}),
       loadStudentChecks(ck, isStudent ? user.profile.id : null),
       loadClassPrep(ck, isStudent ? user.profile.id : null),
+      !isStudent ? loadClassPrepInstructor(ck) : Promise.resolve({}),
       loadTokens(ck, isStudent ? user.profile.id : null),
       !isStudent ? loadFeedbackQueue(ck) : Promise.resolve([]),
       loadTeachingDates(ck),
@@ -1161,7 +1187,7 @@ export default function App() {
       isStudent ? loadMyInstrStatuses(ck, user.profile.id) : Promise.resolve({}),
       isStudent ? loadMyQueue(ck, user.profile.id) : Promise.resolve({}),
     ]);
-    setCourseData({ rel: r, dueDates: dd.dueDates, dueDatesAll: dd.dueDatesAll, students: s, iS: is, iN: inn, sC: sc, cP: cp, toks: t, fq: f, teachDates: td, teachSel: ts, myInstrSt: mis, myQueue: mq });
+    setCourseData({ rel: r, dueDates: dd.dueDates, dueDatesAll: dd.dueDatesAll, students: s, iS: is, iN: inn, sC: sc, cP: cp, cPI: cpi, toks: t, fq: f, teachDates: td, teachSel: ts, myInstrSt: mis, myQueue: mq });
     if (isInitial) setDataLoading(false);
   }
 
@@ -2749,6 +2775,32 @@ export default function App() {
       showToast('Failed to save — please try again.');
     }
   };
+
+  // Instructor's own class prep confirmation. Same optimistic-update-with-
+  // rollback shape as handleInstrUpdate, writing to the separate
+  // class_prep_instructor_checks table so it never reads from or writes to
+  // the student's own class_prep checkoff.
+  const handleClassPrepInstrUpdate = async (pid, prepId, checked) => {
+    const prevVal = (courseData.cPI[pid] || {})[prepId];
+    setCourseData(prev => {
+      const prevStudent = prev.cPI[pid] || {};
+      const updatedStudent = checked
+        ? { ...prevStudent, [prepId]: true }
+        : Object.fromEntries(Object.entries(prevStudent).filter(([k]) => k !== prepId));
+      return { ...prev, cPI: { ...prev.cPI, [pid]: updatedStudent } };
+    });
+    const { error } = await upsertClassPrepInstructor(pid, ck, prepId, checked);
+    if (error) {
+      setCourseData(prev => {
+        const cur = prev.cPI[pid] || {};
+        const reverted = prevVal === undefined
+          ? Object.fromEntries(Object.entries(cur).filter(([k]) => k !== prepId))
+          : { ...cur, [prepId]: prevVal };
+        return { ...prev, cPI: { ...prev.cPI, [pid]: reverted } };
+      });
+      showToast('Failed to save — please try again.');
+    }
+  };
   // ---- PRACTICUM (SR1) HANDLERS -----------------------------------------
   // These call refreshSr1() rather than refresh(): practicum data is loaded
   // separately from courseData, so a full course reload would be wasted work.
@@ -3134,18 +3186,18 @@ export default function App() {
   filteredStudents.forEach(s => { const g = calcInstrGrade(iS[s.id] || {}, relAssignments); dist[g] = (dist[g] || 0) + 1; });
 
   const insights = relAssignments.map(id => { const a = c.assignments.find(x => x.id === id); const rc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "revision").length; const nsc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "not_submitted").length; const mc = filteredStudents.filter(s => (iS[s.id] || {})[id] === "mastery").length; return { ...a, rc, nsc, mc, ns: filteredStudents.length - rc - nsc - mc }; }).filter(a => a.rc > 0 || a.nsc > 0).sort((a, b) => (b.rc + b.nsc) - (a.rc + a.nsc));
-  const cpSum = (c.classPrep || []).map(cp => ({ ...cp, done: filteredStudents.filter(s => (cP[s.id] || {})[cp.id]).length }));
+  const cpSum = (c.classPrep || []).map(cp => ({ ...cp, done: filteredStudents.filter(s => (cPI[s.id] || {})[cp.id]).length }));
 
   const exportCSV = () => {
     const exportable = students.filter(s => !s.isTest);
     const filteredStudents = sectionFilter === 'all' ? exportable : exportable.filter(s => s.section === sectionFilter);
     const allA = c.assignments.filter(x => relAssignments.includes(x.id)); const cpI = c.classPrep || [];
     const hasSections = students.some(s => s.section);
-    const header = ["Term", "Last", "First", "Email", ...(hasSections ? ["Section"] : []), ...allA.map(x => x.name + " (Instr)"), ...allA.map(x => x.name + " (Student)"), ...cpI.map(x => x.name + " (Prep)"), "Tokens Used", "Tokens Avail", "Instr Track", "Student Track"].join(",");
+    const header = ["Term", "Last", "First", "Email", ...(hasSections ? ["Section"] : []), ...allA.map(x => x.name + " (Instr)"), ...allA.map(x => x.name + " (Student)"), ...cpI.map(x => x.name + " (Prep - Instr)"), ...cpI.map(x => x.name + " (Prep - Self)"), "Tokens Used", "Tokens Avail", "Instr Track", "Student Track"].join(",");
     const rows = filteredStudents.map(st => {
-      const si = iS[st.id] || {}; const sc = sC[st.id] || {}; const cp2 = cP[st.id] || {}; const tk = (toks[st.id] || []).length;
+      const si = iS[st.id] || {}; const sc = sC[st.id] || {}; const cp2 = cP[st.id] || {}; const cpi2 = cPI[st.id] || {}; const tk = (toks[st.id] || []).length;
       const ig = calcInstrGrade(si, relAssignments); const sg = calcStudentGrade(sc, si, relAssignments, ck, dueDates); const tok = tokBal(tk, 0);
-      return [activeTerm(), st.last, st.first, st.email, ...(hasSections ? [st.section || ''] : []), ...allA.map(x => si[x.id] === "mastery" ? "M" : si[x.id] === "revision" ? "R" : si[x.id] === "not_submitted" ? "NS" : ""), ...allA.map(x => sc[x.id] ? "Y" : ""), ...cpI.map(x => cp2[x.id] ? "Y" : ""), tok.used, tok.avail, ig === "early" ? "" : ig, sg === "early" ? "" : sg].map(v => `"${v}"`).join(",");
+      return [activeTerm(), st.last, st.first, st.email, ...(hasSections ? [st.section || ''] : []), ...allA.map(x => si[x.id] === "mastery" ? "M" : si[x.id] === "revision" ? "R" : si[x.id] === "not_submitted" ? "NS" : ""), ...allA.map(x => sc[x.id] ? "Y" : ""), ...cpI.map(x => cpi2[x.id] ? "Y" : ""), ...cpI.map(x => cp2[x.id] ? "Y" : ""), tok.used, tok.avail, ig === "early" ? "" : ig, sg === "early" ? "" : sg].map(v => `"${v}"`).join(",");
     });
     const csvContent = header + "\n" + rows.join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" }); const url = URL.createObjectURL(blob);
@@ -3256,15 +3308,13 @@ export default function App() {
     const cpItems = c.classPrep || [];
     const currentPrep = cpItems.find(x => x.id === prepItem);
     const pSorted = [...students].sort((a, b) => sortBy === "first" ? (a.first || "").localeCompare(b.first || "") : (a.last || "").localeCompare(b.last || ""));
-    const markAllPrep = async (checked) => {
-      for (const s of pSorted) {
-        const done = !!(cP[s.id] || {})[prepItem];
-        if (checked && !done) await toggleClassPrep(s.id, ck, prepItem);
-        if (!checked && done) await toggleClassPrep(s.id, ck, prepItem);
-      }
-      refresh();
+    const markAllPrep = (checked) => {
+      pSorted.forEach(s => {
+        const done = !!(cPI[s.id] || {})[prepItem];
+        if (checked !== done) handleClassPrepInstrUpdate(s.id, prepItem, checked);
+      });
     };
-    const doneCount = students.filter(s => (cP[s.id] || {})[prepItem]).length;
+    const doneCount = students.filter(s => (cPI[s.id] || {})[prepItem]).length;
     return (
       <div>
         <a href="#main-content" className="skip-link">Skip to main content</a>
@@ -3293,16 +3343,18 @@ export default function App() {
           </div>
           <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
             {pSorted.map((s, si) => {
-              const done = !!(cP[s.id] || {})[prepItem];
+              const done = !!(cPI[s.id] || {})[prepItem];
+              const selfReported = !!(cP[s.id] || {})[prepItem];
               const sLabel = sortBy === "last" ? `${s.last}, ${s.first}` : `${s.first} ${s.last}`;
-              return <div key={s.id} role="checkbox" aria-checked={done} aria-label={`${sLabel}: ${currentPrep?.name || ''}`} tabIndex={0} onClick={async () => { await toggleClassPrep(s.id, ck, prepItem); refresh(); }}
-                onKeyDown={async e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); await toggleClassPrep(s.id, ck, prepItem); refresh(); } }}
+              return <div key={s.id} role="checkbox" aria-checked={done} aria-label={`${sLabel}: ${currentPrep?.name || ''}${selfReported ? ', student self-reported complete' : ''}`} tabIndex={0} onClick={() => handleClassPrepInstrUpdate(s.id, prepItem, !done)}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleClassPrepInstrUpdate(s.id, prepItem, !done); } }}
                 style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 16px", borderBottom: si < pSorted.length - 1 ? "1px solid #F5F3EF" : "none", cursor: "pointer" }}
                 onMouseEnter={e => e.currentTarget.style.background = "#FAFAF7"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                 <div style={{ width: 22, height: 22, borderRadius: 6, border: done ? "none" : "2px solid #D0CEC9", background: done ? "#2D6A4F" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                   {done && <span style={{ color: "#fff", fontSize: 13, fontWeight: 700 }}>✓</span>}
                 </div>
-                <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, color: done ? "#767676" : "#1A1A1A" }}>{sortBy === "last" ? `${s.last}, ${s.first}` : `${s.first} ${s.last}`}</span>
+                <span style={{ fontFamily: F.b, fontSize: 13, fontWeight: 500, color: done ? "#767676" : "#1A1A1A", flex: 1 }}>{sortBy === "last" ? `${s.last}, ${s.first}` : `${s.first} ${s.last}`}</span>
+                {selfReported && <Pill t="Self ✓" bg="#E8F5E9" c="#2D6A4F" />}
               </div>;
             })}
           </div>
@@ -3728,7 +3780,7 @@ export default function App() {
                 <div style={{ width: 50, flexShrink: 0, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#767676", textAlign: "right" }}>{cpSum.map(cp => `${cp.done}`).join('/')}</div>
               </div>
               {(() => { const cpq = cpGridSearch.toLowerCase(); const cpFiltered = cpq ? sorted.filter(s => `${s.first} ${s.last}`.toLowerCase().includes(cpq) || `${s.last}, ${s.first}`.toLowerCase().includes(cpq)) : sorted; return cpFiltered.map((s, si) => {
-                const sCp = cP[s.id] || {};
+                const sCp = cPI[s.id] || {};
                 const doneCount = (c.classPrep || []).filter(cp => !!sCp[cp.id]).length;
                 const allDone = doneCount === (c.classPrep || []).length;
                 return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < cpFiltered.length - 1 ? "1px solid #F5F3EF" : "none" }}>
