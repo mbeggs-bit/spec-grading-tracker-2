@@ -3781,13 +3781,21 @@ export default function App() {
               </div>
               {(() => { const cpq = cpGridSearch.toLowerCase(); const cpFiltered = cpq ? sorted.filter(s => `${s.first} ${s.last}`.toLowerCase().includes(cpq) || `${s.last}, ${s.first}`.toLowerCase().includes(cpq)) : sorted; return cpFiltered.map((s, si) => {
                 const sCp = cPI[s.id] || {};
+                const sSelf = cP[s.id] || {};
                 const doneCount = (c.classPrep || []).filter(cp => !!sCp[cp.id]).length;
                 const allDone = doneCount === (c.classPrep || []).length;
                 return <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: si < cpFiltered.length - 1 ? "1px solid #F5F3EF" : "none" }}>
                   <div style={{ width: 140, flexShrink: 0, fontFamily: F.b, fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.last}, {s.first}</div>
                   <div style={{ flex: 1, display: "flex", gap: 3 }}>
-                    {(c.classPrep || []).map(cp => { const done = !!sCp[cp.id];
-                      return <div key={cp.id} title={`${cp.name}: ${done ? 'Complete' : 'Not complete'}`} style={{ flex: 1, minWidth: 28, maxWidth: 40, height: 22, borderRadius: 4, background: done ? "#D4EDDA" : "#F5F4F0", border: done ? "1.5px solid #B7DFBF" : "1.5px dashed #E8E6E1", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: done ? "#2D6A4F" : "transparent" }}>{done ? "✓" : ""}</div>;
+                    {(c.classPrep || []).map(cp => { const done = !!sCp[cp.id]; const selfReported = !!sSelf[cp.id];
+                      const label = `${s.first} ${s.last}: ${cp.name} — ${done ? 'confirmed complete' : selfReported ? 'student self-reported, not yet confirmed' : 'not complete'}`;
+                      return <div key={cp.id} role="checkbox" aria-checked={done} aria-label={label} tabIndex={0}
+                        onClick={() => handleClassPrepInstrUpdate(s.id, cp.id, !done)}
+                        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleClassPrepInstrUpdate(s.id, cp.id, !done); } }}
+                        title={`${cp.name}: ${done ? 'Confirmed complete' : selfReported ? 'Student self-reported — click to confirm' : 'Not complete — click to confirm'}`}
+                        style={{ flex: 1, minWidth: 28, maxWidth: 40, height: 22, borderRadius: 4, cursor: "pointer", background: done ? "#D4EDDA" : selfReported ? "#FFF8E1" : "#F5F4F0", border: done ? "1.5px solid #B7DFBF" : selfReported ? "1.5px dashed #E8C56B" : "1.5px dashed #E8E6E1", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: done ? "#2D6A4F" : selfReported ? "#856404" : "transparent" }}>
+                        {done ? "✓" : selfReported ? "•" : ""}
+                      </div>;
                     })}
                   </div>
                   <div style={{ width: 50, flexShrink: 0, textAlign: "right", fontFamily: F.b, fontSize: 11, color: allDone ? "#2D6A4F" : "#767676" }}>{doneCount}/{(c.classPrep || []).length}</div>
@@ -3795,6 +3803,11 @@ export default function App() {
               }); })()}
               </div>{/* end minWidth scroll inner */}
             </div>}
+          </div>}
+          {expClassPrep && cpSum.length > 0 && <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 6, fontFamily: F.b, fontSize: 10, color: "#767676" }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 12, height: 12, borderRadius: 3, background: "#D4EDDA", border: "1.5px solid #B7DFBF", display: "inline-block" }} /> Confirmed by you</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 12, height: 12, borderRadius: 3, background: "#FFF8E1", border: "1.5px dashed #E8C56B", display: "inline-block" }} /> Student self-reported, not yet confirmed</span>
+            <span>Click any cell to toggle your confirmation.</span>
           </div>}
 
         </div>}
