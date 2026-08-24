@@ -844,6 +844,71 @@ function sr1CancelLocked(iso) {
   return new Date(iso).getTime() < Date.now() + 24 * 3600 * 1000;
 }
 
+/* ---- Typed time entry (booking form) --------------------------------------
+   The booking form takes free text rather than <input type="time">, which is a
+   scroll wheel on a phone and a stepper on the desktop — both slow when the
+   candidate already knows the time her lesson starts. Whatever is parsed here
+   is echoed back in the aria-live confirmation panel and normalised in the
+   field on blur, so a misreading is always visible before she books. */
+
+// "13:45:00" (or "13:45") -> 825. Null-safe; used to bound AM/PM inference.
+function hhmmToMinutes(t) {
+  if (!t) return null;
+  const [h, m] = String(t).split(':').map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return null;
+  return h * 60 + m;
+}
+
+// "13:45" -> "1:45 PM". The display form; never sent to the database.
+function fmtTypedTime(hhmm) {
+  if (!hhmm) return '';
+  const [h, m] = String(hhmm).split(':').map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return '';
+  const ap = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m).padStart(2, '0')} ${ap}`;
+}
+
+// Free text -> "HH:MM" 24-hour, or null when it cannot be read.
+// Accepts: "1:45 pm", "1:45p", "1.45 PM", "145", "13:45", "9".
+// winStartMin / winEndMin bound the AM/PM guess for input with no meridiem:
+// on a 1:45-4:30 PM window, a typed "2:00" can only sensibly mean 2:00 PM.
+function parseTypedTime(raw, winStartMin, winEndMin) {
+  if (raw === null || raw === undefined) return null;
+  const s = String(raw).trim().toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ');
+  if (!s) return null;
+  const m = s.match(/^(\d{1,2})(?::?(\d{2}))?\s*(am|pm|a|p)?$/);
+  if (!m) return null;
+
+  let h = Number(m[1]);
+  const min = m[2] === undefined ? 0 : Number(m[2]);
+  const mer = m[3] ? m[3][0] : null; // 'a' | 'p' | null
+  if (min > 59) return null;
+
+  if (mer) {
+    if (h < 1 || h > 12) return null;
+    if (mer === 'p' && h !== 12) h += 12;
+    if (mer === 'a' && h === 12) h = 0;
+  } else if (h > 23) {
+    return null;
+  } else if (h >= 1 && h <= 12) {
+    const amH = h === 12 ? 0 : h;
+    const pmH = h === 12 ? 12 : h + 12;
+    const inWin = v => winStartMin !== null && winStartMin !== undefined
+      && winEndMin !== null && winEndMin !== undefined
+      && v >= winStartMin && v <= winEndMin;
+    const amOk = inWin(amH * 60 + min);
+    const pmOk = inWin(pmH * 60 + min);
+    if (amOk && !pmOk) h = amH;
+    else if (pmOk && !amOk) h = pmH;
+    // Ambiguous or outside the window entirely: assume the school day.
+    // 1-6 is afternoon, 7-12 is morning (12 stays noon).
+    else h = (h >= 1 && h <= 6) ? h + 12 : (h === 12 ? 12 : h);
+  }
+
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+}
+
 
 /* ================================================================
    TINY COMPONENTS
@@ -2069,7 +2134,15 @@ export default function App() {
       const end = first
         ? timeOf(new Date(Math.min(first.start.getTime() + 45 * 60000, first.end.getTime())))
         : '';
-      setSr1BookWindow({ win: w, lessonStart: start, lessonEnd: end, topic: '', err: '' });
+      // lessonStart / lessonEnd stay canonical "HH:MM" 24-hour — every
+      // downstream check reads those. startText / endText are only what she
+      // sees and types into.
+      setSr1BookWindow({
+        win: w,
+        lessonStart: start, lessonEnd: end,
+        startText: fmtTypedTime(start), endText: fmtTypedTime(end),
+        topic: '', err: ''
+      });
     };
 
     const handleStudentCancelSr1 = async (b) => {
@@ -2648,6 +2721,29 @@ export default function App() {
             const B = sr1BookWindow;
             const w = B.win;
             const set = p => setSr1BookWindow(v => ({ ...v, ...p }));
+
+            // Typing updates the display text on every keystroke and the
+            // canonical 24-hour value only when the text can be read. An
+            // unreadable field clears its canonical value, so a half-typed
+            // time can never sneak into a booking.
+            const winStartMin = hhmmToMinutes(w.start_time);
+            const winEndMin = hhmmToMinutes(w.end_time);
+            const setTime = (which, text) => {
+              const parsed = parseTypedTime(text, winStartMin, winEndMin);
+              set(which === 'start'
+                ? { startText: text, lessonStart: parsed || '' }
+                : { endText: text, lessonEnd: parsed || '' });
+            };
+            // On blur, rewrite what she typed in the form the app understood
+            // it as ("145" becomes "1:45 PM"), so the reading is confirmed in
+            // the field itself and not only in the summary below.
+            const normaliseTime = (which) => {
+              const val = which === 'start' ? B.lessonStart : B.lessonEnd;
+              if (!val) return;
+              set(which === 'start'
+                ? { startText: fmtTypedTime(val) }
+                : { endText: fmtTypedTime(val) });
+            };
             const lsISO = centralISO(w.window_date, B.lessonStart);
             const leISO = centralISO(w.window_date, B.lessonEnd);
             const okOrder = lsISO && leISO && new Date(leISO) > new Date(lsISO);
@@ -2656,8 +2752,16 @@ export default function App() {
             const winEnd = new Date(centralISO(w.window_date, w.end_time));
             const winStart = new Date(centralISO(w.window_date, w.start_time));
 
+            // A field with text in it but no canonical value did not parse.
+            const badStart = (B.startText || '').trim().length > 0 && !B.lessonStart;
+            const badEnd = (B.endText || '').trim().length > 0 && !B.lessonEnd;
+
             let problem = '';
-            if (B.lessonStart && B.lessonEnd) {
+            if (badStart || badEnd) {
+              const which = badStart && badEnd ? 'those times'
+                : badStart ? 'that start time' : 'that end time';
+              problem = `I could not read ${which}. Type it like 1:45 PM.`;
+            } else if (B.lessonStart && B.lessonEnd) {
               if (!okOrder) problem = 'The end time must be after the start time.';
               else if (mins < 20) problem = 'A lesson must be at least 20 minutes long.';
               else if (mins > 90) problem = 'A lesson cannot be longer than 90 minutes. Email Dr. Beggs if you need more.';
@@ -2688,17 +2792,33 @@ export default function App() {
                   </div>;
                 })()}
 
-                <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
                   <div>
                     <label htmlFor="sr1-b-start" style={{ display: "block", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 3 }}>Lesson starts</label>
-                    <input id="sr1-b-start" type="time" value={B.lessonStart} onChange={e => set({ lessonStart: e.target.value })}
-                      style={{ padding: "7px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 15 }} />
+                    <input id="sr1-b-start" type="text" autoComplete="off" spellCheck={false}
+                      value={B.startText || ''}
+                      onChange={e => setTime('start', e.target.value)}
+                      onBlur={() => normaliseTime('start')}
+                      aria-describedby="sr1-b-timehint"
+                      aria-invalid={badStart || undefined}
+                      placeholder="1:45 PM"
+                      style={{ width: 130, padding: "7px 10px", border: `1px solid ${badStart ? "#C0392B" : "#E0DDD8"}`, borderRadius: 6, fontFamily: F.b, fontSize: 15, boxSizing: "border-box" }} />
                   </div>
                   <div>
                     <label htmlFor="sr1-b-end" style={{ display: "block", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 3 }}>Lesson ends</label>
-                    <input id="sr1-b-end" type="time" value={B.lessonEnd} onChange={e => set({ lessonEnd: e.target.value })}
-                      style={{ padding: "7px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 15 }} />
+                    <input id="sr1-b-end" type="text" autoComplete="off" spellCheck={false}
+                      value={B.endText || ''}
+                      onChange={e => setTime('end', e.target.value)}
+                      onBlur={() => normaliseTime('end')}
+                      aria-describedby="sr1-b-timehint"
+                      aria-invalid={badEnd || undefined}
+                      placeholder="2:30 PM"
+                      style={{ width: 130, padding: "7px 10px", border: `1px solid ${badEnd ? "#C0392B" : "#E0DDD8"}`, borderRadius: 6, fontFamily: F.b, fontSize: 15, boxSizing: "border-box" }} />
                   </div>
+                </div>
+
+                <div id="sr1-b-timehint" style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", marginBottom: 12, lineHeight: 1.5 }}>
+                  Just type the time — 1:45 PM, 145, and 13:45 all work. Times without AM or PM are read as school hours.
                 </div>
 
                 {/* The reflection window is the part her CT needs to hear about,
