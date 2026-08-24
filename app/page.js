@@ -3432,14 +3432,18 @@ export default function App() {
   if (prepView) {
     const cpItems = c.classPrep || [];
     const currentPrep = cpItems.find(x => x.id === prepItem);
-    const pSorted = [...students].sort((a, b) => sortBy === "first" ? (a.first || "").localeCompare(b.first || "") : (a.last || "").localeCompare(b.last || ""));
+    // filteredStudents, not students: this screen honours the section filter
+    // and excludes test accounts, exactly as the Overview grid does. Marking
+    // all complete therefore only ever touches the roster on screen.
+    const pSorted = [...filteredStudents].sort((a, b) => sortBy === "first" ? (a.first || "").localeCompare(b.first || "") : (a.last || "").localeCompare(b.last || ""));
     const markAllPrep = (checked) => {
       pSorted.forEach(s => {
         const done = !!(cPI[s.id] || {})[prepItem];
         if (checked !== done) handleClassPrepInstrUpdate(s.id, prepItem, checked);
       });
     };
-    const doneCount = students.filter(s => (cPI[s.id] || {})[prepItem]).length;
+    const doneCount = filteredStudents.filter(s => (cPI[s.id] || {})[prepItem]).length;
+    const sectionName = sectionFilter === 'all' ? null : (courseSections?.[sectionFilter]?.name || sectionFilter);
     return (
       <div>
         <a href="#main-content" className="skip-link">Skip to main content</a>
@@ -3449,7 +3453,11 @@ export default function App() {
             <button onClick={() => setPrepView(false)} aria-label="Back to overview" style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.b, fontSize: 12, color: "#6B6B6B" }}>← Overview</button>
             <h1 style={{ fontFamily: F.b, fontSize: 13, fontWeight: 600, color: "#555", margin: 0 }}>Track Class Prep</h1>
           </div>
-          <div style={{ display: "flex", gap: 6 }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {hasSections && <select aria-label="Filter by section" value={sectionFilter} onChange={e => setSectionFilter(e.target.value)} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: "#fff", cursor: "pointer", color: sectionFilter === 'all' ? "#6B6B6B" : c.color, fontWeight: sectionFilter === 'all' ? 400 : 600 }}>
+              <option value="all">All sections</option>
+              {sectionKeys.map(s => <option key={s} value={s}>{courseSections?.[s]?.name || s}</option>)}
+            </select>}
             <select aria-label="Sort order" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, background: "#fff" }}><option value="first">First</option><option value="last">Last</option></select>
             <select aria-label="Select class prep item" value={prepItem} onChange={e => setPrepItem(e.target.value)} style={{ padding: "5px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, background: "#fff" }}>
               {cpItems.map(cp => <option key={cp.id} value={cp.id}>{cp.name}</option>)}
@@ -3459,12 +3467,17 @@ export default function App() {
         {currentPrep && <div>
           <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ fontFamily: F.d, fontSize: 17, fontWeight: 600 }}>{currentPrep.name}</span>
-            <Pill t={`${doneCount} of ${students.length}`} bg={doneCount === students.length ? "#D4EDDA" : "#F5F4F0"} c={doneCount === students.length ? "#2D6A4F" : "#767676"} />
+            <Pill t={`${doneCount} of ${filteredStudents.length}`} bg={filteredStudents.length > 0 && doneCount === filteredStudents.length ? "#D4EDDA" : "#F5F4F0"} c={filteredStudents.length > 0 && doneCount === filteredStudents.length ? "#2D6A4F" : "#767676"} />
+            {sectionName && <span role="status" aria-live="polite" style={{ fontFamily: F.b, fontSize: 11, fontWeight: 600, color: c.color }}>{sectionName} only</span>}
             {(dueDates[prepItem]?.date || dueDates[prepItem]?.label) && <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>Due: {dueDates[prepItem].date ? new Date(dueDates[prepItem].date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}{dueDates[prepItem].date && dueDates[prepItem].label ? ' · ' : ''}{dueDates[prepItem].label || ''}</span>}
           </div>
           <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-            <button onClick={() => markAllPrep(true)} style={{ padding: "6px 14px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>Mark All Complete</button>
-            <button onClick={() => markAllPrep(false)} style={{ padding: "6px 14px", background: "#F5F4F0", border: "1px solid #E8E6E1", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#6B6B6B", cursor: "pointer" }}>Reset All</button>
+            <button onClick={() => markAllPrep(true)}
+              aria-label={`Mark ${currentPrep.name} complete for all ${filteredStudents.length} ${sectionName ? sectionName + ' ' : ''}students shown`}
+              style={{ padding: "6px 14px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>Mark All Complete{sectionName ? ` (${sectionFilter})` : ''}</button>
+            <button onClick={() => markAllPrep(false)}
+              aria-label={`Clear ${currentPrep.name} for all ${filteredStudents.length} ${sectionName ? sectionName + ' ' : ''}students shown`}
+              style={{ padding: "6px 14px", background: "#F5F4F0", border: "1px solid #E8E6E1", borderRadius: 6, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#6B6B6B", cursor: "pointer" }}>Reset All{sectionName ? ` (${sectionFilter})` : ''}</button>
           </div>
           <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden" }}>
             {pSorted.map((s, si) => {
