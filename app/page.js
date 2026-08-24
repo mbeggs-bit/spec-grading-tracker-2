@@ -2359,109 +2359,6 @@ export default function App() {
             </div>;
           })}
 
-          {/* Practicum booking form. Every rule shown here is also enforced in
-              book_sr1_observation(); this is the friendly version, not the gate. */}
-          {sr1BookWindow && (() => {
-            const B = sr1BookWindow;
-            const w = B.win;
-            const set = p => setSr1BookWindow(v => ({ ...v, ...p }));
-            const lsISO = centralISO(w.window_date, B.lessonStart);
-            const leISO = centralISO(w.window_date, B.lessonEnd);
-            const okOrder = lsISO && leISO && new Date(leISO) > new Date(lsISO);
-            const mins = okOrder ? Math.round((new Date(leISO) - new Date(lsISO)) / 60000) : 0;
-            const reflISO = okOrder ? new Date(new Date(leISO).getTime() + w.reflection_minutes * 60000) : null;
-            const winEnd = new Date(centralISO(w.window_date, w.end_time));
-            const winStart = new Date(centralISO(w.window_date, w.start_time));
-
-            let problem = '';
-            if (B.lessonStart && B.lessonEnd) {
-              if (!okOrder) problem = 'The end time must be after the start time.';
-              else if (mins < 20) problem = 'A lesson must be at least 20 minutes long.';
-              else if (mins > 90) problem = 'A lesson cannot be longer than 90 minutes. Email Dr. Beggs if you need more.';
-              else if (new Date(lsISO) < winStart) problem = `This day does not open until ${fmtTime(winStart)}.`;
-              else if (reflISO > winEnd) problem = `Your reflection would run to ${fmtTime(reflISO)}, past the ${fmtTime(winEnd)} close. Choose an earlier start.`;
-              else if (sr1TooSoon(lsISO)) problem = 'That time is less than 48 hours away and can no longer be booked online. Email Dr. Beggs at mbeggs@ucmo.edu.';
-            }
-            const ready = okOrder && !problem && B.topic.trim().length > 0;
-
-            return <div role="dialog" aria-modal="true" aria-labelledby="sr1-book-title"
-              onClick={e => { if (e.target === e.currentTarget) setSr1BookWindow(null); }}
-              style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.3)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20 }}>
-              <div style={{ background: "#fff", borderRadius: 14, padding: "22px", maxWidth: 440, width: "100%", maxHeight: "88vh", overflowY: "auto", boxShadow: "0 12px 40px rgba(0,0,0,.15)" }}>
-                <h2 id="sr1-book-title" style={{ fontFamily: F.d, fontSize: 18, fontWeight: 600, marginBottom: 3 }}>Book an observation</h2>
-                <div style={{ fontFamily: F.b, fontSize: 13, color: "#555", marginBottom: 4 }}>{fmtDateOnly(w.window_date)}</div>
-                <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", marginBottom: 14 }}>
-                  Dr. Beggs is available {fmtTime(winStart)} – {fmtTime(winEnd)}{w.note ? ` · ${w.note}` : ''}
-                </div>
-
-                {(() => {
-                  const gaps = sr1OpenGaps(w, sr1.taken).filter(g => !sr1TooSoon(g.start.toISOString()));
-                  if (gaps.length === 0) return null;
-                  return <div style={{ marginBottom: 14, padding: "8px 10px", background: "#F9F8F5", borderRadius: 6 }}>
-                    <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 3 }}>Times still open</div>
-                    <ul style={{ margin: 0, paddingLeft: 16 }}>
-                      {gaps.map((g, i) => <li key={i} style={{ fontFamily: F.b, fontSize: 12, color: "#2D6A4F" }}>{fmtTime(g.start)} – {fmtTime(g.end)}</li>)}
-                    </ul>
-                  </div>;
-                })()}
-
-                <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
-                  <div>
-                    <label htmlFor="sr1-b-start" style={{ display: "block", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 3 }}>Lesson starts</label>
-                    <input id="sr1-b-start" type="time" value={B.lessonStart} onChange={e => set({ lessonStart: e.target.value })}
-                      style={{ padding: "7px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 15 }} />
-                  </div>
-                  <div>
-                    <label htmlFor="sr1-b-end" style={{ display: "block", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 3 }}>Lesson ends</label>
-                    <input id="sr1-b-end" type="time" value={B.lessonEnd} onChange={e => set({ lessonEnd: e.target.value })}
-                      style={{ padding: "7px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 15 }} />
-                  </div>
-                </div>
-
-                {/* The reflection window is the part her CT needs to hear about,
-                    so it is announced rather than only displayed. */}
-                {okOrder && !problem && <div role="status" aria-live="polite" style={{ fontFamily: F.b, fontSize: 13, color: "#1A1A1A", background: "#F0F8FF", border: "1px solid #DCEEFB", borderRadius: 6, padding: "9px 11px", marginBottom: 12, lineHeight: 1.5 }}>
-                  Lesson {fmtTimeRange(lsISO, leISO)} · Reflection {fmtTimeRange(leISO, reflISO)}
-                  <div style={{ color: "#555", marginTop: 3 }}>Make sure your cooperating teacher can release you until {fmtTime(reflISO)}.</div>
-                </div>}
-
-                {problem && <div role="alert" style={{ fontFamily: F.b, fontSize: 13, color: "#C0392B", background: "#FDF2F2", border: "1px solid #F5C6CB", borderRadius: 6, padding: "9px 11px", marginBottom: 12, lineHeight: 1.5 }}>{problem}</div>}
-
-                <div style={{ marginBottom: 6 }}>
-                  <label htmlFor="sr1-b-topic" style={{ display: "block", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 3 }}>What are you teaching?</label>
-                  <input id="sr1-b-topic" type="text" value={B.topic} onChange={e => set({ topic: e.target.value })}
-                    placeholder="e.g. Fractions — comparing unlike denominators"
-                    style={{ width: "100%", padding: "8px 11px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, boxSizing: "border-box" }} />
-                </div>
-
-                {B.err && <div role="alert" style={{ fontFamily: F.b, fontSize: 13, color: "#C0392B", background: "#FDF2F2", border: "1px solid #F5C6CB", borderRadius: 6, padding: "9px 11px", margin: "10px 0", lineHeight: 1.5 }}>{B.err}</div>}
-
-                <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-                  <button disabled={!ready || sr1Busy}
-                    onClick={async () => {
-                      setSr1Busy(true); set({ err: '' });
-                      const { error } = await bookSr1Observation(w.id, lsISO, leISO, B.topic.trim());
-                      setSr1Busy(false);
-                      if (error) {
-                        // The database messages are written to be read by students.
-                        set({ err: error.message || 'Could not book that time. Please try another.' });
-                        refreshSr1();
-                        return;
-                      }
-                      setSr1BookWindow(null);
-                      showToast('Observation booked ✓', 'success');
-                      refreshSr1();
-                    }}
-                    style={{ padding: "9px 18px", background: (!ready || sr1Busy) ? "#E0DDD8" : c.color, color: "#fff", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 15, fontWeight: 600, cursor: (!ready || sr1Busy) ? "not-allowed" : "pointer" }}>
-                    {sr1Busy ? "Booking…" : "Book this time"}
-                  </button>
-                  <button onClick={() => setSr1BookWindow(null)}
-                    style={{ padding: "9px 14px", background: "#F0EEEA", color: "#6B6B6B", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 13, cursor: "pointer" }}>Cancel</button>
-                </div>
-              </div>
-            </div>;
-          })()}
-
           {/* Token Modal */}
           {modal && <div role="dialog" aria-modal="true" aria-label="Submit a token" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.3)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }} onClick={() => setModal(null)}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: "24px", maxWidth: 420, width: "90%", boxShadow: "0 12px 40px rgba(0,0,0,.15)" }}>
@@ -2740,6 +2637,114 @@ export default function App() {
               </div>;
             })()}
           </div>}
+
+          {/* Practicum booking form. Every rule shown here is also enforced in
+              book_sr1_observation(); this is the friendly version, not the gate.
+              Lives inside the 'prac' tab fragment because the "Book a time"
+              button that triggers it lives here too — it was previously nested
+              in the 'work' tab fragment, so clicking "Book a time" set state
+              correctly but the modal never mounted. */}
+          {sr1BookWindow && (() => {
+            const B = sr1BookWindow;
+            const w = B.win;
+            const set = p => setSr1BookWindow(v => ({ ...v, ...p }));
+            const lsISO = centralISO(w.window_date, B.lessonStart);
+            const leISO = centralISO(w.window_date, B.lessonEnd);
+            const okOrder = lsISO && leISO && new Date(leISO) > new Date(lsISO);
+            const mins = okOrder ? Math.round((new Date(leISO) - new Date(lsISO)) / 60000) : 0;
+            const reflISO = okOrder ? new Date(new Date(leISO).getTime() + w.reflection_minutes * 60000) : null;
+            const winEnd = new Date(centralISO(w.window_date, w.end_time));
+            const winStart = new Date(centralISO(w.window_date, w.start_time));
+
+            let problem = '';
+            if (B.lessonStart && B.lessonEnd) {
+              if (!okOrder) problem = 'The end time must be after the start time.';
+              else if (mins < 20) problem = 'A lesson must be at least 20 minutes long.';
+              else if (mins > 90) problem = 'A lesson cannot be longer than 90 minutes. Email Dr. Beggs if you need more.';
+              else if (new Date(lsISO) < winStart) problem = `This day does not open until ${fmtTime(winStart)}.`;
+              else if (reflISO > winEnd) problem = `Your reflection would run to ${fmtTime(reflISO)}, past the ${fmtTime(winEnd)} close. Choose an earlier start.`;
+              else if (sr1TooSoon(lsISO)) problem = 'That time is less than 48 hours away and can no longer be booked online. Email Dr. Beggs at mbeggs@ucmo.edu.';
+            }
+            const ready = okOrder && !problem && B.topic.trim().length > 0;
+
+            return <div role="dialog" aria-modal="true" aria-labelledby="sr1-book-title"
+              onClick={e => { if (e.target === e.currentTarget) setSr1BookWindow(null); }}
+              style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.3)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20 }}>
+              <div style={{ background: "#fff", borderRadius: 14, padding: "22px", maxWidth: 440, width: "100%", maxHeight: "88vh", overflowY: "auto", boxShadow: "0 12px 40px rgba(0,0,0,.15)" }}>
+                <h2 id="sr1-book-title" style={{ fontFamily: F.d, fontSize: 18, fontWeight: 600, marginBottom: 3 }}>Book an observation</h2>
+                <div style={{ fontFamily: F.b, fontSize: 13, color: "#555", marginBottom: 4 }}>{fmtDateOnly(w.window_date)}</div>
+                <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", marginBottom: 14 }}>
+                  Dr. Beggs is available {fmtTime(winStart)} – {fmtTime(winEnd)}{w.note ? ` · ${w.note}` : ''}
+                </div>
+
+                {(() => {
+                  const gaps = sr1OpenGaps(w, sr1.taken).filter(g => !sr1TooSoon(g.start.toISOString()));
+                  if (gaps.length === 0) return null;
+                  return <div style={{ marginBottom: 14, padding: "8px 10px", background: "#F9F8F5", borderRadius: 6 }}>
+                    <div style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 3 }}>Times still open</div>
+                    <ul style={{ margin: 0, paddingLeft: 16 }}>
+                      {gaps.map((g, i) => <li key={i} style={{ fontFamily: F.b, fontSize: 12, color: "#2D6A4F" }}>{fmtTime(g.start)} – {fmtTime(g.end)}</li>)}
+                    </ul>
+                  </div>;
+                })()}
+
+                <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+                  <div>
+                    <label htmlFor="sr1-b-start" style={{ display: "block", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 3 }}>Lesson starts</label>
+                    <input id="sr1-b-start" type="time" value={B.lessonStart} onChange={e => set({ lessonStart: e.target.value })}
+                      style={{ padding: "7px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 15 }} />
+                  </div>
+                  <div>
+                    <label htmlFor="sr1-b-end" style={{ display: "block", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 3 }}>Lesson ends</label>
+                    <input id="sr1-b-end" type="time" value={B.lessonEnd} onChange={e => set({ lessonEnd: e.target.value })}
+                      style={{ padding: "7px 10px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 15 }} />
+                  </div>
+                </div>
+
+                {/* The reflection window is the part her CT needs to hear about,
+                    so it is announced rather than only displayed. */}
+                {okOrder && !problem && <div role="status" aria-live="polite" style={{ fontFamily: F.b, fontSize: 13, color: "#1A1A1A", background: "#F0F8FF", border: "1px solid #DCEEFB", borderRadius: 6, padding: "9px 11px", marginBottom: 12, lineHeight: 1.5 }}>
+                  Lesson {fmtTimeRange(lsISO, leISO)} · Reflection {fmtTimeRange(leISO, reflISO)}
+                  <div style={{ color: "#555", marginTop: 3 }}>Make sure your cooperating teacher can release you until {fmtTime(reflISO)}.</div>
+                </div>}
+
+                {problem && <div role="alert" style={{ fontFamily: F.b, fontSize: 13, color: "#C0392B", background: "#FDF2F2", border: "1px solid #F5C6CB", borderRadius: 6, padding: "9px 11px", marginBottom: 12, lineHeight: 1.5 }}>{problem}</div>}
+
+                <div style={{ marginBottom: 6 }}>
+                  <label htmlFor="sr1-b-topic" style={{ display: "block", fontFamily: F.b, fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 3 }}>What are you teaching?</label>
+                  <input id="sr1-b-topic" type="text" value={B.topic} onChange={e => set({ topic: e.target.value })}
+                    placeholder="e.g. Fractions — comparing unlike denominators"
+                    style={{ width: "100%", padding: "8px 11px", border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 13, boxSizing: "border-box" }} />
+                </div>
+
+                {B.err && <div role="alert" style={{ fontFamily: F.b, fontSize: 13, color: "#C0392B", background: "#FDF2F2", border: "1px solid #F5C6CB", borderRadius: 6, padding: "9px 11px", margin: "10px 0", lineHeight: 1.5 }}>{B.err}</div>}
+
+                <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+                  <button disabled={!ready || sr1Busy}
+                    onClick={async () => {
+                      setSr1Busy(true); set({ err: '' });
+                      const { error } = await bookSr1Observation(w.id, lsISO, leISO, B.topic.trim());
+                      setSr1Busy(false);
+                      if (error) {
+                        // The database messages are written to be read by students.
+                        set({ err: error.message || 'Could not book that time. Please try another.' });
+                        refreshSr1();
+                        return;
+                      }
+                      setSr1BookWindow(null);
+                      showToast('Observation booked ✓', 'success');
+                      refreshSr1();
+                    }}
+                    style={{ padding: "9px 18px", background: (!ready || sr1Busy) ? "#E0DDD8" : c.color, color: "#fff", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 15, fontWeight: 600, cursor: (!ready || sr1Busy) ? "not-allowed" : "pointer" }}>
+                    {sr1Busy ? "Booking…" : "Book this time"}
+                  </button>
+                  <button onClick={() => setSr1BookWindow(null)}
+                    style={{ padding: "9px 14px", background: "#F0EEEA", color: "#6B6B6B", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 13, cursor: "pointer" }}>Cancel</button>
+                </div>
+              </div>
+            </div>;
+          })()}
+
           </>}
 
         </main>
