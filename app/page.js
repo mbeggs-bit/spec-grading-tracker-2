@@ -1112,7 +1112,8 @@ export default function App() {
   const [expStruggles, setExpStruggles] = useState(true);
   const [expTokLookup, setExpTokLookup] = useState(false);
   const [expClassPrep, setExpClassPrep] = useState(true);
-  const [expTeachSched, setExpTeachSched] = useState(true);
+  const [expTeachSched, setExpTeachSched] = useState(false); // collapsed by default
+  const [glanceOpen, setGlanceOpen] = useState(null); // assignment_id whose scheduled-student roster is expanded
   const [expFinalGrades, setExpFinalGrades] = useState(false);
   const [expTracks, setExpTracks] = useState(false);
   const [expTokens, setExpTokens] = useState(false);
@@ -3629,9 +3630,16 @@ export default function App() {
             const allAids = [...new Set(teachDates.map(td => td.assignment_id))];
             const glance = allAids.map(aid => {
               const a = c.assignments.find(x => x.id === aid);
-              const scheduled = teachSel.filter(ts => ts.assignment_id === aid && (sectionFilter === 'all' || filteredStudents.some(s => s.id === ts.profile_id))).length;
+              const sels = teachSel.filter(ts => ts.assignment_id === aid && (sectionFilter === 'all' || filteredStudents.some(s => s.id === ts.profile_id)));
+              const scheduled = sels.length;
               const closed = teachDates.filter(td => td.assignment_id === aid).every(d => d.closed);
-              return { aid, name: a?.name || aid, scheduled, closed };
+              // Full roster, regardless of how far out the teaching date is — the
+              // Scheduled Lessons list only surfaces the next 7 days, so this is
+              // the one place a far-future booking is visible.
+              const roster = [...sels].sort((x, y) => x.teach_date === y.teach_date
+                ? `${x.profiles?.last_name || ''}`.localeCompare(`${y.profiles?.last_name || ''}`)
+                : x.teach_date.localeCompare(y.teach_date));
+              return { aid, name: a?.name || aid, scheduled, closed, roster };
             });
 
             // All selections (section-filtered)
@@ -3704,13 +3712,37 @@ export default function App() {
               </div>
               {expTeachSched && <>
                 {/* At a glance */}
-                <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-                  {glance.map(g => <div key={g.aid} style={{ flex: 1, minWidth: 100, background: g.closed ? "#F5F4F0" : "#F0F8FF", padding: "10px 12px", borderRadius: 8, border: `1px solid ${g.closed ? "#E8E6E1" : "#DCEEFB"}` }}>
-                    <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 2 }}>{g.name}</div>
-                    <div style={{ fontFamily: F.d, fontSize: 18, fontWeight: 600, color: g.closed ? "#767676" : "#1565C0" }}>{g.scheduled}/{filteredStudents.length}</div>
-                    <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{g.closed ? "closed" : "scheduled"}</div>
-                  </div>)}
+                <div style={{ display: "flex", gap: 8, marginBottom: glanceOpen ? 8 : 14, flexWrap: "wrap" }}>
+                  {glance.map(g => {
+                    const isOpen = glanceOpen === g.aid;
+                    const cardStyle = { flex: 1, minWidth: 100, background: g.closed ? "#F5F4F0" : "#F0F8FF", padding: "10px 12px", borderRadius: 8, border: `1px solid ${isOpen ? "#1565C0" : g.closed ? "#E8E6E1" : "#DCEEFB"}`, textAlign: "left" };
+                    const inner = <>
+                      <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B", marginBottom: 2 }}>{g.name}</div>
+                      <div style={{ fontFamily: F.d, fontSize: 18, fontWeight: 600, color: g.closed ? "#767676" : "#1565C0" }}>{g.scheduled}/{filteredStudents.length}</div>
+                      <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>{g.closed ? "closed" : "scheduled"}{g.scheduled > 0 ? (isOpen ? " ▴" : " ▾") : ""}</div>
+                    </>;
+                    if (g.scheduled === 0) return <div key={g.aid} style={cardStyle}>{inner}</div>;
+                    return <button key={g.aid} type="button" aria-expanded={isOpen} aria-controls={`glance-roster-${g.aid}`} aria-label={`${g.name}: ${g.scheduled} of ${filteredStudents.length} students scheduled. ${isOpen ? "Hide" : "Show"} the list of scheduled students.`} onClick={() => setGlanceOpen(isOpen ? null : g.aid)} style={{ ...cardStyle, cursor: "pointer", font: "inherit" }}>{inner}</button>;
+                  })}
                 </div>
+
+                {/* Scheduled-student roster for the expanded at-a-glance card */}
+                {glance.filter(g => g.aid === glanceOpen && g.scheduled > 0).map(g => <div key={g.aid} id={`glance-roster-${g.aid}`} role="region" aria-label={`Students scheduled for ${g.name}`} style={{ background: "#fff", borderRadius: 10, border: "1px solid #E8E6E1", overflow: "hidden", marginBottom: 14 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", padding: "10px 16px", background: "#FAFAF7", borderBottom: "1px solid #F0EEEA" }}>
+                    <span style={{ fontFamily: F.b, fontSize: 12, fontWeight: 600 }}>{g.name} — scheduled students ({g.scheduled})</span>
+                    <button type="button" onClick={() => setGlanceOpen(null)} aria-label={`Hide the list of students scheduled for ${g.name}`} style={{ padding: "3px 9px", border: "1px solid #E0DDD8", borderRadius: 5, background: "#fff", fontFamily: F.b, fontSize: 11, color: "#666", cursor: "pointer" }}>Hide</button>
+                  </div>
+                  {g.roster.map((ts, ri) => {
+                    const st = (iS[ts.profile_id] || {})[ts.assignment_id] || '';
+                    const stLabel = st === 'mastery' ? 'Mastered' : st === 'revision' ? 'Needs revision' : st === 'not_submitted' ? 'Not submitted' : 'Not yet graded';
+                    const stC = st === 'mastery' ? { bg: "#D4EDDA", c: "#2D6A4F" } : st === 'revision' ? { bg: "#FFF3CD", c: "#856404" } : st === 'not_submitted' ? { bg: "#FCE8E8", c: "#C0392B" } : { bg: "#F5F4F0", c: "#666" };
+                    return <div key={ts.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 16px", borderBottom: ri < g.roster.length - 1 ? "1px solid #F5F3EF" : "none" }}>
+                      <span style={{ flex: 1, minWidth: 120, fontFamily: F.b, fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{ts.profiles?.last_name || ''}, {ts.profiles?.first_name || ''}</span>
+                      <span style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>Teaching {formatDate(ts.teach_date)}{ts.plan_due_date ? ` · plan due ${formatDate(ts.plan_due_date)}` : ''}</span>
+                      <span style={{ display: "inline-block", padding: "2px 7px", borderRadius: 4, fontFamily: F.b, fontSize: 11, fontWeight: 600, background: stC.bg, color: stC.c, whiteSpace: "nowrap" }}>{stLabel}</span>
+                    </div>;
+                  })}
+                </div>)}
 
                 {/* Scheduled Lessons */}
                 {visibleGroups.length > 0 && <div style={{ marginBottom: 14 }}>
@@ -3747,19 +3779,19 @@ export default function App() {
                               <div style={{ fontFamily: F.b, fontSize: 11, color: "#6B6B6B" }}>Teaching {formatDate(ts.teach_date)}{st ? ` · ${st === 'mastery' ? 'Mastered' : st === 'revision' ? 'Needs revision' : 'Not submitted'}` : ''}</div>
                             </div>
                             {!st && <div style={{ display: "flex", gap: 4 }}>
-                              <button aria-label={`Mark ${sName} mastered`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'mastery'); refresh(); }} style={{ padding: "4px 10px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>M</button>
-                              <button aria-label={`Mark ${sName} revision`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'revision'); refresh(); }} style={{ padding: "4px 10px", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>R</button>
-                              <button aria-label={`Mark ${sName} not submitted`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'not_submitted'); refresh(); }} style={{ padding: "4px 10px", background: "#FCE8E8", border: "1px solid #F5B7B7", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#C0392B", cursor: "pointer" }}>NS</button>
+                              <button aria-label={`Mark ${sName} mastered`} onClick={() => handleInstrUpdate(ts.profile_id, ts.assignment_id, 'mastery')} style={{ padding: "4px 10px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>M</button>
+                              <button aria-label={`Mark ${sName} revision`} onClick={() => handleInstrUpdate(ts.profile_id, ts.assignment_id, 'revision')} style={{ padding: "4px 10px", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>R</button>
+                              <button aria-label={`Mark ${sName} not submitted`} onClick={() => handleInstrUpdate(ts.profile_id, ts.assignment_id, 'not_submitted')} style={{ padding: "4px 10px", background: "#FCE8E8", border: "1px solid #F5B7B7", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#C0392B", cursor: "pointer" }}>NS</button>
                               <button aria-label={`Add note for ${sName}`} onClick={() => { setNoteFor(isEditingNote ? null : noteKey); setNoteVal(existingNote || ''); }} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: existingNote ? "#856404" : "#767676", cursor: "pointer", background: "#fff" }}>{existingNote ? "✎" : "+"}</button>
                             </div>}
                             {st === 'revision' && <div style={{ display: "flex", gap: 4 }}>
-                              <button aria-label={`Mark ${sName} mastered`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'mastery'); refresh(); }} style={{ padding: "4px 10px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>→ M</button>
-                              <button aria-label={`Mark ${sName} not submitted`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'not_submitted'); refresh(); }} style={{ padding: "4px 10px", background: "#FCE8E8", border: "1px solid #F5B7B7", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#C0392B", cursor: "pointer" }}>NS</button>
+                              <button aria-label={`Mark ${sName} mastered`} onClick={() => handleInstrUpdate(ts.profile_id, ts.assignment_id, 'mastery')} style={{ padding: "4px 10px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>→ M</button>
+                              <button aria-label={`Mark ${sName} not submitted`} onClick={() => handleInstrUpdate(ts.profile_id, ts.assignment_id, 'not_submitted')} style={{ padding: "4px 10px", background: "#FCE8E8", border: "1px solid #F5B7B7", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#C0392B", cursor: "pointer" }}>NS</button>
                               <button aria-label={`Add note for ${sName}`} onClick={() => { setNoteFor(isEditingNote ? null : noteKey); setNoteVal(existingNote || ''); }} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: existingNote ? "#856404" : "#767676", cursor: "pointer", background: "#fff" }}>{existingNote ? "✎" : "+"}</button>
                             </div>}
                             {st === 'not_submitted' && <div style={{ display: "flex", gap: 4 }}>
-                              <button aria-label={`Mark ${sName} mastered`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'mastery'); refresh(); }} style={{ padding: "4px 10px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>→ M</button>
-                              <button aria-label={`Mark ${sName} revision needed`} onClick={async () => { await upsertInstrStatus(ts.profile_id, ck, ts.assignment_id, 'revision'); refresh(); }} style={{ padding: "4px 10px", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>→ R</button>
+                              <button aria-label={`Mark ${sName} mastered`} onClick={() => handleInstrUpdate(ts.profile_id, ts.assignment_id, 'mastery')} style={{ padding: "4px 10px", background: "#D4EDDA", border: "1px solid #B7DFBF", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#2D6A4F", cursor: "pointer" }}>→ M</button>
+                              <button aria-label={`Mark ${sName} revision needed`} onClick={() => handleInstrUpdate(ts.profile_id, ts.assignment_id, 'revision')} style={{ padding: "4px 10px", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 5, fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#856404", cursor: "pointer" }}>→ R</button>
                               <button aria-label={`Add note for ${sName}`} onClick={() => { setNoteFor(isEditingNote ? null : noteKey); setNoteVal(existingNote || ''); }} style={{ padding: "4px 8px", border: "1px solid #E0DDD8", borderRadius: 5, fontFamily: F.b, fontSize: 11, color: existingNote ? "#856404" : "#767676", cursor: "pointer", background: "#fff" }}>{existingNote ? "✎" : "+"}</button>
                             </div>}
                           </div>
