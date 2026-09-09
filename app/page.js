@@ -5036,8 +5036,10 @@ export default function App() {
           || spanEnd > new Date(centralISO(win.window_date, win.end_time))));
         const soon = !!(lsISO && sr1TooSoon(lsISO));
         const past = !!(lsISO && new Date(lsISO).getTime() < Date.now());
-        const noteRequired = needsAck;
-        const canSave = valid && (!needsAck || (N.acknowledged && N.overrideNote.trim()));
+        // The note is prompted on an override but never required — being blocked
+        // from scheduling by a memo to yourself is the wrong trade.
+        const noteRequired = false;
+        const canSave = valid && (!needsAck || N.acknowledged);
 
         const fieldS = { padding: "8px 10px", minHeight: 44, border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, boxSizing: "border-box" };
         const labelS = { display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 };
@@ -5128,7 +5130,7 @@ export default function App() {
               </div>
 
               <div style={{ marginBottom: 12 }}>
-                <label htmlFor="sr1-n-note" style={labelS}>Note to yourself{noteRequired ? '' : ' (optional)'}</label>
+                <label htmlFor="sr1-n-note" style={labelS}>Note to yourself{needsAck ? ' — recommended' : ' (optional)'}</label>
                 <input id="sr1-n-note" type="text" value={N.overrideNote} onChange={e => set({ overrideNote: e.target.value })}
                   aria-required={noteRequired} aria-invalid={noteRequired && !N.overrideNote.trim()}
                   placeholder="e.g. Same building as Jordan, reflection moved to 3:00"
@@ -5160,7 +5162,7 @@ export default function App() {
                   const onm = `${on?.profiles?.first_name || ''} ${on?.profiles?.last_name || ''}`.trim() || 'another candidate';
                   return <div key={o.id} style={{ marginBottom: 2 }}>{onm}: {fmtTimeRange(o.lesson_start, o.reflection_end)}</div>;
                 })}
-                <div style={{ marginTop: 6 }}>Saving marks this an adjusted booking, and a note is required.</div>
+                <div style={{ marginTop: 6 }}>Saving marks this an adjusted booking.</div>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, cursor: "pointer" }}>
                   <input type="checkbox" checked={N.acknowledged} onChange={() => set({ acknowledged: !N.acknowledged })}
                     style={{ width: 18, height: 18, cursor: "pointer", accentColor: "#856404" }} />
