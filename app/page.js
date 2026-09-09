@@ -789,6 +789,54 @@ async function instrUpdateSr1Booking(booking, next, notify) {
   return { error: null };
 }
 
+// Instructor-created booking. Deliberately does NOT go through
+// book_sr1_observation() — that function is the student gate, and every rule it
+// enforces (published window, building match, 48-hour lead, window boundaries)
+// is a rule this path exists to step around. The RLS policy sr1_bookings_instr_all
+// is ALL/sr1_is_instructor(), so a direct insert is permitted for her and for
+// nobody else.
+//
+// instructor_override is set only when the row actually overlaps something. When
+// it is false the Postgres exclusion constraint still arbitrates, which is the
+// safer default; when it is true the row leaves the constraint's index and she
+// has taken responsibility for that clash. sr1_block_overlap_with_override()
+// early-returns on override rows, so this insert is never blocked by it — while
+// students remain blocked from booking over the result.
+async function instrCreateSr1Booking(f) {
+  const { data, error } = await supabase.from('sr1_bookings').insert({
+    term: activeTerm(),
+    profile_id: f.profile_id,
+    window_id: f.window_id || null,
+    building_id: f.building_id || null,
+    lesson_start: f.lesson_start, lesson_end: f.lesson_end,
+    reflection_start: f.reflection_start, reflection_end: f.reflection_end,
+    span: `[${f.span_start},${f.span_end})`,
+    topic: f.topic,
+    ct_name: f.ct_name || null,
+    status: 'booked',
+    instructor_override: f.instructor_override,
+    override_note: f.override_note || null,
+    reflection_minutes: f.reflection_minutes,
+    buffer_minutes: f.buffer_minutes
+  }).select('id').maybeSingle();
+  if (error) return { error };
+  if (f.notify && data?.id) {
+    // kind reuses 'time_changed' rather than a new value: sr1_notifications may
+    // carry a CHECK on kind, and an unverified new value would fail the insert
+    // and swallow the notice. The message says plainly what happened.
+    const detached = new Date(f.reflection_start).getTime() !== new Date(f.lesson_end).getTime();
+    await supabase.from('sr1_notifications').insert({
+      profile_id: f.profile_id, booking_id: data.id, term: activeTerm(),
+      kind: 'time_changed',
+      message: `Dr. Beggs scheduled your observation for ${fmtDay(f.lesson_start)}, ${fmtTimeRange(f.lesson_start, f.lesson_end)}`
+        + (detached
+            ? `, with your reflection later that day at ${fmtTimeRange(f.reflection_start, f.reflection_end)}. Please confirm both times with your cooperating teacher — you will be out of the classroom twice.`
+            : `, with reflection until ${fmtTime(f.reflection_end)}. Please let your cooperating teacher know.`)
+    });
+  }
+  return { error: null };
+}
+
 async function instrCancelSr1Booking(booking) {
   const { error } = await supabase.from('sr1_bookings')
     .update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', booking.id);
@@ -1066,6 +1114,7 @@ export default function App() {
   const [studentTab, setStudentTab] = useState('work'); // 'work' | 'prac' — only shown to SR1 candidates
   const [sr1OpenCandidate, setSr1OpenCandidate] = useState(null); // accordion
   const [sr1EditBooking, setSr1EditBooking] = useState(null);     // instructor edit modal
+  const [sr1NewBooking, setSr1NewBooking] = useState(null);       // instructor manual-add modal
   const [sr1EditWindow, setSr1EditWindow] = useState(null);       // inline window editor (id)
   const [sr1BookWindow, setSr1BookWindow] = useState(null);       // student booking modal
   const [sr1Busy, setSr1Busy] = useState(false);
@@ -3088,6 +3137,21 @@ export default function App() {
     });
   };
 
+  // Manual add. Opens empty (or prefilled to one candidate from her accordion).
+  // Nothing is defaulted to "now" — a half-remembered date is worse than a blank
+  // field she has to fill in deliberately.
+  const openSr1New = (profileId) => {
+    setSr1NewBooking({
+      profileId: profileId || '',
+      date: '', lessonStart: '', lessonEnd: '',
+      reflStart: '', reflEnd: '',
+      topic: '', overrideNote: '',
+      holdGap: true,      // only consulted when reflection is detached
+      acknowledged: false,
+      notify: true
+    });
+  };
+
   const handleInstrCancelSr1 = async (bk, name) => {
     if (!confirm(`Cancel ${name}'s observation on ${fmtDay(bk.lesson_start)} at ${fmtTime(bk.lesson_start)}?\n\nThey will see a notice the next time they sign in.`)) return;
     const { error } = await instrCancelSr1Booking(bk);
@@ -4362,7 +4426,13 @@ export default function App() {
 
           {/* ---- CANDIDATES — the actionable bookings, kept at the top. Windows
                   and Roster Setup are planning tools, collapsed below. ---- */}
-          <Lbl s={{ marginTop: 4 }}>Candidates</Lbl>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+            <Lbl s={{ marginTop: 4 }}>Candidates</Lbl>
+            {sr1.roster.length > 0 && <button onClick={() => openSr1New('')}
+              style={{ padding: "8px 14px", minHeight: 44, border: `1px solid ${c.color}`, borderRadius: 6, background: "#fff", color: c.color, fontFamily: F.b, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+              + Schedule an observation
+            </button>}
+          </div>
           {sr1.roster.length === 0
             ? <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", padding: "14px 16px", background: "#fff", border: "1px solid #E8E6E1", borderRadius: 10, marginBottom: 18 }}>
                 No supervised candidates this semester. Add them in Roster Setup below.
@@ -4401,6 +4471,13 @@ export default function App() {
 
                       {open && <div style={{ padding: "0 16px 14px", borderTop: "1px solid #F0EEEA" }}>
                         {active.length === 0 && <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", paddingTop: 12 }}>No observations scheduled.</div>}
+
+                        <div style={{ paddingTop: 12 }}>
+                          <button onClick={() => openSr1New(r.profile_id)} aria-label={`Schedule an observation for ${nm}`}
+                            style={{ padding: "8px 14px", minHeight: 44, border: "1px solid #E0DDD8", borderRadius: 6, background: "#fff", color: "#555", fontFamily: F.b, fontSize: 12, cursor: "pointer" }}>
+                            + Schedule for {nm.split(' ')[0]}
+                          </button>
+                        </div>
 
                         {upcoming.length > 0 && <div style={{ paddingTop: 12 }}>
                           {upcoming.map((bk, i) => {
@@ -4888,6 +4965,244 @@ export default function App() {
                   }}
                   style={{ padding: "7px 14px", background: (sr1Busy || !valid || (needsAck && !E.acknowledged)) ? "#B0ADA8" : c.color, color: "#fff", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 12, fontWeight: 600, cursor: (sr1Busy || !valid || (needsAck && !E.acknowledged)) ? "default" : "pointer" }}>
                   {sr1Busy ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Manual booking — the instructor scheduling a candidate herself.
+          Every gate in book_sr1_observation() is skipped here by design; what
+          replaces them is a named, visible warning per rule broken, so nothing
+          slips through silently. */}
+      {sr1NewBooking && (() => {
+        const N = sr1NewBooking;
+        const set = (patch) => setSr1NewBooking(v => ({ ...v, ...patch }));
+
+        const cand = sr1.roster.find(r => r.profile_id === N.profileId) || null;
+        const nm = cand ? `${cand.profiles?.first_name || ''} ${cand.profiles?.last_name || ''}`.trim() : '';
+        const candBuilding = cand ? sr1.buildings.find(b => b.id === cand.building_id) : null;
+
+        // The three-case window predicate, client side: exact building, peer
+        // building in the same travel zone, or a zone window with no building of
+        // its own. Same shape as sr1_placement_matches_window(). Used only to
+        // attach window_id and to warn — never to permit or deny.
+        const matchWin = (w) => {
+          if (!cand) return false;
+          if (w.building_id && cand.building_id && w.building_id === cand.building_id) return true;
+          if (w.building_group && candBuilding?.building_group && w.building_group === candBuilding.building_group) return true;
+          if (w.building_id && candBuilding?.building_group) {
+            const wb = sr1.buildings.find(b => b.id === w.building_id);
+            if (wb?.building_group && wb.building_group === candBuilding.building_group) return true;
+          }
+          return false;
+        };
+        const dayWins = N.date ? sr1.windows.filter(w => w.window_date === N.date && matchWin(w)) : [];
+        const win = dayWins[0] || null;
+        const reflMins = win?.reflection_minutes ?? 25;
+        const bufferMin = win?.buffer_minutes ?? 10;
+
+        const lsISO = centralISO(N.date, N.lessonStart);
+        const leISO = centralISO(N.date, N.lessonEnd);
+        const rsISO = centralISO(N.date, N.reflStart);
+        const reISO = centralISO(N.date, N.reflEnd);
+        const timesOk = lsISO && leISO && rsISO && reISO
+          && new Date(leISO) > new Date(lsISO) && new Date(reISO) >= new Date(rsISO)
+          && new Date(rsISO) >= new Date(leISO);
+        const valid = !!cand && !!N.topic.trim() && timesOk;
+
+        const detached = timesOk && new Date(rsISO).getTime() !== new Date(leISO).getTime();
+        // With the reflection detached, one tstzrange cannot describe two
+        // separate blocks. Holding the gap is the safe default — it keeps the
+        // whole stretch off-limits. Releasing it re-opens the middle of the day
+        // and leaves the reflection itself unprotected; that trade is hers.
+        const spanEndSrc = (detached && !N.holdGap) ? leISO : reISO;
+        const spanStart = timesOk ? new Date(lsISO) : null;
+        const spanEnd = timesOk ? new Date(new Date(spanEndSrc).getTime() + bufferMin * 60000) : null;
+
+        const clashes = !timesOk ? [] : sr1.bookings.filter(o => {
+          if (o.status !== 'booked') return false;
+          const oS = new Date(o.lesson_start);
+          const oE = new Date(new Date(o.reflection_end).getTime() + (o.buffer_minutes ?? 10) * 60000);
+          return spanStart < oE && oS < spanEnd;
+        });
+        const needsAck = clashes.length > 0;
+
+        // Informational only — these never block the save.
+        const outsideWindow = !!(N.date && cand && !win);
+        const outsideBounds = !!(win && timesOk && (
+          new Date(lsISO) < new Date(centralISO(win.window_date, win.start_time))
+          || spanEnd > new Date(centralISO(win.window_date, win.end_time))));
+        const soon = !!(lsISO && sr1TooSoon(lsISO));
+        const past = !!(lsISO && new Date(lsISO).getTime() < Date.now());
+        const noteRequired = needsAck;
+        const canSave = valid && (!needsAck || (N.acknowledged && N.overrideNote.trim()));
+
+        const fieldS = { padding: "8px 10px", minHeight: 44, border: "1px solid #E0DDD8", borderRadius: 6, fontFamily: F.b, fontSize: 12, boxSizing: "border-box" };
+        const labelS = { display: "block", fontFamily: F.b, fontSize: 11, fontWeight: 600, color: "#555", marginBottom: 3 };
+
+        return (
+          <div role="dialog" aria-modal="true" aria-labelledby="sr1-new-title"
+            onClick={e => { if (e.target === e.currentTarget) setSr1NewBooking(null); }}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }}>
+            <div style={{ background: "#fff", borderRadius: 12, padding: "20px 22px", maxWidth: 540, width: "100%", maxHeight: "88vh", overflowY: "auto" }}>
+              <h2 id="sr1-new-title" style={{ fontFamily: F.d, fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Schedule an observation</h2>
+              <div style={{ fontFamily: F.b, fontSize: 12, color: "#6B6B6B", marginBottom: 14, lineHeight: 1.5 }}>
+                For times a candidate cannot book herself. Window hours, building, and the 48-hour rule do not apply — you will be warned about anything unusual, not stopped.
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label htmlFor="sr1-n-who" style={labelS}>Candidate</label>
+                <select id="sr1-n-who" value={N.profileId} onChange={e => set({ profileId: e.target.value })}
+                  style={{ ...fieldS, width: "100%", background: "#fff" }}>
+                  <option value="">Choose…</option>
+                  {sr1.roster.slice()
+                    .sort((a, b) => (a.profiles?.last_name || '').localeCompare(b.profiles?.last_name || ''))
+                    .map(r => {
+                      const rn = `${r.profiles?.first_name || ''} ${r.profiles?.last_name || ''}`.trim() || 'Unknown';
+                      const rb = sr1.buildings.find(b => b.id === r.building_id)?.name;
+                      return <option key={r.profile_id} value={r.profile_id}>{rn}{rb ? ` — ${rb}` : ''}</option>;
+                    })}
+                </select>
+              </div>
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
+                <div>
+                  <label htmlFor="sr1-n-date" style={labelS}>Date</label>
+                  <input id="sr1-n-date" type="date" value={N.date} onChange={e => set({ date: e.target.value })} style={fieldS} />
+                </div>
+                <div>
+                  <label htmlFor="sr1-n-ls" style={labelS}>Lesson starts</label>
+                  <input id="sr1-n-ls" type="time" value={N.lessonStart} onChange={e => set({ lessonStart: e.target.value })} style={fieldS} />
+                </div>
+                <div>
+                  <label htmlFor="sr1-n-le" style={labelS}>Lesson ends</label>
+                  <input id="sr1-n-le" type="time" value={N.lessonEnd}
+                    onChange={e => {
+                      // Reflection follows the lesson until she moves it, same
+                      // rule as the edit modal.
+                      const wasAttached = N.reflStart === N.lessonEnd;
+                      const patch = { lessonEnd: e.target.value };
+                      if (wasAttached) {
+                        patch.reflStart = e.target.value;
+                        const rs = centralISO(N.date || '2000-01-01', e.target.value);
+                        if (rs) patch.reflEnd = new Date(new Date(rs).getTime() + reflMins * 60000)
+                          .toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: SR1_TZ });
+                      }
+                      set(patch);
+                    }}
+                    style={fieldS} />
+                </div>
+              </div>
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 6 }}>
+                <div>
+                  <label htmlFor="sr1-n-rs" style={labelS}>Reflection starts</label>
+                  <input id="sr1-n-rs" type="time" value={N.reflStart} onChange={e => set({ reflStart: e.target.value })} style={fieldS} />
+                </div>
+                <div>
+                  <label htmlFor="sr1-n-re" style={labelS}>Reflection ends</label>
+                  <input id="sr1-n-re" type="time" value={N.reflEnd} onChange={e => set({ reflEnd: e.target.value })} style={fieldS} />
+                </div>
+              </div>
+              <div style={{ fontFamily: F.b, fontSize: 11, color: "#767676", marginBottom: 12 }}>
+                Reflection normally follows the lesson. Set a later start to move it elsewhere in the day.
+              </div>
+
+              {detached && <div style={{ background: "#F9F8F5", borderRadius: 6, padding: "10px 12px", marginBottom: 12 }}>
+                <label style={{ display: "flex", alignItems: "flex-start", gap: 8, cursor: "pointer" }}>
+                  <input type="checkbox" checked={N.holdGap} onChange={() => set({ holdGap: !N.holdGap })}
+                    style={{ width: 18, height: 18, marginTop: 1, cursor: "pointer", accentColor: c.color }} />
+                  <span style={{ fontFamily: F.b, fontSize: 12, color: "#555", lineHeight: 1.5 }}>
+                    <strong>Hold the time between the lesson and the reflection.</strong> Checked, nothing can be booked from {N.lessonStart && fmtTime(lsISO)} through the reflection. Unchecked, that middle stretch reopens for other candidates — and the reflection itself is no longer protected, so keep an eye on it.
+                  </span>
+                </label>
+              </div>}
+
+              <div style={{ marginBottom: 10 }}>
+                <label htmlFor="sr1-n-topic" style={labelS}>Topic</label>
+                <input id="sr1-n-topic" type="text" value={N.topic} onChange={e => set({ topic: e.target.value })}
+                  placeholder="e.g. Fractions — comparing unlike denominators"
+                  style={{ ...fieldS, width: "100%" }} />
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label htmlFor="sr1-n-note" style={labelS}>Note to yourself{noteRequired ? '' : ' (optional)'}</label>
+                <input id="sr1-n-note" type="text" value={N.overrideNote} onChange={e => set({ overrideNote: e.target.value })}
+                  aria-required={noteRequired} aria-invalid={noteRequired && !N.overrideNote.trim()}
+                  placeholder="e.g. Same building as Jordan, reflection moved to 3:00"
+                  style={{ ...fieldS, width: "100%" }} />
+              </div>
+
+              {valid && <div style={{ fontFamily: F.b, fontSize: 12, color: "#555", background: "#F9F8F5", borderRadius: 6, padding: "8px 10px", marginBottom: 10 }} role="status" aria-live="polite">
+                {nm} · {fmtDay(lsISO)} · Lesson {fmtTimeRange(lsISO, leISO)} · Reflection {fmtTimeRange(rsISO, reISO)}
+                <div style={{ color: "#767676", marginTop: 2 }}>Holds {fmtTimeRange(spanStart.toISOString(), spanEnd.toISOString())} on your calendar.</div>
+              </div>}
+
+              {!timesOk && (N.lessonStart || N.lessonEnd || N.reflStart || N.reflEnd) &&
+                <div role="alert" style={{ fontFamily: F.b, fontSize: 12, color: "#C0392B", background: "#FDF2F2", border: "1px solid #F5C6CB", borderRadius: 6, padding: "8px 10px", marginBottom: 10 }}>
+                  Check the times: the lesson must end after it starts, and the reflection cannot begin before the lesson ends.
+                </div>}
+
+              {(outsideWindow || outsideBounds || soon || past) &&
+                <div style={{ fontFamily: F.b, fontSize: 12, color: "#555", background: "#F4F7FB", border: "1px solid #D6E2F0", borderRadius: 6, padding: "10px 12px", marginBottom: 10, lineHeight: 1.5 }}>
+                  {past && <div>· That time has already passed. Fine for recording an observation after the fact.</div>}
+                  {!past && soon && <div>· Less than 48 hours away — candidates could not book this themselves.</div>}
+                  {outsideWindow && <div>· No availability window that day for {candBuilding?.name || 'her building'}. Scheduling anyway.</div>}
+                  {outsideBounds && <div>· Outside the hours of your window that day ({fmtTime(centralISO(win.window_date, win.start_time))} – {fmtTime(centralISO(win.window_date, win.end_time))}).</div>}
+                </div>}
+
+              {needsAck && <div role="alert" style={{ fontFamily: F.b, fontSize: 12, color: "#856404", background: "#FFF3CD", border: "1px solid #FFECB5", borderRadius: 6, padding: "10px 12px", marginBottom: 12 }}>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>⚠ This overlaps {clashes.length} existing booking{clashes.length === 1 ? '' : 's'}.</div>
+                {clashes.map(o => {
+                  const on = sr1.roster.find(r => r.profile_id === o.profile_id);
+                  const onm = `${on?.profiles?.first_name || ''} ${on?.profiles?.last_name || ''}`.trim() || 'another candidate';
+                  return <div key={o.id} style={{ marginBottom: 2 }}>{onm}: {fmtTimeRange(o.lesson_start, o.reflection_end)}</div>;
+                })}
+                <div style={{ marginTop: 6 }}>Saving marks this an adjusted booking, and a note is required.</div>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, cursor: "pointer" }}>
+                  <input type="checkbox" checked={N.acknowledged} onChange={() => set({ acknowledged: !N.acknowledged })}
+                    style={{ width: 18, height: 18, cursor: "pointer", accentColor: "#856404" }} />
+                  <span style={{ fontWeight: 600 }}>I know — schedule it anyway</span>
+                </label>
+              </div>}
+
+              <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, cursor: "pointer" }}>
+                <input type="checkbox" checked={N.notify} onChange={() => set({ notify: !N.notify })}
+                  style={{ width: 18, height: 18, cursor: "pointer", accentColor: c.color }} />
+                <span style={{ fontFamily: F.b, fontSize: 12, color: "#555" }}>Tell {nm ? nm.split(' ')[0] : 'her'} it is scheduled</span>
+              </label>
+
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button onClick={() => setSr1NewBooking(null)}
+                  style={{ padding: "10px 16px", minHeight: 44, background: "#F0EEEA", color: "#555", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 12, cursor: "pointer" }}>Cancel</button>
+                <button disabled={sr1Busy || !canSave}
+                  onClick={async () => {
+                    setSr1Busy(true);
+                    const { error } = await instrCreateSr1Booking({
+                      profile_id: cand.profile_id,
+                      window_id: win?.id || null,
+                      building_id: cand.building_id || null,
+                      ct_name: cand.ct_name || null,
+                      lesson_start: lsISO, lesson_end: leISO,
+                      reflection_start: rsISO, reflection_end: reISO,
+                      span_start: spanStart.toISOString(), span_end: spanEnd.toISOString(),
+                      topic: N.topic.trim(),
+                      reflection_minutes: Math.round((new Date(reISO) - new Date(rsISO)) / 60000),
+                      buffer_minutes: bufferMin,
+                      instructor_override: needsAck,
+                      override_note: N.overrideNote.trim(),
+                      notify: N.notify
+                    });
+                    setSr1Busy(false);
+                    if (error) { showToast('Could not schedule that observation — please try again.'); return; }
+                    setSr1NewBooking(null);
+                    showToast(N.notify ? 'Scheduled ✓ — candidate notified' : 'Scheduled ✓', 'success');
+                    refreshSr1();
+                  }}
+                  style={{ padding: "10px 16px", minHeight: 44, background: (sr1Busy || !canSave) ? "#B0ADA8" : c.color, color: "#fff", border: "none", borderRadius: 6, fontFamily: F.b, fontSize: 12, fontWeight: 600, cursor: (sr1Busy || !canSave) ? "default" : "pointer" }}>
+                  {sr1Busy ? "Scheduling…" : "Schedule"}
                 </button>
               </div>
             </div>
