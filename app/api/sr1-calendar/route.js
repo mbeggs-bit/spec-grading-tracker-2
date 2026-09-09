@@ -13,7 +13,12 @@
 //   Title:       SR1 Observation — First Last
 //   Location:    Building name (from sr1_buildings via sr1_supervision)
 //   Start/End:   lesson_start → reflection_end (full block)
-//   Description: Lesson: 9:00–9:45 AM · Reflection: 9:45–10:15 AM
+//   Description: Lesson: 9:00-9:45 AM . Reflection: 9:45-10:15 AM
+//
+// When the reflection does not immediately follow the lesson — which happens
+// when Dr. Beggs schedules a candidate manually and moves the debrief later in
+// the day — the booking is emitted as TWO events instead of one, so the hours
+// in between are not blocked out on her calendar. See splitUid() below.
 //
 // Only current-term bookings with status = 'booked' are included.
 // Cancelled bookings are excluded.
@@ -88,6 +93,14 @@ function uid(bookingId) {
   return `sr1-${bookingId}@mylumos.vercel.app`;
 }
 
+// A booking whose reflection is detached becomes two events, and each needs its
+// own stable UID. The contiguous case deliberately keeps the original unsuffixed
+// UID so every event already synced to Google stays exactly as it is — only
+// detached bookings change identity.
+function splitUid(bookingId, part) {
+  return `sr1-${bookingId}-${part}@mylumos.vercel.app`;
+}
+
 export async function GET(request) {
   // ── Token check ───────────────────────────────────────────────────────────
   const { searchParams } = new URL(request.url);
@@ -132,7 +145,7 @@ export async function GET(request) {
   // ── Fetch bookings (with candidate name) ──────────────────────────────────
   const { data: bookings, error: bErr } = await supabase
     .from('sr1_bookings')
-    .select('id, profile_id, lesson_start, lesson_end, reflection_start, reflection_end, status, profiles(first_name, last_name)')
+    .select('id, profile_id, lesson_start, lesson_end, reflection_start, reflection_end, status, override_note, profiles(first_name, last_name)')
     .eq('term', term)
     .eq('status', 'booked')
     .order('lesson_start');
@@ -203,18 +216,51 @@ export async function GET(request) {
 
     const lessonRange = `Lesson: ${fmtTime(bk.lesson_start)}–${fmtTime(bk.lesson_end)}`;
     const reflRange = `Reflection: ${fmtTime(bk.reflection_start)}–${fmtTime(bk.reflection_end)}`;
-    const description = `${lessonRange} · ${reflRange}`;
+    const note = bk.override_note ? ` · Note: ${bk.override_note}` : '';
 
-    lines.push('BEGIN:VEVENT');
-    lines.push(`UID:${uid(bk.id)}`);
-    lines.push(`DTSTAMP:${now}`);
-    lines.push('TRANSP:OPAQUE');
-    lines.push(foldLine(`DTSTART;TZID=${SR1_TZ}:${toIcsLocal(bk.lesson_start)}`));
-    lines.push(foldLine(`DTEND;TZID=${SR1_TZ}:${toIcsLocal(bk.reflection_end)}`));
-    lines.push(foldLine(`SUMMARY:SR1 Observation — ${icsEscape(name)}`));
-    if (building) lines.push(foldLine(`LOCATION:${icsEscape(building)}`));
-    lines.push(foldLine(`DESCRIPTION:${icsEscape(description)}`));
-    lines.push('END:VEVENT');
+    // Emit one event per contiguous block. A reflection that starts when the
+    // lesson ends is a single block; one moved later in the day is two, and the
+    // gap between them stays free on her calendar.
+    const detached =
+      new Date(bk.reflection_start).getTime() !== new Date(bk.lesson_end).getTime();
+
+    const pushEvent = ({ eventUid, start, end, summary, description }) => {
+      lines.push('BEGIN:VEVENT');
+      lines.push(`UID:${eventUid}`);
+      lines.push(`DTSTAMP:${now}`);
+      lines.push('TRANSP:OPAQUE');
+      lines.push(foldLine(`DTSTART;TZID=${SR1_TZ}:${toIcsLocal(start)}`));
+      lines.push(foldLine(`DTEND;TZID=${SR1_TZ}:${toIcsLocal(end)}`));
+      lines.push(foldLine(`SUMMARY:${icsEscape(summary)}`));
+      if (building) lines.push(foldLine(`LOCATION:${icsEscape(building)}`));
+      lines.push(foldLine(`DESCRIPTION:${icsEscape(description)}`));
+      lines.push('END:VEVENT');
+    };
+
+    if (!detached) {
+      pushEvent({
+        eventUid: uid(bk.id),
+        start: bk.lesson_start,
+        end: bk.reflection_end,
+        summary: `SR1 Observation — ${name}`,
+        description: `${lessonRange} · ${reflRange}${note}`,
+      });
+    } else {
+      pushEvent({
+        eventUid: splitUid(bk.id, 'lesson'),
+        start: bk.lesson_start,
+        end: bk.lesson_end,
+        summary: `SR1 Observation — ${name}`,
+        description: `${lessonRange} · Reflection moved to ${fmtTime(bk.reflection_start)}${note}`,
+      });
+      pushEvent({
+        eventUid: splitUid(bk.id, 'reflection'),
+        start: bk.reflection_start,
+        end: bk.reflection_end,
+        summary: `SR1 Reflection — ${name}`,
+        description: `${reflRange} · Lesson was ${fmtTime(bk.lesson_start)}–${fmtTime(bk.lesson_end)}${note}`,
+      });
+    }
   }
 
   lines.push('END:VCALENDAR');
